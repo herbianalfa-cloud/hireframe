@@ -1,0 +1,21 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Secrets: never commit env files (only the placeholder template)
+.env*
+!.env.example
+
+# Logs and local tooling
+*.log
+.firebase/
+.DS_Store
+
+# Personal data guard: CVs, documents and data exports stay out of the repo.
+# Fake test fixtures and the anonymised eval set are the only exceptions.
+*.docx
+*.pdf
+*.jsonl
+!**/fixtures/**
+!evals/*.jsonl
