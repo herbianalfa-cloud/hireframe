@@ -15,6 +15,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - **App Check** with reCAPTCHA Enterprise. Firebase config is read from Hosting's `init.json`, so none is in the repo.
   - **Local dev:** `npm run dev` runs the emulators on `demo-hireframe` with a seeded fake owner. See ADR-013.
   - **Deploy:** a tag-only workflow with keyless Workload Identity Federation and `production` environment approval, in region europe-west2. See ADR-014.
+  - **Security:** an npm override forces `@grpc/grpc-js` 1.14.5 under the Firebase SDK, fixing two high advisories (ADR-013).
   - **Docs:** RUNBOOK Firebase setup, owner bootstrap and recovery; `AppConfigSchema` and Firestore path constants in `packages/shared`.
 
 ### Changed
