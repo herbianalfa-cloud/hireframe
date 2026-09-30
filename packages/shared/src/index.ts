@@ -1,3 +1,6 @@
+export { AppConfigSchema, type AppConfig } from './config.js';
+export { COLLECTIONS, DOCS, SUBCOLLECTIONS } from './firestore.js';
+
 /**
  * Exhaustiveness guard for discriminated unions. The compiler rejects any call
  * where `value` is not `never`; at runtime it throws if an unhandled case slips through.
