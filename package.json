@@ -16,7 +16,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
-    "test": "vitest run"
+    "test": "vitest run",
+    "scan:pii": "node scripts/check-pii.ts",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run scan:pii",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -25,6 +28,7 @@
     "eslint": "10.11.0",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.12.0",
+    "husky": "9.1.7",
     "prettier": "3.9.9",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",

@@ -1,0 +1,5 @@
+# Emails allowed in tracked files. One per line: an exact address or *@domain.
+# Only add non-personal addresses (bots, placeholders). See docs/SECURITY.md.
+noreply@anthropic.com
+*@users.noreply.github.com
+*@example.com
