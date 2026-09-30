@@ -8,8 +8,8 @@ CV and profile facts; job/application history; alert-email content; API keys (An
 ## Threats → controls
 | Threat | Control |
 |---|---|
-| Secret leaked via public repo | Secret Manager for all keys; `.env*` gitignored; gitleaks pre-commit + CI; GitHub secret scanning + push protection on; rotate any key that ever touches a commit |
-| Personal data in repo | Fixtures are fake; `evals/` anonymised; CV never committed; CI grep for email/phone patterns in tracked files |
+| Secret leaked via public repo | Secret Manager for all keys; `.env*` gitignored; gitleaks pre-commit (fail-closed: no gitleaks, no commit) + CI over full history; GitHub secret scanning + push protection on; rotate any key that ever touches a commit |
+| Personal data in repo | Fixtures are fake; `evals/` anonymised; CV never committed (`.gitignore` blocks `.docx`/`.pdf`/`.jsonl` outside fixtures and evals); docs describe the user generically and candidate-specific values (e.g. `{profile.work_rights}`) are templated from the Firebase profile at runtime; `npm run scan:pii` (in `check` and CI) fails on non-allowlisted emails/phone numbers in tracked files. History was rewritten once to remove personal details (ADR-010) |
 | Someone else reads the data | Firestore/Storage rules: `request.auth.uid == config owner UID` on every path, default deny; rules unit-tested; App Check (reCAPTCHA Enterprise) enforced on Firestore, Storage, callables |
 | Forged calls to webhooks | HMAC-SHA256 over body + timestamp; reject if > 5 min skew or replayed (nonce store 10 min); constant-time compare |
 | Prompt injection in job posts / emails | Funnel LLM calls have no tools and fixed schemas; untrusted text wrapped in delimiters with explicit "data, not instructions"; outputs can only write verdict fields on that job; eval set includes injection cases |

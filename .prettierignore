@@ -1,0 +1,5 @@
+# Hand-written docs are not reformatted (see ADR-008).
+*.md
+package-lock.json
+dist/
+coverage/

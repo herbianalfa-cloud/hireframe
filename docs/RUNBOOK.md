@@ -1,13 +1,19 @@
 # Runbook
 
 ## One-time setup (user)
-1. **GitHub:** create public repo `hireframe`, push this docs pack. Enable secret scanning + push protection, Dependabot, branch protection on `main` (PR required now; add required status checks after M0 CI has run once).
+1. **GitHub:** create public repo `hireframe`, push this docs pack. Enable secret scanning + push protection, Dependabot, branch protection on `main` (PR required now; add required status checks after M0 CI has run once). *Done:* ruleset `protect-main` requires a PR, blocks force-push and deletion, and requires the `check`, `gitleaks` and `audit` CI jobs.
 2. **Firebase:** new project → upgrade to Blaze → GCP Billing budget alerts at £5 and £10. Enable Google sign-in.
 3. **Anthropic:** create API key at console.anthropic.com, set a monthly spend limit (e.g. £20).
 4. **Reed:** free Jobseeker API key. **Adzuna:** free developer app_id + app_key.
 5. **Gmail:** create labels `hireframe/alerts` and `hireframe/done`; filters that label job-alert senders (LinkedIn, Wellfound, Work at a Startup, Welcome to the Jungle, Reed, Indeed alerts).
 6. **Job alerts:** set up LinkedIn/Wellfound/WaaS/WTTJ alerts for the lane titles in `FUNNEL.md`, UK/London, daily.
 7. Secrets go into Secret Manager via `firebase functions:secrets:set` — never pasted into chat or code.
+
+## Local setup (per machine)
+1. Node 22: `nvm use` (reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.
+2. gitleaks: `brew install gitleaks`. The pre-commit hook is fail-closed: without gitleaks, commits are blocked.
+3. `npm ci` — installs dependencies and the husky git hooks.
+4. `npm run check` — must be clean before every PR.
 
 ## Building with Claude Code
 Open the repo in Claude Code and start with:
@@ -29,4 +35,5 @@ Per milestone: "Plan M{n}" → review → approve → build → PR → you test 
 | Verdicts feel wrong | 👎 notes, eval report | Adjust criteria or rubric; add cases to golden set; re-run eval before deploy |
 | Bad deploy | — | `firebase hosting:rollback`; redeploy functions from previous tag |
 | Suspected key leak | GitHub alert | Rotate key immediately, update Secret Manager, purge from history |
+| Personal data committed | `npm run scan:pii`, review | Remove it; if pushed, rewrite history as in ADR-010 and ask GitHub Support to purge cached commit views |
 

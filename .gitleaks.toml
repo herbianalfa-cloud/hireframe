@@ -1,0 +1,5 @@
+# gitleaks config: default ruleset; add project-specific rules or narrow allowlists below.
+title = "hireframe"
+
+[extend]
+useDefault = true
