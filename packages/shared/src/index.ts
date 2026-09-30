@@ -1,5 +1,13 @@
+export * from './atomicity.js';
 export { AppConfigSchema, type AppConfig } from './config.js';
-export { COLLECTIONS, DOCS, SUBCOLLECTIONS } from './firestore.js';
+export * from './criteria.js';
+export { CRITERIA_SEED_V1 } from './criteria-seed.js';
+export { verifyEvidence } from './evidence.js';
+export { COLLECTIONS, DOCS, PATHS, STORAGE_PATHS, SUBCOLLECTIONS } from './firestore.js';
+export * from './merge.js';
+export { redactPii } from './pii.js';
+export * from './profile.js';
+export * from './usage.js';
 
 /**
  * Exhaustiveness guard for discriminated unions. The compiler rejects any call

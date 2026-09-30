@@ -1,7 +1,9 @@
 /**
  * Pure detection of personal data (emails, phone numbers) in text.
- * Used by scripts/check-pii.ts; kept free of I/O so it is unit-testable.
+ * Used by scripts/check-pii.ts; kept free of I/O so it is unit-testable. The patterns live in
+ * packages/shared so the functions logger redacts the same things.
  */
+import { EMAIL, isPhoneLike, PHONE } from '../packages/shared/src/pii.ts';
 
 export type PiiKind = 'email' | 'phone';
 
@@ -16,15 +18,6 @@ export interface Allowlist {
   exact: Set<string>;
   domains: Set<string>;
 }
-
-const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
-
-// International (+CC …) or UK national (01…, 02…, 03…, 07…) numbers, not embedded in a longer token.
-const PHONE =
-  /(?<![\w+])(?:\+\d{1,3}[\s-]?\(?\d{1,4}\)?(?:[\s-]?\d{2,4}){2,4}|0[1237]\d{2,3}[\s-]?\d{3}[\s-]?\d{3,4})(?!\w)/g;
-
-const MIN_PHONE_DIGITS = 9;
-const MAX_PHONE_DIGITS = 15;
 
 /** Parses one entry per line: an exact address or `*@domain`. `#` starts a comment. */
 export function parseAllowlist(text: string): Allowlist {
@@ -58,8 +51,7 @@ export function findPii(text: string, allowlist: Allowlist): PiiFinding[] {
       }
     }
     for (const [phone] of content.matchAll(PHONE)) {
-      const digits = phone.replace(/\D/g, '').length;
-      if (digits >= MIN_PHONE_DIGITS && digits <= MAX_PHONE_DIGITS) {
+      if (isPhoneLike(phone)) {
         findings.push({ kind: 'phone', line, redacted: redact(phone) });
       }
     }
