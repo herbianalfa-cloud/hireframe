@@ -3,6 +3,20 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Added
+- M2 Profile brain:
+  - **CV → facts:** `parseCv` reads an uploaded PDF or DOCX (up to 5 MB), extracts the text and asks a Sonnet-class model for atomic facts (one claim each, multi-claim bullets split), each with a verbatim evidence quote checked against the CV. See ADR-018.
+  - **Re-upload merge:** new facts are added, changed facts are flagged for review, archived facts aren't revived, nothing is overwritten.
+  - **Profile screen:** view, search, edit, archive and restore facts; every fact shows its source; accept or keep proposed changes; version history; add a fact from a note (`addFact`, Haiku-class model).
+  - **Criteria:** v1 seeded from FUNNEL.md (with structured excluded titles), an editable Criteria screen, immutable versions with a `criteria/current` pointer, and history. See ADR-019.
+  - **Spend cap from day one:** a minimal `llm.call()` reserves each call's worst case against the monthly cap before it runs and records the actual cost in `usage/{yyyy-mm}`. See ADR-016.
+  - **Rules:** the first client writes (versioned fact edits, criteria versions, CV uploads), each tested for owner allow, anon deny and other-user deny.
+  - **Functions:** first Cloud Functions in europe-west2 on a dedicated runtime account, App Check enforced and consumed, bundled with esbuild; fake model in the emulator. See ADR-017.
+  - **Docs:** RUNBOOK Functions setup (M2) and local-dev steps; `node scripts/make-cv-fixtures.ts` for fake CVs.
+
+### Changed
+- `npm run dev` also runs the Functions emulator and seeds criteria v1; `npm run test:rules` also runs emulator integration tests; `npm run deploy` includes functions.
+
 ### Fixed
 - RUNBOOK M1 setup:
   - enable the Firebase Storage API and create the bucket from the Firebase console;

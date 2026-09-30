@@ -30,9 +30,10 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run check` — lint + typecheck + unit tests + PII scan
 - `npm run format` / `npm run format:check` — Prettier (code and config; Markdown excluded)
 - `npm run scan:pii` — fail on emails/phone numbers in tracked files
-- `npm run dev` — web app + Firebase emulators (`demo-hireframe`, seeded fake owner)
-- `npm run test:rules` — Firestore + Storage security rules tests on the emulators (needs Java 21)
-- `npm run build` — build all workspaces
+- `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner and criteria, fake LLM unless `LIVE=1`)
+- `npm run test:rules` — Firestore + Storage security rules tests and emulator integration tests (`tests/emulator/`) (needs Java 21)
+- `npm run build` — build all workspaces (functions: esbuild bundle in `functions/deploy/`)
+- `node scripts/make-cv-fixtures.ts` — write fake CVs (PDF/DOCX) to `tmp/fixtures/` for local uploads
 - `npm run deploy` — deploy (CI only on `v*` tags; refuses to run locally)
 - `npm run eval` — funnel eval against the golden set *(from M4)*
 

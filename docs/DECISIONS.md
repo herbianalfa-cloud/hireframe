@@ -102,3 +102,46 @@ Consequences: production auth and App Check are first exercised after merge and 
 
 ## ADR-015 Closing sign-ups without Identity Platform
 Context: ADR-011 and ADR-014 assumed sign-ups could only be turned off after upgrading Firebase Auth to Identity Platform. During the v0.1.0 bootstrap, **Authentication → Settings → User actions** was already available, so no upgrade was needed. Decision: after bootstrap, untick both **Enable create (sign-up)** and **Enable deletion**. Deletion is also off because a deleted owner account couldn't be re-created while sign-ups are closed, and a new account would get a new UID anyway. The Identity Platform upgrade stays only as a fallback, for projects where User actions is missing. This supersedes ADR-014's "Sign-ups" bullet and the Identity Platform mention in ADR-011. Consequences: no one-way upgrade was made. A blocked sign-up still returns `auth/admin-restricted-operation`. Recovering a lost owner account is a short console procedure (RUNBOOK Recovery).
+
+## ADR-016 Minimal `llm.call()` in M2, with a reserved spend cap
+Context: `parseCv` and `addFact` call Anthropic in M2, but ROADMAP put `llm.call()` and the cost cap in M4. CLAUDE.md says every LLM call goes through `llm.call()`, which checks the cap first. Decision: pull a minimal `llm.call()` forward (`functions/src/llm/`).
+- **One model per purpose** in `functions/src/config.ts`: Sonnet-class (`claude-sonnet-5-5`, effort `medium`) for `parseCv`, Haiku-class (`claude-haiku-4-5`, no effort parameter) for `addFact`. No beta features: no refusal fallback in M2.
+- **Per attempt:** count tokens (free) → **reserve** the worst case (input +10% +500 tokens at the uncached rate, plus `max_tokens` of output, at the call's model price) on `usage/{yyyy-mm}` in a Firestore transaction (month in Europe/London). If spend + live reservations + this call would pass the cap, it throws before any API call → stream the request with a fixed JSON output schema and no tools → **settle** in one transaction: remove this reservation, prune every reservation older than 15 minutes, and add the actual cost, calls, tokens and per-purpose spend.
+- **Failures:** a request the API rejected with a status code costs nothing; a dropped connection or timeout is charged the worst case, because it may have been billed. Invalid JSON or schema errors get one retry with the issue paths and codes appended (FUNNEL rule); refusal and `max_tokens` fail without retry. The SDK retries 408/409/429/5xx twice.
+- **Cap and FX:** `config/app.monthlyCapPence` (default 1500) and `config/app.fxUsdToGbp` (default 0.85, deliberately high so pence are overstated). Both are optional `AppConfigSchema` fields set in the console.
+- A usage document that fails its schema blocks spending (fails closed).
+
+Consequences: R11's "simulated overspend stops LLM calls before exceeding the cap" is covered from M2 (unit and emulator tests). M4 adds per-run caps, the 80% warning, batches, prompt caching and eval recording on top, and decides on the refusal fallback. Crashed calls can hold budget for at most 15 minutes.
+
+## ADR-017 Cloud Functions build, runtime and deploy
+Context: M2 adds the first functions. Cloud Build installs a function's `package.json` in the cloud and can't see the npm workspace package `@hireframe/shared`; the default runtime account has the Editor role; and local dev must not need App Check or an Anthropic key. Decision:
+- **Bundle:** `scripts/build-functions.ts` uses esbuild to inline `@hireframe/shared` and the pure-JS dependencies (Anthropic SDK, zod, unpdf, mammoth) into `functions/deploy/index.js`. The generated `functions/deploy/package.json` lists only `firebase-functions` and `firebase-admin`, pinned exactly, so few transitive versions float at deploy time. `firebase.json` deploys from `functions/deploy` (`nodejs22`; `*.local` and source maps excluded). CI builds the bundle and imports it as a smoke test.
+- **Options:** region `europe-west2`, one instance at most, and the dedicated `hireframe-fns` runtime account (`serviceAccount: 'hireframe-fns@'`), set in `functions/src/options.ts`. Every module that defines functions imports it first, because ES modules evaluate imports before their own body; each callable also states its region.
+- **Runtime account roles:** `datastore.user` and `firebaseappcheck.tokenVerifier` on the project, `storage.objectViewer` on the bucket, `secretmanager.secretAccessor` on `ANTHROPIC_API_KEY` only. **Deployer extra roles:** `cloudfunctions.developer`, `iam.serviceAccountUser` on `hireframe-fns` only, `secretmanager.viewer` on the secret.
+- **Callables:** `enforceAppCheck` and `consumeAppCheckToken` (replay protection for calls that spend money) are on everywhere except the Functions emulator, which local dev runs without App Check; deployed functions never see `FUNCTIONS_EMULATOR`. The key comes from `defineSecret('ANTHROPIC_API_KEY')`.
+- **Local dev:** the emulator uses a fake LLM transport that returns the fake CV's extraction, unless `LIVE=1` (key from the gitignored `functions/.secret.local`). `npm run dev` writes a placeholder secret so the emulator never calls Secret Manager.
+- **Artifact Registry:** the first functions deploy needs a cleanup policy, and `firebase deploy --non-interactive` stops if none exists. The owner creates `gcf-artifacts` in europe-west2 with the `firebase-functions-cleanup` policy before the first deploy (RUNBOOK Part C), rather than CI passing `--force`, which would also skip other deploy safety prompts.
+
+Consequences: the deploy bundle is about 5 MB (mostly pdf.js). Bundled dependencies are pinned through the workspace lockfile. The first `v0.2.0` deploy may still surface one missing deployer role (RUNBOOK Recovery).
+
+## ADR-018 Profile facts: extraction, evidence, merge and versions
+Context: PRD R2 needs ≥ 60 atomic facts from a CV, each showing its source, re-uploads that never overwrite, and versioned edits. Decision:
+- **Text extraction, not native PDF input:** unpdf (PDF) and mammoth (DOCX) extract the text, and the model gets it as tagged, untrusted data. That lets the server check evidence word for word, costs fewer tokens than page images, and makes scanned PDFs fail clearly ("upload the .docx"). The file type comes from its magic bytes, not the client.
+- **Atomic facts:** the prompt requires one claim per fact, splits multi-claim bullets, and asks for the shortest verbatim evidence span. A soft `countCompound` hint is logged as a count only.
+- **Evidence verification:** evidence must appear in the source text after whitespace, quote and dash normalisation. If not, the fact is kept with `evidenceVerified: false` and flagged in the UI, never dropped. `addFact` verifies evidence against the note.
+- **Deterministic merge** (`mergeFacts`, pure): same type and text → unchanged (or flagged if only the dates changed); same type and token-Jaccard ≥ 0.6 on an active fact → flagged with `review.proposed`; archived matches are skipped, not revived; anything else is added. Facts missing from a new CV are counted, never archived.
+- **Versions:** every fact has immutable snapshots at `profile/main/facts/{factId}/versions/{n}`. The server writes v1 with the fact.
+- **Client edits enforced by rules**, not edit callables: an update must bump `version`, stamp server time and write the matching snapshot in the same batch; `review` can only be removed, and removing it is exactly `review_accepted` or `review_kept`. The web builders run against the real rules in tests.
+
+Rejected: an LLM-driven merge (not testable offline; parking lot); callables for every edit (cold starts, more code, same guarantees).
+
+Consequences: a CV of up to 200 facts writes in one atomic batch. Snapshots are built from the raw stored data so Timestamps compare exactly. A heuristic merge can produce an extra review item or a near-duplicate, but never lose data.
+
+## ADR-019 Criteria versions and pointer
+Context: PRD R3 needs one editable, versioned criteria document, and M4 must record which version judged each job. Decision:
+- Immutable `criteria/v{n}` plus `criteria/current = { version }`, written together in one batch or transaction; rules allow v{n} only with the pointer moving from n-1 to n, and never allow updates or deletes. A save that started from an older version is refused (conflict).
+- Content keys stay snake_case exactly as in FUNNEL.md; metadata (`version`, `createdAt`) is camelCase.
+- `excluded_titles` is structured as `{ id, term, unless_prefixed_by? }`, so S1 (M4) can apply "unless preceded by" without parsing prose. "Technical" is an allowed Business Analyst prefix, because "Technical Business Analyst" is a secondary-lane title. `excluded_keywords` is added (empty) for PRD R3's "excluded titles/keywords".
+- v1 is seeded from the Criteria screen ("Start from default criteria"), not by a script, since there are no local credentials (ADR-011). `npm run dev` seeds the emulator.
+
+Consequences: R3's "next run uses it" and "Re-score" can only be verified once runs exist (M4); `getCurrentCriteria` reads the pointer, then the version.
