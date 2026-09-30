@@ -3,8 +3,10 @@ rules_version = '2';
 // Owner-only access (docs/SECURITY.md, ADR-011).
 // - Fails closed: until `config/app` exists with an `ownerUid`, nobody can read or write anything.
 // - `config/*` is never writable from a client, so no signed-in user can claim ownership.
-// - M1 is read-only for the owner too; later milestones open only the writes their UI needs,
-//   with rules tests (tests/rules/). Unknown paths fall through to the default deny.
+// - Client writes are opened one milestone at a time, each with rules tests (tests/rules/).
+//   M2 opens fact edits with versioned snapshots (ADR-018) and criteria versions (ADR-019);
+//   everything else, including every write by the Admin SDK paths, stays client-deny.
+//   Unknown paths fall through to the default deny.
 service cloud.firestore {
   match /databases/{database}/documents {
     function isOwner() {
@@ -14,13 +16,131 @@ service cloud.firestore {
         && request.auth.uid == get(appConfig).data.get('ownerUid', null);
     }
 
+    function hasExactly(data, keys) {
+      return data.keys().hasAll(keys) && data.keys().hasOnly(keys);
+    }
+
+    // ---- Facts (packages/shared/src/profile.ts; limits mirror FACT_LIMITS) ----
+
+    function validFactContent(data) {
+      return data.type in ['skill', 'experience', 'achievement', 'metric', 'education', 'project',
+                           'constraint', 'preference']
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 500
+        && data.evidence is string && data.evidence.size() >= 1 && data.evidence.size() <= 1000
+        && data.dates is map && data.dates.keys().hasOnly(['start', 'end'])
+        && data.tags is list && data.tags.size() <= 20
+        && data.lanes is list && data.lanes.size() <= 4
+        && data.lanes.hasOnly(['primary', 'secondary', 'opportunistic', 'wildcard'])
+        && data.status in ['active', 'archived'];
+    }
+
+    function factPath(profileId, factId) {
+      return /databases/$(database)/documents/profile/$(profileId)/facts/$(factId);
+    }
+
+    // Every client update is a new version: the content may change, `review` may only be removed
+    // (accepting or keeping a proposed change), and the snapshot for the new version must be
+    // written in the same batch. Identity fields (source, sourceDocId, createdAt, …) never change.
+    function validFactUpdate(profileId, factId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let changed = after.diff(before).affectedKeys();
+      return changed.hasOnly(['type', 'text', 'evidence', 'dates', 'tags', 'lanes', 'status',
+                              'review', 'version', 'updatedAt'])
+        && after.version == before.version + 1
+        && after.updatedAt == request.time
+        && validFactContent(after)
+        && (!changed.hasAny(['review']) || !('review' in after))
+        && existsAfter(/databases/$(database)/documents/profile/$(profileId)/facts/$(factId)/versions/$(string(after.version)));
+    }
+
+    // A snapshot is the fact exactly as the same batch leaves it, for the version that batch
+    // creates. Versions are immutable (create only).
+    function validVersionCreate(profileId, factId, versionId) {
+      let data = request.resource.data;
+      let factNow = get(factPath(profileId, factId)).data;
+      let factAfter = getAfter(factPath(profileId, factId)).data;
+      return hasExactly(data, ['snapshot', 'change', 'at'])
+        && data.change in ['edit', 'archive', 'unarchive', 'review_accepted', 'review_kept']
+        && data.at == request.time
+        && factAfter.version == factNow.version + 1
+        && versionId == string(factAfter.version)
+        && data.snapshot == factAfter
+        // Removing a review is exactly what accepting or keeping a proposed change means.
+        && (('review' in factNow && !('review' in factAfter))
+            == (data.change in ['review_accepted', 'review_kept']));
+    }
+
+    // ---- Criteria (packages/shared/src/criteria.ts) ----
+
+    function criteriaPointerPath() {
+      return /databases/$(database)/documents/criteria/current;
+    }
+
+    function validPointerWrite() {
+      let data = request.resource.data;
+      let expected = resource == null ? 1 : resource.data.version + 1;
+      return hasExactly(data, ['version', 'updatedAt', 'schemaVersion'])
+        && data.version is int && data.version == expected
+        && data.updatedAt == request.time
+        && data.schemaVersion == 1
+        && existsAfter(/databases/$(database)/documents/criteria/$('v' + string(data.version)));
+    }
+
+    function validCriteriaContent(data) {
+      return data.lanes is map && hasExactly(data.lanes, ['primary', 'secondary', 'opportunistic'])
+        && data.wildcards is list && data.wildcards.size() <= 100
+        && data.excluded_titles is list && data.excluded_titles.size() <= 100
+        && data.excluded_keywords is list && data.excluded_keywords.size() <= 100
+        && data.excluded_companies is list && data.excluded_companies.size() <= 100
+        && data.experience_cap_years is int
+        && data.experience_cap_years >= 0 && data.experience_cap_years <= 20
+        && data.blockers is list && data.blockers.size() <= 100
+        && data.locations is map && hasExactly(data.locations, ['preferred', 'accepted'])
+        && data.company_prefs is map
+        && hasExactly(data.company_prefs, ['size', 'stages', 'sectors_boost', 'sectors_penalise'])
+        && data.freshness_days is int && data.freshness_days >= 1 && data.freshness_days <= 90
+        && data.thresholds is map
+        && hasExactly(data.thresholds, ['apply_fit', 'apply_luck', 'near_miss_fit', 'wildcard_fit'])
+        && data.weekly_target is int && data.weekly_target >= 1 && data.weekly_target <= 100;
+    }
+
+    // Version n is created together with the pointer moving from n-1 to n.
+    function validCriteriaVersionCreate(versionId) {
+      let data = request.resource.data;
+      let before = exists(criteriaPointerPath()) ? get(criteriaPointerPath()).data.version : 0;
+      let after = getAfter(criteriaPointerPath()).data.version;
+      return after == before + 1
+        && versionId == 'v' + string(after)
+        && hasExactly(data, ['lanes', 'wildcards', 'excluded_titles', 'excluded_keywords',
+                             'excluded_companies', 'experience_cap_years', 'blockers',
+                             'locations', 'company_prefs', 'freshness_days', 'thresholds',
+                             'weekly_target', 'version', 'createdAt', 'schemaVersion'])
+        && data.version == after
+        && data.createdAt == request.time
+        && data.schemaVersion == 1
+        && validCriteriaContent(data);
+    }
+
     match /config/{docId} {
       allow read: if isOwner();
       allow write: if false; // Admin SDK / console only.
     }
 
+    match /criteria/current {
+      allow read: if isOwner();
+      allow create, update: if isOwner() && validPointerWrite();
+    }
+
+    // `current` also matches here; overlapping matches are OR'd, so the guard keeps the
+    // version rules from ever applying to the pointer.
     match /criteria/{versionId} {
       allow read: if isOwner();
+      allow create: if isOwner()
+        && versionId != 'current'
+        && versionId.matches('^v[1-9][0-9]*$')
+        && existsAfter(criteriaPointerPath())
+        && validCriteriaVersionCreate(versionId);
     }
 
     match /profile/{profileId} {
@@ -28,6 +148,15 @@ service cloud.firestore {
 
       match /facts/{factId} {
         allow read: if isOwner();
+        allow update: if isOwner() && profileId == 'main' && validFactUpdate(profileId, factId);
+
+        match /versions/{versionId} {
+          allow read: if isOwner();
+          allow create: if isOwner()
+            && profileId == 'main'
+            && existsAfter(factPath(profileId, factId))
+            && validVersionCreate(profileId, factId, versionId);
+        }
       }
 
       match /documents/{docId} {

@@ -1,6 +1,8 @@
 /**
  * Firestore rules tests (PRD R1, ADR-011). Run with `npm run test:rules` (needs the emulators).
- * Every collection in the data model: anon deny, other user deny, owner read-only (M1).
+ * Every collection in the data model: anon deny, other user deny, owner read. Writes that don't
+ * match an allowed shape are denied to the owner too; the allowed M2 writes (fact edits, criteria
+ * versions) are tested in profile.rules.test.ts and criteria.rules.test.ts.
  */
 import { readFileSync } from 'node:fs';
 
@@ -26,6 +28,7 @@ const DATA_MODEL_DOCS = [
   'criteria/v1',
   DOCS.profileMain,
   'profile/main/facts/fact-1',
+  'profile/main/facts/fact-1/versions/1',
   'profile/main/documents/doc-1',
   'companies/company-1',
   'jobs/job-1',
@@ -38,7 +41,12 @@ const DATA_MODEL_DOCS = [
 ];
 
 /** Paths outside the data model must be denied even to the owner. */
-const UNKNOWN_DOCS = ['unknown/doc-1', 'profile/main/other/doc-1', 'jobs/job-1/other/doc-1'];
+const UNKNOWN_DOCS = [
+  'unknown/doc-1',
+  'profile/main/other/doc-1',
+  'profile/main/facts/fact-1/other/doc-1',
+  'jobs/job-1/other/doc-1',
+];
 
 let env: RulesTestEnvironment;
 
@@ -104,7 +112,7 @@ describe('with an owner configured', () => {
       await assertSucceeds(getDocs(collection(db, parentCollection(path))));
     });
 
-    it('denies the owner every client write (M1 is read-only)', async () => {
+    it('denies the owner every write that does not match an allowed shape', async () => {
       await expectAllWritesDenied(dbFor('owner'), path);
     });
   });
