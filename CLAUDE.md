@@ -27,9 +27,11 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - **Every LLM call goes through `llm.call()`**, which checks the spend cap first and records cost.
 
 ## Commands (keep this list current)
-- `npm run dev` — web app + Firebase emulators
-- `npm run check` — lint + typecheck + unit tests
-- `npm run test:rules` — Firestore security rules tests
-- `npm run eval` — funnel eval against the golden set
-- `npm run deploy` — deploy (CI only on tagged releases)
+- `npm run check` — lint + typecheck + unit tests + PII scan
+- `npm run format` / `npm run format:check` — Prettier (code and config; Markdown excluded)
+- `npm run scan:pii` — fail on emails/phone numbers in tracked files
+- `npm run dev` — web app + Firebase emulators *(from M1)*
+- `npm run test:rules` — Firestore security rules tests *(from M1)*
+- `npm run deploy` — deploy (CI only on tagged releases) *(from M1)*
+- `npm run eval` — funnel eval against the golden set *(from M4)*
 

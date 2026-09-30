@@ -19,5 +19,5 @@ Single user, private data, public code.
 | `CHANGELOG.md` | What shipped, when |
 
 ## Status
-Wave 1 — specced, not started.
+Wave 1 — M0 (repo + guardrails) done; next: M1 Firebase foundation. Local setup: `docs/RUNBOOK.md`.
 
