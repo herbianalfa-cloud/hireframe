@@ -1,3 +1,6 @@
+// Must stay the first import: global options apply only to functions defined after it.
+import '../options.js';
+
 import type { AppConfig } from '@hireframe/shared';
 import { onCall, type CallableOptions } from 'firebase-functions/https';
 import { defineSecret } from 'firebase-functions/params';
@@ -9,6 +12,7 @@ import {
   CALLABLE,
   DEFAULT_FX_USD_TO_GBP,
   DEFAULT_MONTHLY_CAP_PENCE,
+  REGION,
 } from '../config.js';
 import { extractText } from '../cv/extract.js';
 import { safeHandler } from '../errors.js';
@@ -49,6 +53,7 @@ async function readFile(path: string): Promise<Uint8Array | null> {
 }
 
 const baseOptions: CallableOptions = {
+  region: REGION, // also set globally; stated here so a callable can never land elsewhere
   enforceAppCheck: !inEmulator,
   consumeAppCheckToken: !inEmulator,
   secrets: [anthropicApiKey],
