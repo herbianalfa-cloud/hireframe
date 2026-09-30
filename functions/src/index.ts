@@ -7,3 +7,5 @@ import { setGlobalOptions } from 'firebase-functions/options';
 import { REGION, RUNTIME_SERVICE_ACCOUNT } from './config.js';
 
 setGlobalOptions({ region: REGION, maxInstances: 1, serviceAccount: RUNTIME_SERVICE_ACCOUNT });
+
+export { addFact, parseCv } from './profile/callables.js';

@@ -53,7 +53,8 @@ function sameDates(a: FactContent['dates'], b: FactContent['dates']): boolean {
   return a.start === b.start && a.end === b.end;
 }
 
-function key(content: Pick<FactContent, 'type' | 'text'>): string {
+/** Identity used for exact matching: type plus normalised text. */
+export function factKey(content: Pick<FactContent, 'type' | 'text'>): string {
   return `${content.type}|${normaliseText(content.text)}`;
 }
 
@@ -74,9 +75,9 @@ export function mergeFacts(
   const byKey = new Map<string, ExistingFact>();
   for (const fact of existing) {
     // Prefer an active fact over an archived one with the same text.
-    const current = byKey.get(key(fact.content));
+    const current = byKey.get(factKey(fact.content));
     if (!current || (current.status === 'archived' && fact.status === 'active')) {
-      byKey.set(key(fact.content), fact);
+      byKey.set(factKey(fact.content), fact);
     }
   }
 
@@ -84,7 +85,7 @@ export function mergeFacts(
   const seenDraftKeys = new Set<string>();
   const remaining: FactDraft[] = [];
   for (const draft of drafts) {
-    const draftKey = key(draft);
+    const draftKey = factKey(draft);
     if (seenDraftKeys.has(draftKey)) {
       plan.duplicatesInCv++;
       continue;
