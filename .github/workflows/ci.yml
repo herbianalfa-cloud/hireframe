@@ -32,6 +32,8 @@ jobs:
       - run: npm run format:check
       - run: npm run check
       - run: npm run build
+      - name: Smoke-import the functions deploy bundle
+        run: node --input-type=module -e "await import('./functions/deploy/index.js')"
 
   rules:
     name: rules

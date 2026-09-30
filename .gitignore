@@ -7,6 +7,10 @@ coverage/
 .env*
 !.env.example
 
+# Functions: deploy bundle (scripts/build-functions.ts) and local emulator secrets
+functions/deploy/
+functions/.secret.local
+
 # Logs and local tooling
 *.log
 .firebase/
