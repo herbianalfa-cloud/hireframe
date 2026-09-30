@@ -2,7 +2,8 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "allowImportingTsExtensions": true,
-    "erasableSyntaxOnly": true
+    "erasableSyntaxOnly": true,
+    "customConditions": ["source"]
   },
-  "include": ["scripts", "*.config.ts"]
+  "include": ["scripts", "tests", "*.config.ts"]
 }

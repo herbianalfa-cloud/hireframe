@@ -1,0 +1,70 @@
+rules_version = '2';
+
+// Owner-only access (docs/SECURITY.md, ADR-011).
+// - Fails closed: until `config/app` exists with an `ownerUid`, nobody can read or write anything.
+// - `config/*` is never writable from a client, so no signed-in user can claim ownership.
+// - M1 is read-only for the owner too; later milestones open only the writes their UI needs,
+//   with rules tests (tests/rules/). Unknown paths fall through to the default deny.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner() {
+      let appConfig = /databases/$(database)/documents/config/app;
+      return request.auth != null
+        && exists(appConfig)
+        && request.auth.uid == get(appConfig).data.get('ownerUid', null);
+    }
+
+    match /config/{docId} {
+      allow read: if isOwner();
+      allow write: if false; // Admin SDK / console only.
+    }
+
+    match /criteria/{versionId} {
+      allow read: if isOwner();
+    }
+
+    match /profile/{profileId} {
+      allow read: if isOwner();
+
+      match /facts/{factId} {
+        allow read: if isOwner();
+      }
+
+      match /documents/{docId} {
+        allow read: if isOwner();
+      }
+    }
+
+    match /companies/{companyId} {
+      allow read: if isOwner();
+    }
+
+    match /jobs/{jobId} {
+      allow read: if isOwner();
+
+      match /description/{descId} {
+        allow read: if isOwner();
+      }
+    }
+
+    match /cvs/{cvId} {
+      allow read: if isOwner();
+    }
+
+    match /runs/{runId} {
+      allow read: if isOwner();
+    }
+
+    match /usage/{month} {
+      allow read: if isOwner();
+    }
+
+    match /events/{eventId} {
+      allow read: if isOwner();
+    }
+
+    match /locks/{lockId} {
+      allow read: if isOwner();
+    }
+  }
+}
