@@ -3,6 +3,14 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Fixed
+- RUNBOOK M1 setup:
+  - enable the Firebase Storage API and create the bucket from the Firebase console;
+  - add the `web.app` origin and `/__/auth/handler` redirect URI to the OAuth web client;
+  - close sign-ups and account deletion under User actions, with no Identity Platform upgrade (ADR-015).
+- New recovery entries, and the SECURITY checklist is updated.
+
+## [0.1.0] - 2026-09-30
 ### Added
 - M1 Firebase foundation:
   - **Owner-only access:**

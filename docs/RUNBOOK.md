@@ -18,14 +18,20 @@ Project `hireframe-f6b03`, region **europe-west2 (London)**. Design: ADR-011 (ow
    2. Pick the **Standard** edition and Database ID **(default)**.
    3. Location **europe-west2**. This can never be changed.
    4. Choose **production mode**.
-2. **Create Storage.** Go to **Build → Storage** → **Get started** → location **europe-west2** → **production mode**.
+2. **Create Storage.**
+   1. Enable the Storage API. In the Google Cloud console, go to **APIs & Services → Library**, search for **Cloud Storage for Firebase API** (`firebasestorage.googleapis.com`) → **Enable**. The deploy service account can't enable APIs, by design.
+   2. In the **Firebase** console, go to **Build → Storage** → **Get started** → location **europe-west2** → **production mode**.
+   3. Create the bucket here, not in the Cloud Storage console. A bucket made there isn't linked to Firebase, and deploys fail with "Firebase Storage has not been set up".
 3. **Register the web app.**
    1. Go to ⚙️ **Project settings → General → Your apps** → click the **</>** (Web) icon.
    2. Nickname `hireframe-web`, and **tick "Also set up Firebase Hosting"**. The app reads its config from Hosting's `/__/firebase/init.json`, so nothing needs copying.
-4. **Check authorized domains.**
+4. **Check authorized domains and the OAuth client.**
    1. Go to **Authentication → Settings → Authorized domains**.
    2. Keep `hireframe-f6b03.web.app` and `hireframe-f6b03.firebaseapp.com`.
    3. Delete `localhost`: local dev uses the emulators.
+   4. The app serves Google sign-in from its own host (ADR-012), so the Google OAuth client must also trust `web.app`. In the Google Cloud console, go to **APIs & Services → Credentials**, and under **OAuth 2.0 Client IDs** open **Web client (auto created by Google Service)**.
+   5. Under **Authorized JavaScript origins**, add `https://hireframe-f6b03.web.app`.
+   6. Under **Authorized redirect URIs**, add `https://hireframe-f6b03.web.app/__/auth/handler` → **Save**. It can take a few minutes to apply.
 5. **Create the reCAPTCHA Enterprise key.**
    1. In the Google Cloud console, search for **reCAPTCHA** (enable the API if asked) → **Create key**.
    2. Name `hireframe-web`, platform **Website**.
@@ -78,10 +84,10 @@ Project `hireframe-f6b03`, region **europe-west2 (London)**. Design: ADR-011 (ow
     | `updatedAt` | timestamp | now |
 13. **Check the owner view.** Reload the app: you should see the shell.
 14. **Check a non-owner.** Sign in with a different Google account in a private window: it should show "No access" only. Then delete that user under **Authentication → Users**.
-15. **Close sign-ups.**
-    1. Go to **Authentication → Settings**, **upgrade to Identity Platform**.
-    2. Under **User actions**, untick **Enable create (sign-up)** and save.
-    3. A new account now gets "Sign-ups are closed".
+15. **Close sign-ups and account deletion.**
+    1. Go to **Authentication → Settings → User actions**. On this project it's already there. On older projects it only appears after **Upgrade to Identity Platform**.
+    2. Untick **Enable create (sign-up)** and **Enable deletion** → **Save**.
+    3. A new account now gets "Sign-ups are closed". Deletion is off because the owner account couldn't be re-created while sign-ups are closed.
 16. **Enforce App Check.**
     1. Go to **App Check → APIs**.
     2. When Cloud Firestore shows mostly *Verified* requests, **Enforce** it. Then do the same for Cloud Storage.
@@ -91,6 +97,9 @@ Project `hireframe-f6b03`, region **europe-west2 (London)**. Design: ADR-011 (ow
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
 - **Deploy fails with 403:** the `github-deployer` service account is missing a role. Grant the role named in the error with `gcloud projects add-iam-policy-binding` (never use a key file).
+- **Deploy fails with "Firebase Storage has not been set up":** enable the API and create the bucket from the Firebase console (Part A step 2).
+- **Google sign-in shows "Error 400: redirect_uri_mismatch":** the OAuth client is missing the `web.app` origin or redirect URI (Part A step 4).
+- **Owner account lost or deleted:** briefly tick **Enable create (sign-up)**, then sign in. Set `config/app.ownerUid` to the new UID, then untick sign-up again.
 
 ## Local setup (per machine)
 1. **Node 22:** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.

@@ -97,3 +97,8 @@ Context: CLAUDE.md says deploys are CI-only on tagged releases, and there must b
 - **Sign-ups:** after the owner bootstrap, Firebase Auth is upgraded to Identity Platform (free at this scale, one-way) and "Enable create (sign-up)" is turned off, so strangers can't even create accounts.
 
 Consequences: production auth and App Check are first exercised after merge and tag. That risk is reduced by the emulator tests, report-only CSP and `firebase hosting:rollback`. Adding Functions later needs extra deployer roles.
+
+*The "Sign-ups" bullet is superseded by ADR-015.*
+
+## ADR-015 Closing sign-ups without Identity Platform
+Context: ADR-011 and ADR-014 assumed sign-ups could only be turned off after upgrading Firebase Auth to Identity Platform. During the v0.1.0 bootstrap, **Authentication → Settings → User actions** was already available, so no upgrade was needed. Decision: after bootstrap, untick both **Enable create (sign-up)** and **Enable deletion**. Deletion is also off because a deleted owner account couldn't be re-created while sign-ups are closed, and a new account would get a new UID anyway. The Identity Platform upgrade stays only as a fallback, for projects where User actions is missing. This supersedes ADR-014's "Sign-ups" bullet and the Identity Platform mention in ADR-011. Consequences: no one-way upgrade was made. A blocked sign-up still returns `auth/admin-restricted-operation`. Recovering a lost owner account is a short console procedure (RUNBOOK Recovery).
