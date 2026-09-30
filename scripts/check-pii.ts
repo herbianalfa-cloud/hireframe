@@ -10,6 +10,10 @@ import { findPii, parseAllowlist } from './pii.ts';
 
 const ALLOWLIST_PATH = 'scripts/pii-allowlist.txt';
 
+// Generated from the npm registry, never hand-edited: third-party package metadata
+// (e.g. maintainer contacts in deprecation notices) is not our personal data (ADR-013).
+const SKIPPED_FILES = new Set(['package-lock.json']);
+
 const files = execFileSync(
   'git',
   ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
@@ -18,7 +22,7 @@ const files = execFileSync(
   },
 )
   .split('\0')
-  .filter((file) => file !== '');
+  .filter((file) => file !== '' && !SKIPPED_FILES.has(file));
 
 const allowlist = parseAllowlist(readFileSync(ALLOWLIST_PATH, 'utf8'));
 
