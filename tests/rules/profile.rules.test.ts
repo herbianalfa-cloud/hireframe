@@ -18,6 +18,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDoc,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -26,6 +27,13 @@ import {
   type DocumentData,
 } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+
+import {
+  buildAcceptReview,
+  buildFactWrite,
+  buildKeepReview,
+  type FactWrite,
+} from '../../web/src/services/fact-writes.ts';
 
 const OWNER = 'owner-uid';
 const STRANGER = 'stranger-uid';
@@ -392,5 +400,44 @@ describe('fact edits (not the owner)', () => {
   it('denies the owner before config/app exists (fails closed)', async () => {
     await seed({ withOwner: false });
     await assertFails(edit(dbFor('owner'), { factPatch: { text: 'x', ...bump } }));
+  });
+});
+
+describe('batches built by web/src/services/fact-writes.ts', () => {
+  async function commit(build: (raw: DocumentData) => FactWrite): Promise<void> {
+    const db = dbFor('owner');
+    const snapshot = await getDoc(doc(db, PATHS.fact(FACT_ID)));
+    const write = build(snapshot.data() ?? {});
+    const batch = writeBatch(db);
+    batch.update(doc(db, PATHS.fact(FACT_ID)), write.update);
+    batch.set(doc(db, PATHS.factVersion(FACT_ID, write.version)), {
+      snapshot: write.snapshot,
+      change: write.change,
+      at: serverTimestamp(),
+    });
+    await batch.commit();
+  }
+
+  it('passes the rules for edit, archive and unarchive in sequence', async () => {
+    await seed();
+    await assertSucceeds(
+      commit((raw) => buildFactWrite(raw, { text: 'Edited' }, 'edit', serverTimestamp())),
+    );
+    await assertSucceeds(
+      commit((raw) => buildFactWrite(raw, { status: 'archived' }, 'archive', serverTimestamp())),
+    );
+    await assertSucceeds(
+      commit((raw) => buildFactWrite(raw, { status: 'active' }, 'unarchive', serverTimestamp())),
+    );
+  });
+
+  it('passes the rules for accepting a proposed change', async () => {
+    await seed({ withReview: true });
+    await assertSucceeds(commit((raw) => buildAcceptReview(raw, serverTimestamp())));
+  });
+
+  it('passes the rules for keeping the current fact', async () => {
+    await seed({ withReview: true });
+    await assertSucceeds(commit((raw) => buildKeepReview(raw, serverTimestamp())));
   });
 });

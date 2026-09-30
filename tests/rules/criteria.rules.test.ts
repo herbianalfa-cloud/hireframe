@@ -25,6 +25,8 @@ import {
 } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 
+import { buildCriteriaWrite } from '../../web/src/services/fact-writes.ts';
+
 const OWNER = 'owner-uid';
 const STRANGER = 'stranger-uid';
 const AT = Timestamp.fromDate(new Date('2026-10-01T09:00:00Z'));
@@ -235,5 +237,23 @@ describe('criteria writes (not the owner)', () => {
   it('denies the owner before config/app exists (fails closed)', async () => {
     await seed({ withOwner: false });
     await assertFails(save(dbFor('owner'), { version: 1 }));
+  });
+});
+
+describe('writes built by web/src/services/fact-writes.ts', () => {
+  it('passes the rules for seeding v1 and saving v2', async () => {
+    await seed();
+    const db = dbFor('owner');
+    for (const version of [1, 2]) {
+      const write = buildCriteriaWrite(
+        { ...CRITERIA_SEED_V1, freshness_days: 10 + version },
+        version,
+        serverTimestamp(),
+      );
+      const batch = writeBatch(db);
+      batch.set(doc(db, PATHS.criteriaVersion(write.versionId)), write.versionDoc);
+      batch.set(doc(db, DOCS.criteriaCurrent), write.pointerDoc);
+      await assertSucceeds(batch.commit());
+    }
   });
 });

@@ -2,6 +2,8 @@ import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
+import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase/functions';
+import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
 import { z } from 'zod';
 
 import { isTransient, withRetry, withTimeout } from './resilience';
@@ -18,10 +20,14 @@ export interface FirebaseServices {
   app: FirebaseApp;
   auth: Auth;
   db: Firestore;
+  storage: FirebaseStorage;
+  functions: Functions;
 }
 
 export const DEMO_PROJECT_ID = 'demo-hireframe';
 const EMULATOR_HOST = '127.0.0.1';
+/** Callables run in London (ADR-014, ADR-017). */
+export const FUNCTIONS_REGION = 'europe-west2';
 
 const HostingConfigSchema = z.object({
   apiKey: z.string().min(1),
@@ -52,9 +58,14 @@ function initEmulators(): Promise<FirebaseServices> {
   });
   const auth = getAuth(app);
   const db = getFirestore(app);
+  // Without a bucket name the Storage SDK has nothing to address; the emulator accepts any.
+  const storage = getStorage(app, `gs://${DEMO_PROJECT_ID}.appspot.com`);
+  const functions = getFunctions(app, FUNCTIONS_REGION);
   connectAuthEmulator(auth, `http://${EMULATOR_HOST}:9099`, { disableWarnings: true });
   connectFirestoreEmulator(db, EMULATOR_HOST, 8080);
-  return Promise.resolve({ app, auth, db });
+  connectStorageEmulator(storage, EMULATOR_HOST, 9199);
+  connectFunctionsEmulator(functions, EMULATOR_HOST, 5001);
+  return Promise.resolve({ app, auth, db, storage, functions });
 }
 
 async function fetchHostingConfig(): Promise<z.infer<typeof HostingConfigSchema>> {
@@ -81,5 +92,11 @@ async function initHosted(): Promise<FirebaseServices> {
     provider: new ReCaptchaEnterpriseProvider(siteKey),
     isTokenAutoRefreshEnabled: true,
   });
-  return { app, auth: getAuth(app), db: getFirestore(app) };
+  return {
+    app,
+    auth: getAuth(app),
+    db: getFirestore(app),
+    storage: getStorage(app),
+    functions: getFunctions(app, FUNCTIONS_REGION),
+  };
 }
