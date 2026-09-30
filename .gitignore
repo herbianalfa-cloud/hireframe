@@ -11,6 +11,9 @@ coverage/
 functions/deploy/
 functions/.secret.local
 
+# Local scratch output (e.g. scripts/make-cv-fixtures.ts)
+/tmp/
+
 # Logs and local tooling
 *.log
 .firebase/

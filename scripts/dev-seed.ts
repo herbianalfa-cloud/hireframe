@@ -1,6 +1,8 @@
+import { CRITERIA_SEED_V1 } from '../packages/shared/src/criteria-seed.ts';
+
 /**
- * Pure helpers for `npm run dev` (scripts/dev.ts): the fake owner seeded into the local
- * emulators. Fake data only (CLAUDE.md); the project must be a `demo-*` project, which the
+ * Pure helpers for `npm run dev` (scripts/dev.ts): the fake owner and criteria v1 seeded into
+ * the local emulators. Fake data only (CLAUDE.md); the project must be a `demo-*` project, which the
  * emulators guarantee can never reach real Firebase resources (ADR-013).
  */
 export const DEV_OWNER = {
@@ -52,5 +54,47 @@ export function appConfigDocument(now: Date) {
       createdAt: timestamp,
       updatedAt: timestamp,
     },
+  };
+}
+
+/** A Firestore REST value (https://firebase.google.com/docs/firestore/reference/rest/v1/Value). */
+export type RestValue =
+  | { stringValue: string }
+  | { integerValue: string }
+  | { doubleValue: number }
+  | { booleanValue: boolean }
+  | { timestampValue: string }
+  | { arrayValue: { values: RestValue[] } }
+  | { mapValue: { fields: Record<string, RestValue> } };
+
+export function toRestValue(value: unknown): RestValue {
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  }
+  if (value instanceof Date) return { timestampValue: value.toISOString() };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(toRestValue) } };
+  if (typeof value === 'object' && value !== null) {
+    return { mapValue: { fields: toRestFields(value as Record<string, unknown>) } };
+  }
+  throw new Error(`Unsupported seed value: ${typeof value}`);
+}
+
+function toRestFields(data: Record<string, unknown>): Record<string, RestValue> {
+  return Object.fromEntries(
+    Object.entries(data)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, toRestValue(value)]),
+  );
+}
+
+/** `criteria/v1` and `criteria/current`, as the Criteria screen's "Start from default" writes them. */
+export function criteriaSeedDocuments(now: Date) {
+  return {
+    v1: {
+      fields: toRestFields({ ...CRITERIA_SEED_V1, version: 1, createdAt: now, schemaVersion: 1 }),
+    },
+    current: { fields: toRestFields({ version: 1, updatedAt: now, schemaVersion: 1 }) },
   };
 }
