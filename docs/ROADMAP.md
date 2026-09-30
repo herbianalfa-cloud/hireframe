@@ -27,5 +27,5 @@ Referral path finder and recruiter/HM finder (public sources + one-click LinkedI
 Offer & negotiation helper, autofill browser extension.
 
 ## Parking lot
-Telegram bot, case-study page generator for fridgerweb.com.
+Telegram bot, case-study page generator for fridgerweb.com. PR preview channels (need a Google sign-in/App Check story for preview domains, ADR-014). Playwright smoke test of sign-in against the emulators. Re-add `eslint-plugin-jsx-a11y` once it supports ESLint 10 (ADR-012).
 

@@ -19,5 +19,5 @@ Single user, private data, public code.
 | `CHANGELOG.md` | What shipped, when |
 
 ## Status
-Wave 1 — M0 (repo + guardrails) done; next: M1 Firebase foundation. Local setup: `docs/RUNBOOK.md`.
+Wave 1 — M0 (repo + guardrails) and M1 (Firebase foundation) built; next: M2 Profile brain. Local setup and Firebase setup: `docs/RUNBOOK.md`.
 
