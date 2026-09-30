@@ -3,3 +3,5 @@
 noreply@anthropic.com
 *@users.noreply.github.com
 *@example.com
+# Google-managed Firebase Storage service agent (docs/RUNBOOK.md IAM setup).
+*@gcp-sa-firebasestorage.iam.gserviceaccount.com

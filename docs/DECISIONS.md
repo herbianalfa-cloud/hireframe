@@ -50,3 +50,50 @@ Consequences: the spec is consistent before code exists; the M4 and M7 plans mus
 
 ## ADR-010 Personal details stay out of the repo
 Context: the repo is public, and the first docs pack described the candidate's education, work-rights status, dates and employer. Decision: docs describe the user generically. Candidate-specific values live in the Firebase profile and are templated into prompts and rules at runtime (e.g. `{profile.work_rights}`). The single initial commit was amended and force-pushed on 2026-09-30 (the `main` ruleset was briefly disabled, then restored with identical rules), so those details are not in branch history. Guardrails: `.gitignore` blocks CV/document/data-export file types; `npm run scan:pii` runs in `check` and CI; the PR template asks for no personal data in PR text. Consequences: S2 prompts and S1 work-rights blocker patterns must read from the profile; commit author metadata keeps the real name by choice (portfolio repo).
+
+## ADR-011 Owner allowlist, bootstrap and M1 rules
+Context: PRD R1 allows only the owner's UID, but that UID doesn't exist until the owner first signs in, and the repo is public. Decision:
+- Firestore and Storage rules allow access only when `request.auth.uid == config/app.ownerUid` (Storage reads it through cross-service rules). If `config/app` or `ownerUid` is missing, nobody gets in: the rules fail closed.
+- `config/*` is never writable from a client, so a signed-in stranger can't create `config/app` to claim ownership. A rules test proves this.
+- **Bootstrap:** after the first deploy the owner signs in and sees "No access". They copy their UID from the Auth console and create `config/app` in the Firestore console; console writes are admin writes (docs/RUNBOOK.md). There's no script and no local credentials.
+- **M1 matrix:** the owner can read every Wave-1 collection. There are no client writes anywhere yet, for the owner too. Each later milestone opens only the writes its UI needs, with rules tests. Unknown paths and Storage `backups/**` are denied to all clients.
+- **Defence in depth:** the web gate zod-parses `config/app` and compares UIDs; it never grants access by default. After bootstrap, new sign-ups are disabled (Identity Platform, ADR-014).
+- **Rejected:**
+  - "First sign-in becomes owner": whoever finds the URL first wins.
+  - Owner email in the rules: personal data in a public repo.
+  - Custom claims: they need an Admin SDK script and local credentials.
+
+Consequences: each rules check costs one extra document read (`get(config/app)`), which is negligible for one user; custom claims can replace it later if that ever matters. A typo in `ownerUid` locks the owner out until fixed in the console. Changing the owner is a console edit.
+
+## ADR-012 Web shell toolchain
+Context: M1 needs a deployable dark shell on the documented stack (React 19, Vite, Tailwind v4, shadcn/ui, TanStack Query). Decision:
+- **Routing:** react-router in declarative mode, which is enough for a handful of screens.
+- **shadcn/ui:** components are added by hand into `web/src/components/ui` (no CLI step in CI).
+- **Fonts:** Inter and JetBrains Mono are self-hosted via `@fontsource-variable`.
+- **Firebase config:** read at runtime from Firebase Hosting's reserved `/__/firebase/init.json`, so no Firebase config or API key sits in the repo or CI (and gitleaks never sees one). `authDomain` is set to the serving host, so the sign-in handler is same-origin and works without third-party storage. Pop-up sign-in falls back to redirect if the pop-up is blocked.
+- **Shared code:** `@hireframe/shared` has a `source` export condition, so Vite, Vitest and TS read its sources directly, while Node (functions) uses `dist`.
+- **CSP:** ships as `Content-Security-Policy-Report-Only` in M1. Other security headers are enforced. CSP enforcement moves to M8, once the real traffic of Google sign-in and App Check has been observed.
+- **eslint-plugin-jsx-a11y:** not used, because it doesn't support ESLint 10 yet and the forks are unvetted. Accessibility is covered by role-based component tests, the Lighthouse ≥ 95 check (R7) and native elements (e.g. radio inputs for the theme switcher). It gets added back once upstream supports ESLint 10 (ROADMAP parking lot).
+- **Theme:** dark by default; `light` and `system` (follows `prefers-color-scheme`) on request. `<html data-theme>` is the single source of truth.
+
+Consequences: the production bundle only works when served by Firebase Hosting (by design). A local production build needs `web/.env.local` with the public reCAPTCHA site key.
+
+## ADR-013 Local development on the demo-hireframe emulator project
+Context: local work must never touch production data, and rules tests need emulators. Decision:
+- `npm run dev` and `npm run test:rules` run `firebase emulators:exec --project demo-hireframe`. A `demo-*` project can't reach real Firebase resources.
+- `npm run dev` seeds a fake owner (`owner@example.com`, linked to Google so the emulator's sign-in pop-up lists it) and a console-shaped `config/app` with Timestamps. The seed refuses to run against any non-`demo-*` project.
+- Rules tests live in `tests/rules/` with their own Vitest config (`vitest.rules.config.ts`, run serially because both suites share one emulator), so `npm test` stays network-free.
+- `firebase-tools` is a pinned devDependency, so local runs and CI use the same emulators. The emulators need Java 21.
+
+Consequences: contributors need Java 21 installed. firebase-tools brings a large dependency tree (currently only moderate `npm audit` findings; CI fails on high). Its lockfile entries include npm deprecation notices containing a third-party maintainer's public contact address, so `scan:pii` skips the generated `package-lock.json` rather than allowlisting a person's address; every hand-written file is still scanned. `@firebase/firestore` pins `@grpc/grpc-js ~1.9.0`, which has high advisories (GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4; server-side, and grpc-js is not in the browser bundle). A root `overrides` entry forces the patched 1.14.5 (rules tests pass on it) so the `audit` gate stays at `high`; remove the override once Firebase bumps its pin.
+
+## ADR-014 Deploy: keyless, tag-only, London
+Context: CLAUDE.md says deploys are CI-only on tagged releases, and there must be no long-lived keys. Decision:
+- **Trigger:** `.github/workflows/deploy.yml` runs on `v*` tags in the GitHub `production` environment (owner approval required; only `v*` tags may deploy). It re-runs `check` and `test:rules`, builds, then deploys hosting, Firestore rules/indexes and Storage rules.
+- **Auth:** Workload Identity Federation. The pool provider only accepts tokens whose `repository_id` is this repo, whose ref is `refs/tags/v*` and whose environment is `production`. The `github-deployer` service account holds only the roles the deploy needs (docs/RUNBOOK.md). There's no service-account key. `npm run deploy` refuses to run outside GitHub Actions on a `v*` tag.
+- **Region:** `europe-west2` (London) for Firestore and Storage, and later for Functions. The Firestore location can't be changed.
+- **No Cloud Functions in M1**: the `functions` block is added with the first function.
+- **PR preview channels are parked:** Google sign-in and App Check (reCAPTCHA domain list) don't work cleanly on preview domains.
+- **Sign-ups:** after the owner bootstrap, Firebase Auth is upgraded to Identity Platform (free at this scale, one-way) and "Enable create (sign-up)" is turned off, so strangers can't even create accounts.
+
+Consequences: production auth and App Check are first exercised after merge and tag. That risk is reduced by the emulator tests, report-only CSP and `firebase hosting:rollback`. Adding Functions later needs extra deployer roles.

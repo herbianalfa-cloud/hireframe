@@ -56,7 +56,7 @@ interface Source { id: string; fetch(ctx): Promise<RawJob[]>; health(): SourceHe
 ## Data model (Firestore)
 All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 
-- `config/app` — owner UID, schedules, model names, caps (in pence), `fxUsdToGbp` (converts Anthropic's USD costs to pence), feature flags
+- `config/app` — owner UID, schedules, model names, caps (in pence), `fxUsdToGbp` (converts Anthropic's USD costs to pence), feature flags. M1 fields: `ownerUid`, `schemaVersion`, `createdAt`, `updatedAt` (`AppConfigSchema` in `packages/shared`). Written only by the Admin SDK or the Firebase console, never by clients (ADR-011)
 - `criteria/{version}` + `criteria/current` pointer — see FUNNEL.md seed
 - `profile/main/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', dates, tags[], lanes[], status: 'active'|'archived', version }`
 - `profile/main/documents/{docId}` — uploaded CVs (file in Storage), parse status
@@ -94,6 +94,11 @@ Timeouts: scan functions 540 s, memory 1 GiB, max instances 1.
 - Shared secret stored in Apps Script Script Properties and Secret Manager. Never in code.
 
 ## Environments
-- `local`: emulators, fake data, no real API calls unless `LIVE=1`.
-- `prod`: single Firebase project. (Staging not worth it for one user; guarded by emulator tests + eval gate + tagged deploys.)
+- `local`: emulators on the `demo-hireframe` project (can't reach real resources), fake data seeded by `npm run dev`, no real API calls unless `LIVE=1` (ADR-013).
+- `prod`: single Firebase project `hireframe-f6b03`, region `europe-west2`. (Staging not worth it for one user; guarded by emulator tests + eval gate + tagged deploys.)
+
+## Web app config and deploy
+- The web app reads its Firebase config from Hosting's `/__/firebase/init.json` at runtime; no Firebase config lives in the repo (ADR-012). App Check uses reCAPTCHA Enterprise; the public site key is a build-time variable.
+- Components never import Firebase; `web/src/services/` wraps auth, access checks and Firestore reads (with timeout + retry).
+- Deploy: `v*` tag → GitHub `production` environment approval → `check` + `test:rules` → build → keyless Workload Identity Federation → `firebase deploy --only hosting,firestore,storage` (ADR-014).
 

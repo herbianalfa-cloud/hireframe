@@ -1,0 +1,119 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens (docs/DESIGN.md, web/DESIGN.md). Components use these via Tailwind
+ * utilities (`bg-surface`, `text-muted-foreground`, …); no hard-coded hex in components.
+ * Theme: `data-theme` on <html> is `dark` (default), `light`, or `system`.
+ */
+:root {
+  color-scheme: dark;
+  --background: #0b0c0e;
+  --surface: #111214;
+  --surface-raised: #17181b;
+  --border: #25272c;
+  --foreground: #e7e8eb;
+  --muted-foreground: #9da1ab;
+  --accent: #8b93ff;
+  --accent-foreground: #0b0c0e;
+  --ring: #8b93ff;
+  --danger: #ff7b72;
+  --verdict-apply: #3fb950;
+  --verdict-near-miss: #d29922;
+  --verdict-wildcard: #a371f7;
+  --verdict-skip: #8b949e;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --background: #fafafb;
+  --surface: #ffffff;
+  --surface-raised: #f3f4f6;
+  --border: #e2e4e8;
+  --foreground: #15171c;
+  --muted-foreground: #585e6b;
+  --accent: #4b53d6;
+  --accent-foreground: #ffffff;
+  --ring: #4b53d6;
+  --danger: #c4262e;
+  --verdict-apply: #1a7f37;
+  --verdict-near-miss: #9a6700;
+  --verdict-wildcard: #8250df;
+  --verdict-skip: #6e7781;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'] {
+    color-scheme: light;
+    --background: #fafafb;
+    --surface: #ffffff;
+    --surface-raised: #f3f4f6;
+    --border: #e2e4e8;
+    --foreground: #15171c;
+    --muted-foreground: #585e6b;
+    --accent: #4b53d6;
+    --accent-foreground: #ffffff;
+    --ring: #4b53d6;
+    --danger: #c4262e;
+    --verdict-apply: #1a7f37;
+    --verdict-near-miss: #9a6700;
+    --verdict-wildcard: #8250df;
+    --verdict-skip: #6e7781;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --color-danger: var(--danger);
+  --color-verdict-apply: var(--verdict-apply);
+  --color-verdict-near-miss: var(--verdict-near-miss);
+  --color-verdict-wildcard: var(--verdict-wildcard);
+  --color-verdict-skip: var(--verdict-skip);
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Motion: 150–200 ms ease-out, only for state changes; none if the user asks. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
