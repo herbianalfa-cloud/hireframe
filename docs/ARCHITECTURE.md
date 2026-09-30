@@ -56,10 +56,10 @@ interface Source { id: string; fetch(ctx): Promise<RawJob[]>; health(): SourceHe
 ## Data model (Firestore)
 All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 
-- `config/app` — owner UID, schedules, model names, caps, feature flags
+- `config/app` — owner UID, schedules, model names, caps (in pence), `fxUsdToGbp` (converts Anthropic's USD costs to pence), feature flags
 - `criteria/{version}` + `criteria/current` pointer — see FUNNEL.md seed
-- `profile/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', dates, tags[], lanes[], status: 'active'|'archived', version }`
-- `profile/documents/{docId}` — uploaded CVs (file in Storage), parse status
+- `profile/main/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', dates, tags[], lanes[], status: 'active'|'archived', version }`
+- `profile/main/documents/{docId}` — uploaded CVs (file in Storage), parse status
 - `companies/{companyId}` — `{ name, domain, ats: {type, token}, size?, stage?, hq, watch: bool, lastScannedAt }`
 - `jobs/{jobId}` — `{ dedupeKey, title, company, companyId?, location, remote, url, sources[{id, url, externalId, seenAt}], postedAt, firstSeenAt, descriptionRef, salary?, stage: 's0'..'s3', verdict?, fitScore?, luckScore?, reason?, matchedFactIds[], gaps[{type, text}], criteriaVersion, promptVersion, status: 'new'|'saved'|'applied'|'skipped'|'interview'|'offer'|'rejected', feedback?: {agree: bool, note?} }`
 - `jobs/{jobId}/description/raw` — full text (kept separate to keep list reads cheap). Purged after 60 days for `skip` jobs.
@@ -67,16 +67,17 @@ All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 - `runs/{runId}` — `{ trigger: 'schedule'|'manual', startedAt, finishedAt, status, perSource{}, perStage{}, costPence, errors[] }`
 - `usage/{yyyy-mm}` — `{ spendPence, capPence, calls{model: n}, tokens{} }` (transactional increments)
 - `events/{eventId}` — append-only user actions (applied, skipped, feedback, criteria change) for analytics
+- `locks/scan` — single-flight scan lock (kept out of `runs` so run queries never return it)
 
 **Dedupe key:** `hash(normCompany + '|' + normTitle + '|' + normCity)`; also match on any known `externalId` (e.g. LinkedIn job ID) or canonical URL. Normalisation strips seniority noise words only for matching, never for display.
 
 ## Functions
 | Function | Trigger | Does |
 |---|---|---|
-| `scheduledScan` | Cloud Scheduler 07:30 + 17:30 Mon–Fri Europe/London | Runs all sources → dedupe → funnel; single-flight lock in `runs/lock` |
+| `scheduledScan` | Cloud Scheduler 07:30 + 17:30 Mon–Fri Europe/London | Runs all sources → dedupe → funnel; single-flight lock in `locks/scan` |
 | `scanNow` | Callable (owner only) | Same, manual |
 | `ingestEmailJobs` | HTTPS, HMAC-signed, from Apps Script | Parses alert payloads → jobs |
-| `getDigest` | HTTPS, HMAC-signed, from Apps Script | Returns digest HTML for latest morning run |
+| `getDigest` | HTTPS, HMAC-signed, from Apps Script | Returns digest HTML for latest morning run, or an explicit in-progress/failed notice |
 | `lookup` | Callable | URL/text → match or run funnel |
 | `parseCv` / `addFact` | Callable | Profile brain |
 | `rescore` | Callable | Re-run S2–S3 on last 14 days with current criteria |
@@ -89,7 +90,7 @@ Timeouts: scan functions 540 s, memory 1 GiB, max instances 1.
 - Gmail filters label alert emails `hireframe/alerts` (LinkedIn, Wellfound, WaaS, WTTJ, Reed, etc.).
 - Time trigger every 30 min: read unprocessed labelled threads → extract text + links → POST to `ingestEmailJobs` with HMAC-SHA256 signature + timestamp → relabel `hireframe/done`.
 - Parsing of the email body into jobs happens server-side (cheap model or per-sender parser), so the script stays dumb.
-- Time trigger 07:50 weekdays: GET `getDigest` (signed) → `MailApp.sendEmail` to self.
+- Time trigger 07:50 weekdays: GET `getDigest` (signed) → `MailApp.sendEmail` to self. Apps Script time triggers fire within a ±15 min window, so the digest can be requested before the morning run finishes; `getDigest` then returns an explicit "run in progress" or "run failed" notice, never nothing (R9).
 - Shared secret stored in Apps Script Script Properties and Secret Manager. Never in code.
 
 ## Environments
