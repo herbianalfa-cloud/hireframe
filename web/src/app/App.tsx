@@ -16,6 +16,9 @@ const ProfilePage = lazy(() =>
 const CriteriaPage = lazy(() =>
   import('@/features/criteria/CriteriaPage').then((module) => ({ default: module.CriteriaPage })),
 );
+const SystemPage = lazy(() =>
+  import('@/features/system/SystemPage').then((module) => ({ default: module.SystemPage })),
+);
 
 function ScreenLoading() {
   return (
@@ -32,6 +35,7 @@ const screen = (page: ReactNode) => () => <Suspense fallback={<ScreenLoading />}
 const PAGES: Readonly<Record<string, () => ReactNode>> = {
   '/profile': screen(<ProfilePage />),
   '/criteria': screen(<CriteriaPage />),
+  '/system': screen(<SystemPage />),
 };
 
 export function AppRoutes() {

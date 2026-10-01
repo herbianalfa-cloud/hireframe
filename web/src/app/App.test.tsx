@@ -9,6 +9,7 @@ vi.mock('@/features/profile/ProfilePage', () => ({ ProfilePage: () => <h1>Profil
 vi.mock('@/features/criteria/CriteriaPage', () => ({
   CriteriaPage: () => <h1>Criteria screen</h1>,
 }));
+vi.mock('@/features/system/SystemPage', () => ({ SystemPage: () => <h1>System screen</h1> }));
 
 function renderAt(path: string) {
   render(
@@ -26,6 +27,7 @@ describe('AppRoutes', () => {
   it.each([
     ['/profile', 'Profile screen'],
     ['/criteria', 'Criteria screen'],
+    ['/system', 'System screen'],
   ])('routes %s to the built screen, not the placeholder', async (path, heading) => {
     renderAt(path);
     expect(await screen.findByRole('heading', { name: heading })).toBeTruthy();
