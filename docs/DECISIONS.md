@@ -126,6 +126,13 @@ Context: M2 adds the first functions. Cloud Build installs a function's `package
 
 Consequences: the deploy bundle is about 5 MB (mostly pdf.js). Bundled dependencies are pinned through the workspace lockfile. The first `v0.2.0` deploy may still surface one missing deployer role (RUNBOOK Recovery).
 
+*Addendum (M2.1):* the runtime account's bucket role is now `storage.objectUser`, so Reset profile can delete uploads (ADR-023). The v0.2.x deploys also needed, by hand:
+- three more APIs (eventarc, firebaseextensions, cloudbilling);
+- the deployer's `serviceAccountUser` on the App Engine default and default compute accounts;
+- a one-time `allUsers` `run.invoker` binding per new callable, because the deployer can't set IAM.
+
+All are in RUNBOOK Part C. M8 replaces the compute-account grant with a dedicated Cloud Build account (ROADMAP).
+
 ## ADR-018 Profile facts: extraction, evidence, merge and versions
 Context: PRD R2 needs ≥ 60 atomic facts from a CV, each showing its source, re-uploads that never overwrite, and versioned edits. Decision:
 - **Text extraction, not native PDF input:** unpdf (PDF) and mammoth (DOCX) extract the text, and the model gets it as tagged, untrusted data. That lets the server check evidence word for word, costs fewer tokens than page images, and makes scanned PDFs fail clearly ("upload the .docx"). The file type comes from its magic bytes, not the client.
@@ -138,6 +145,8 @@ Context: PRD R2 needs ≥ 60 atomic facts from a CV, each showing its source, re
 Rejected: an LLM-driven merge (not testable offline; parking lot); callables for every edit (cold starts, more code, same guarantees).
 
 Consequences: a CV of up to 200 facts writes in one atomic batch. Snapshots are built from the raw stored data so Timestamps compare exactly. A heuristic merge can produce an extra review item or a near-duplicate, but never lose data.
+
+*Addendum (M2.1, ADR-022):* the merge gains an evidence-quote pass between "same text" and "similar text", and parseCv no longer reads a file whose bytes it has already parsed.
 
 ## ADR-019 Criteria versions and pointer
 Context: PRD R3 needs one editable, versioned criteria document, and M4 must record which version judged each job. Decision:
@@ -167,3 +176,44 @@ Context: the M2 web build was one 1.08 MB chunk (Vite's warning threshold is 500
 - `npm run check:bundle` (CI, after build) fails if any chunk is over 500 kB or the initial JS is over 310 kB gzip.
 
 Consequences: initial JS went from 1,083 kB to about 974 kB minified (326 to about 292 kB gzip), and the largest chunk is Firestore at about 472 kB. Firestore and Auth are needed before the first screen (owner check), so they can't be deferred without changing the sign-in flow.
+
+## ADR-022 Stable re-upload
+Context: after v0.2.1, uploading the same CV as .docx and then as .pdf gave "Added 64, unchanged 77, flagged 53". The model words facts differently on every read. ADR-018's merge only matched on the same text, or on token-Jaccard ≥ 0.6, so most reworded facts were added again or flagged, although the CV line behind them hadn't changed. Decision:
+- **Identical file, no read:** parseCv stores the SHA-256 of the uploaded bytes on the document. If an earlier *parsed* upload has the same hash, the new one is marked `duplicateOf` it, with an all-zero result. There is no model call and no fact is touched. Failed uploads don't count, so a failed read can be retried. Removed uploads do count: reading again would only skip the archived facts.
+- **Evidence pass in `mergeFacts`**, between pass 1 (same type and text) and the similarity pass:
+  - The key is the type plus the quote with case, accents, punctuation and *all* spacing removed. That survives PDF/DOCX extraction noise: ligatures, curly quotes, bullets, doubled spaces and words hyphenated across a line break.
+  - Facts split from one bullet share a quote. So among the unmatched facts behind a quote, a single candidate (or several copies of the same text) matches, and otherwise the closest wording wins. A tie between different facts, or no shared word at all, is ambiguous and falls through to the similarity pass.
+  - The outcome is the same as an exact match: unchanged, flagged if the dates differ, or skipped if the fact is archived. An archived fact is therefore never re-added under new wording.
+- **Tests reproduce the bug:** two differently worded fake reads of the same CV. The old merge found 0 of 14 unchanged; the parseCv fixture went from "added 30, flagged 33, unchanged 0" to 0 / 0 / 63.
+
+Rejected: lowering the similarity threshold, which would flag more unrelated facts; an LLM second opinion (still in the parking lot).
+
+Consequences: a CV edit that changes a bullet's wording changes its quote too, so it is still added or flagged as before. A model that quotes a different span of the same line on the second read falls back to the similarity pass. The duplicate check only helps byte-identical files; the evidence pass covers the format switch. Uploads from before v0.2.2 have no hash.
+
+## ADR-023 Removing an upload and resetting the profile
+Context: there was no way to undo a bad upload (like the unstable v0.2.1 re-upload) or to start the profile over. SECURITY promises "delete all my data". Decision:
+- **Remove upload uses the client-write path.** `planUploadRemoval` (pure, shared) picks the facts to change:
+  - it archives facts with `sourceDocId` = the upload that are active, `version == 1` and not manual;
+  - it drops every pending proposed change from that upload as a `review_kept` version;
+  - it counts, and keeps, the facts the owner edited.
+
+  `buildUploadRemoval` turns the plan into versioned batches of at most 240 facts (480 writes). The document's `removedAt` goes in the last batch, so a document is marked only after everything before it committed. A retry plans only what is left. One new rule lets the owner set `removedAt` and `updatedAt` to the server time, once, on a parsed or failed upload, and change nothing else. The file stays in Storage.
+- **Reset profile is a callable**, `resetProfile`, because it must delete Storage objects and whole subcollections (`recursiveDelete`), which client rules shouldn't allow.
+  - It is owner-only, with App Check enforced and consumed, and mounts no secrets.
+  - It needs `{ confirm: 'RESET' }`, checked by zod on the server as well as in the UI.
+  - It refuses while a CV is being read (a non-stalled `parsing` document), so a running parse can't write facts back afterwards.
+  - It deletes facts with their versions, upload documents and everything under `profile/documents/`. It never touches config, criteria or usage.
+- **IAM:** the runtime account moves from `storage.objectViewer` to `storage.objectUser` on the bucket. That is the narrowest built-in role that can delete objects; it can also create and overwrite them, which no function does.
+
+Rejected: a removal callable, because the versioned client path already gives history, rules tests and no cold start; a soft-delete reset, because "delete my data" means gone.
+
+Consequences: Remove upload is reversible from the Archived tab, but its proposed-change drops are not re-proposed unless the CV is uploaded again. Reset can't be undone: there is no backup until M8's weekly export. A new callable needs a one-time invoker binding (RUNBOOK Part C step 28).
+
+## ADR-024 Evidence links on facts
+Context: some facts are best backed by something outside the CV, like a portfolio page, a certificate or a live dashboard. Decision: an optional `evidenceUrl` on the fact, which the owner sets in the Edit dialog.
+- Https only, at most 500 characters, no whitespace. The check lives in `EvidenceUrlSchema` (zod `z.url` with the https protocol) and is mirrored in firestore.rules.
+- It is on `FactSchema` only, not on `FactContent`/`FactDraft`. The model's output schema can't carry it, and a proposed change can't set it. Text injected into a CV or note can therefore never plant a link.
+- Clearing the field removes it (`deleteField()`); every change is a normal versioned edit.
+- The link opens in a new tab with `rel="noopener noreferrer"`.
+
+Consequences: file attachments as evidence are parked (ROADMAP). Links are never fetched or checked server-side.

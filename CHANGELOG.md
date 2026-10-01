@@ -3,6 +3,24 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Fixed
+- **Re-uploading the same CV is stable** (ADR-022). Uploading the .docx and then the .pdf gave "Added 64, unchanged 77, flagged 53", because the model words facts differently on every read.
+  - The merge now matches on the fact's evidence quote (normalised for PDF/DOCX extraction noise) before falling back to text similarity. An archived fact is never re-added under new wording.
+  - parseCv stores a SHA-256 of each upload and doesn't read the same file twice: no model call, nothing changes.
+  - Tests reproduce the bug with two differently worded fake reads of the same CV.
+
+### Added
+- **Remove upload** on each upload row (ADR-023). It archives the facts that upload added and that were never edited, drops its pending proposed changes, keeps (and counts) facts you edited, and marks the upload Removed. It uses versioned client writes, with one new rule: the owner may set `removedAt` once on a finished upload.
+- **Reset profile** in a Profile Danger zone (ADR-023). You type RESET, and the owner-only `resetProfile` callable hard-deletes every fact, version, upload and uploaded file; criteria and spend are kept. It refuses while a CV is being read.
+- **Evidence link** on facts (ADR-024): an optional https-only `evidenceUrl`, editable and versioned. A model can never set one. Rules and rules tests are updated.
+
+### Changed
+- RUNBOOK: "Functions setup (M2)" is now **Part C**.
+  - It covers every manual step from the v0.2.x deploys: the extra APIs (and why); the deployer's `serviceAccountUser` on the App Engine default and the default compute accounts; a one-time `allUsers` invoker binding per new callable; a check of the Storage service agent's `firebaserules.firestoreServiceAgent` role.
+  - Upgrade steps for v0.2.2 and new Recovery entries.
+- The functions runtime account needs `storage.objectUser` instead of `storage.objectViewer` on the bucket (to delete uploads on reset).
+- Only the model callables mount the Anthropic key.
+- ROADMAP: M8 adds a dedicated Cloud Build account and removes Editor from the default compute account; "file attachments as evidence" is parked.
 
 ## [0.2.1] - 2026-10-01
 ### Fixed
