@@ -1,4 +1,5 @@
 import {
+  FACT_LIMITS,
   isParseStalled,
   planUploadRemoval,
   type ParseSummary,
@@ -252,6 +253,15 @@ function RecentUploads({
               className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm"
             >
               <span className="font-mono text-xs uppercase">{document.kind}</span>
+              {document.fileName ? (
+                <span
+                  title={document.fileName}
+                  className="max-w-[16rem] min-w-0 truncate"
+                  data-testid="upload-file-name"
+                >
+                  {document.fileName}
+                </span>
+              ) : null}
               <span className="text-muted-foreground">{formatDate(document.createdAt)}</span>
               <StatusChip status={status} />
               {(status === 'parsed' || status === 'failed') && !document.duplicateOf ? (
@@ -353,7 +363,7 @@ export function UploadCard({
 
     setState({ phase: 'reading' });
     try {
-      const result = await parseCv(docId);
+      const result = await parseCv(docId, file.name.slice(0, FACT_LIMITS.fileName));
       setState(
         result.duplicateOf ? { phase: 'duplicate' } : { phase: 'done', summary: result.summary },
       );

@@ -577,6 +577,7 @@ describe('removing an upload (ADR-023)', () => {
     ['status', { status: 'failed' }],
     ['summary', { summary: { added: 0 } }],
     ['sha256', { sha256: 'b'.repeat(64) }],
+    ['fileName', { fileName: 'other.pdf' }],
     ['duplicateOf', { duplicateOf: 'zyxwvutsrq9876543210' }],
     ['storagePath', { storagePath: 'elsewhere' }],
   ])('denies also changing %s', async (_name, patch) => {

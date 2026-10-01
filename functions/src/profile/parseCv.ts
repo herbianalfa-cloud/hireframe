@@ -88,7 +88,7 @@ async function findUpload(
 export async function parseCvHandler(data: unknown, deps: ParseCvDeps): Promise<ParseCvResult> {
   const input = ParseCvInputSchema.safeParse(data);
   if (!input.success) throw new HttpsError('invalid-argument', 'Invalid request.');
-  const { docId } = input.data;
+  const { docId, fileName } = input.data;
 
   const upload = await findUpload(docId, deps.readFile);
   if (!upload) throw new HttpsError(...USER_ERRORS.file_missing);
@@ -96,7 +96,7 @@ export async function parseCvHandler(data: unknown, deps: ParseCvDeps): Promise<
 
   await deps.store.beginParse(
     docId,
-    { kind: upload.kind, storagePath: upload.path, sha256 },
+    { kind: upload.kind, storagePath: upload.path, sha256, fileName },
     deps.now(),
   );
   log.info('parse_cv.started', { docId, kind: upload.kind, bytes: upload.bytes.length });

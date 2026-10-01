@@ -17,7 +17,7 @@ beforeEach(() => {
 
 describe('callable clients', () => {
   it.each([
-    ['parseCv', () => parseCv('abcdefghij0123456789')],
+    ['parseCv', () => parseCv('abcdefghij0123456789', 'cv.pdf')],
     ['addFact', () => addFact('A note')],
     ['resetProfile', () => resetProfile('RESET')],
   ] as const)(

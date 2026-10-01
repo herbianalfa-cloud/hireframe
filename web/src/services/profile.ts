@@ -240,13 +240,13 @@ export async function uploadCv(file: File): Promise<string> {
   return docId;
 }
 
-export async function parseCv(docId: string): Promise<ParseCvResult> {
+export async function parseCv(docId: string, fileName: string): Promise<ParseCvResult> {
   const functions = await getFunctionsClient();
   const call = httpsCallable(functions, 'parseCv', {
     timeout: clientTimeoutMs('parseCv'),
     limitedUseAppCheckTokens: true,
   });
-  const result = await call({ docId });
+  const result = await call({ docId, fileName });
   return ParseCvResultSchema.parse(result.data);
 }
 

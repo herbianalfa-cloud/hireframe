@@ -2,6 +2,7 @@ import { FACT_TYPES } from '@hireframe/shared';
 import {
   Archive,
   ArchiveRestore,
+  ChevronRight,
   ExternalLink,
   History,
   Pencil,
@@ -81,8 +82,14 @@ function FactRow({
           {fact.source === 'cv' ? 'Quote not found in the CV' : 'Quote not found in your text'}
         </p>
       ) : null}
-      <details className="mt-1 text-xs text-muted-foreground">
-        <summary className="flex min-h-11 cursor-pointer items-center">Evidence</summary>
+      <details className="group mt-1 text-xs text-muted-foreground">
+        <summary className="flex min-h-11 cursor-pointer items-center gap-1">
+          <ChevronRight
+            aria-hidden="true"
+            className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+          />
+          Evidence
+        </summary>
         <blockquote className="border-l-2 pl-3 pb-2">{fact.evidence}</blockquote>
       </details>
       {fact.evidenceUrl ? (

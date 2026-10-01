@@ -64,8 +64,18 @@ describe('fact schemas', () => {
 });
 
 describe('callable inputs', () => {
+  it('requires a file name of 1 to 200 characters', () => {
+    const docId = 'abcdefghij0123456789';
+    expect(ParseCvInputSchema.safeParse({ docId }).success).toBe(false);
+    expect(ParseCvInputSchema.safeParse({ docId, fileName: '  ' }).success).toBe(false);
+    expect(ParseCvInputSchema.safeParse({ docId, fileName: 'a'.repeat(200) }).success).toBe(true);
+    expect(ParseCvInputSchema.safeParse({ docId, fileName: 'a'.repeat(201) }).success).toBe(false);
+  });
+
   it('accepts only Firestore-style document IDs', () => {
-    expect(ParseCvInputSchema.safeParse({ docId: 'abcdefghij0123456789' }).success).toBe(true);
+    expect(
+      ParseCvInputSchema.safeParse({ docId: 'abcdefghij0123456789', fileName: 'cv.pdf' }).success,
+    ).toBe(true);
     expect(ParseCvInputSchema.safeParse({ docId: '../other' }).success).toBe(false);
   });
 
