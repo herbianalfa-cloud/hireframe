@@ -10,7 +10,9 @@ import {
   appConfigDocument,
   assertDemoProject,
   criteriaSeedDocuments,
+  DEV_LINKEDIN_JOB_ID,
   DEV_OWNER,
+  linkedInJobDocuments,
   ownerAccountBody,
 } from './dev-seed.ts';
 
@@ -52,12 +54,21 @@ await emulatorRequest('PATCH', `${documents}/config/app`, appConfigDocument(now)
 const criteria = criteriaSeedDocuments(now);
 await emulatorRequest('PATCH', `${documents}/criteria/v1`, criteria.v1);
 await emulatorRequest('PATCH', `${documents}/criteria/current`, criteria.current);
+const linkedIn = linkedInJobDocuments(now);
+await emulatorRequest('PATCH', `${documents}/jobs/${DEV_LINKEDIN_JOB_ID}`, linkedIn.job);
+await emulatorRequest(
+  'PATCH',
+  `${documents}/jobs/${DEV_LINKEDIN_JOB_ID}/description/raw`,
+  linkedIn.description,
+);
 
 console.log(
-  `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}) and criteria v1. ` +
+  `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}), criteria v1 and one fake ` +
+    'LinkedIn-alert job. ' +
     'In the sign-in pop-up pick that account; "Add new account" gives a non-owner. ' +
     `CV and note parsing use ${process.env.LIVE === '1' ? 'the real Anthropic API (LIVE=1)' : 'a fake model'}; ` +
-    'run `node scripts/make-cv-fixtures.ts` for fake CVs to upload.',
+    'run `node scripts/make-cv-fixtures.ts` for fake CVs to upload. ' +
+    `System → Scan now uses ${process.env.LIVE === '1' ? 'the real job APIs (LIVE=1)' : 'fake job APIs'}.`,
 );
 
 const vite = spawn('npm', ['run', 'dev', '-w', '@hireframe/web'], { stdio: 'inherit' });

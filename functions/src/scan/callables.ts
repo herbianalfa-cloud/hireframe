@@ -79,11 +79,14 @@ export const scanNow = onCall(
             log[level](event, fields);
           },
         }),
-      secrets: {
-        ...(reed ? { reedApiKey: reed } : {}),
-        ...(adzunaId ? { adzunaAppId: adzunaId } : {}),
-        ...(adzunaKey ? { adzunaAppKey: adzunaKey } : {}),
-      },
+      // The fake job APIs need no keys, so Reed and Adzuna run on their fixtures locally.
+      secrets: useFakes
+        ? { reedApiKey: 'fake', adzunaAppId: 'fake', adzunaAppKey: 'fake' }
+        : {
+            ...(reed ? { reedApiKey: reed } : {}),
+            ...(adzunaId ? { adzunaAppId: adzunaId } : {}),
+            ...(adzunaKey ? { adzunaAppKey: adzunaKey } : {}),
+          },
       seed: useFakes ? FAKE_SEED : WATCHLIST_SEED,
       disabledSources: config.disabledSources ?? [],
       cooldownMs: useFakes ? SCAN.emulatorCooldownMs : SCAN.cooldownMs,
