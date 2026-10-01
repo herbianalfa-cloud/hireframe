@@ -3,6 +3,7 @@ export * from './callables.js';
 export { AppConfigSchema, type AppConfig } from './config.js';
 export * from './criteria.js';
 export { CRITERIA_SEED_V1 } from './criteria-seed.js';
+export * from './titles.js';
 export { verifyEvidence } from './evidence.js';
 export { COLLECTIONS, DOCS, PATHS, STORAGE_PATHS, SUBCOLLECTIONS } from './firestore.js';
 export * from './merge.js';

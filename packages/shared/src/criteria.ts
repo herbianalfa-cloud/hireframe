@@ -13,7 +13,10 @@ const TermList = z.array(Term).max(100);
 export const ExcludedTitleSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]{1,60}$/),
   term: Term,
-  /** The title is allowed when any of these words appears before `term` (e.g. "Product Manager"). */
+  /**
+   * The occurrence is allowed when one of these comes immediately before `term` (whole words,
+   * any case), e.g. "Product Manager". Applied by `checkTitle` (titles.ts, ADR-020).
+   */
   unless_prefixed_by: TermList.exactOptional(),
 });
 export type ExcludedTitle = z.infer<typeof ExcludedTitleSchema>;

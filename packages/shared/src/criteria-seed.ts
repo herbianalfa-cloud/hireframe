@@ -2,8 +2,9 @@ import type { CriteriaContent } from './criteria.js';
 
 /**
  * Criteria v1, from docs/FUNNEL.md "Seed criteria (v1)". `excluded_titles` is structured so the
- * S1 rules (M4) can apply "unless preceded by" without parsing prose. "Technical" is an allowed
- * prefix for Business Analyst because "Technical Business Analyst" is a secondary-lane title.
+ * S1 rules (M4) can apply "unless immediately preceded by" with `checkTitle` (titles.ts) instead
+ * of parsing prose. "Technical" is an allowed prefix for Business Analyst because "Technical
+ * Business Analyst" is a secondary-lane title.
  */
 export const CRITERIA_SEED_V1: CriteriaContent = {
   lanes: {
