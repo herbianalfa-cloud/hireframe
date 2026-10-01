@@ -11,6 +11,7 @@ import {
   keepReview,
   parseCv,
   removeUpload,
+  resetProfile,
   unarchiveFact,
   updateFact,
   uploadCv,
@@ -31,6 +32,7 @@ vi.mock('@/services/profile', () => ({
   uploadCv: vi.fn(),
   parseCv: vi.fn(),
   removeUpload: vi.fn(),
+  resetProfile: vi.fn(),
   addFact: vi.fn(),
   updateFact: vi.fn(),
   archiveFact: vi.fn(),
@@ -630,5 +632,58 @@ describe('Identical uploads', () => {
     expect(screen.getByText(/^Same file as the upload from .+\. Nothing changed\.$/)).toBeDefined();
     // Only the original can be removed; the copy changed nothing.
     expect(screen.getAllByRole('button', { name: /Remove upload from/ })).toHaveLength(1);
+  });
+});
+
+describe('Danger zone', () => {
+  async function openReset(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Reset profile' }));
+    return screen.getByRole('dialog', { name: 'Reset your profile?' });
+  }
+
+  it('enables the reset only when RESET is typed exactly', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    render(<ProfilePage />);
+
+    const dialog = await openReset(user);
+    const input = within(dialog).getByLabelText('Type RESET to confirm');
+    const submit = within(dialog).getByRole('button', { name: 'Delete everything' });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    await user.type(input, 'reset');
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    await user.clear(input);
+    await user.type(input, 'RESET');
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('resets and reports what was deleted', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    vi.mocked(resetProfile).mockResolvedValue({ facts: 141, documents: 2, files: 1 });
+    render(<ProfilePage />);
+
+    const dialog = await openReset(user);
+    await user.type(within(dialog).getByLabelText('Type RESET to confirm'), 'RESET{Enter}');
+
+    expect(resetProfile).toHaveBeenCalledWith('RESET');
+    expect(
+      await screen.findByText('Profile reset. Deleted 141 facts, 2 uploads and 1 file.'),
+    ).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps the dialog open with the server message when the reset fails', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    vi.mocked(resetProfile).mockRejectedValue(new Error('busy'));
+    render(<ProfilePage />);
+
+    const dialog = await openReset(user);
+    await user.type(within(dialog).getByLabelText('Type RESET to confirm'), 'RESET');
+    await user.click(within(dialog).getByRole('button', { name: 'Delete everything' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toContain(
+      'Something went wrong',
+    );
   });
 });

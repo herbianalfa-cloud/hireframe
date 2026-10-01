@@ -22,7 +22,8 @@ import { anthropicTransport } from '../llm/transport.js';
 import { firestoreUsageStore } from '../llm/usage-store.js';
 import { addFactHandler } from './addFact.js';
 import { parseCvHandler } from './parseCv.js';
-import { firestoreProfileStore } from './store.js';
+import { resetProfileHandler } from './reset.js';
+import { bucketFileDeleter, firestoreProfileStore, firestoreResetStore } from './store.js';
 
 const anthropicApiKey = defineSecret(ANTHROPIC_SECRET_NAME);
 
@@ -52,16 +53,18 @@ async function readFile(path: string): Promise<Uint8Array | null> {
   return new Uint8Array(contents);
 }
 
-const baseOptions: CallableOptions = {
+const ownerOptions: CallableOptions = {
   region: REGION, // also set globally; stated here so a callable can never land elsewhere
   enforceAppCheck: !inEmulator,
   consumeAppCheckToken: !inEmulator,
-  secrets: [anthropicApiKey],
   memory: CALLABLE.memory,
 };
 
+/** Only callables that call the model mount the Anthropic key. */
+const llmOptions: CallableOptions = { ...ownerOptions, secrets: [anthropicApiKey] };
+
 export const parseCv = onCall(
-  { ...baseOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.parseCv },
+  { ...llmOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.parseCv },
   safeHandler('parseCv', async (request) => {
     const config = await requireOwner(request);
     return parseCvHandler(request.data, {
@@ -75,12 +78,24 @@ export const parseCv = onCall(
 );
 
 export const addFact = onCall(
-  { ...baseOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.addFact },
+  { ...llmOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.addFact },
   safeHandler('addFact', async (request) => {
     const config = await requireOwner(request);
     return addFactHandler(request.data, {
       store: firestoreProfileStore(db()),
       llm: llmFor(config),
+      now: () => new Date(),
+    });
+  }),
+);
+
+export const resetProfile = onCall(
+  { ...ownerOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.resetProfile },
+  safeHandler('resetProfile', async (request) => {
+    await requireOwner(request);
+    return resetProfileHandler(request.data, {
+      store: firestoreResetStore(db()),
+      deleteFiles: bucketFileDeleter(bucket()),
       now: () => new Date(),
     });
   }),

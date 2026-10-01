@@ -2,7 +2,7 @@ import { CALLABLE_TIMEOUT_SECONDS } from '@hireframe/shared';
 import { httpsCallable } from 'firebase/functions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { addFact, parseCv } from './profile';
+import { addFact, parseCv, resetProfile } from './profile';
 
 vi.mock('firebase/functions', () => ({
   httpsCallable: vi.fn(() => () => Promise.reject(new Error('not under test'))),
@@ -19,6 +19,7 @@ describe('callable clients', () => {
   it.each([
     ['parseCv', () => parseCv('abcdefghij0123456789')],
     ['addFact', () => addFact('A note')],
+    ['resetProfile', () => resetProfile('RESET')],
   ] as const)(
     '%s waits longer than the server timeout and uses a limited-use App Check token',
     async (name, invoke) => {

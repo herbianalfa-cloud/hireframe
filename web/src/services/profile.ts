@@ -8,6 +8,7 @@ import {
   ParseCvResultSchema,
   PATHS,
   planUploadRemoval,
+  ResetProfileResultSchema,
   ProfileDocumentSchema,
   STORAGE_PATHS,
   type AddFactResult,
@@ -16,6 +17,7 @@ import {
   type FactVersion,
   type ParseCvResult,
   type ProfileDocument,
+  type ResetProfileResult,
   type UploadRemovalPlan,
 } from '@hireframe/shared';
 import {
@@ -256,6 +258,20 @@ export async function addFact(text: string): Promise<AddFactResult> {
   });
   const result = await call({ text });
   return AddFactResultSchema.parse(result.data);
+}
+
+/**
+ * Reset profile (ADR-023): the server hard-deletes every fact, version, upload and file. Never
+ * retried; the caller passes what the owner typed and the server checks it again.
+ */
+export async function resetProfile(confirm: string): Promise<ResetProfileResult> {
+  const functions = await getFunctionsClient();
+  const call = httpsCallable(functions, 'resetProfile', {
+    timeout: clientTimeoutMs('resetProfile'),
+    limitedUseAppCheckTokens: true,
+  });
+  const result = await call({ confirm });
+  return ResetProfileResultSchema.parse(result.data);
 }
 
 /** A user-facing message for a failed callable (HttpsError messages are written for users). */

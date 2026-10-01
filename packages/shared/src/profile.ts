@@ -230,3 +230,21 @@ export const AddFactExtractionSchema = z.object({
   facts: z.array(FactDraftSchema).min(1).max(FACT_LIMITS.factsPerAdd),
 });
 export type AddFactExtraction = z.infer<typeof AddFactExtractionSchema>;
+
+/**
+ * Reset profile (ADR-023): hard-deletes every fact, version, upload document and uploaded file.
+ * The client must send the exact word the owner typed; the server checks it again.
+ */
+export const RESET_CONFIRMATION = 'RESET';
+
+export const ResetProfileInputSchema = z.object({
+  confirm: z.literal(RESET_CONFIRMATION),
+});
+export type ResetProfileInput = z.infer<typeof ResetProfileInputSchema>;
+
+export const ResetProfileResultSchema = z.object({
+  facts: z.int().min(0),
+  documents: z.int().min(0),
+  files: z.int().min(0),
+});
+export type ResetProfileResult = z.infer<typeof ResetProfileResultSchema>;

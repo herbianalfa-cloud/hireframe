@@ -46,6 +46,8 @@ export const PATHS = {
 
 /** Cloud Storage object paths (storage.rules). */
 export const STORAGE_PATHS = {
+  /** Every uploaded CV (Reset profile deletes everything under it). */
+  profileDocumentsPrefix: 'profile/documents/',
   /** Uploaded CV: `profile/documents/{docId}/cv.pdf` or `cv.docx`. */
   profileDocument: (docId: string, kind: 'pdf' | 'docx') => `profile/documents/${docId}/cv.${kind}`,
 } as const;
