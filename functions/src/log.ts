@@ -20,8 +20,10 @@ export type LogEvent =
   | 'parse_cv.started'
   | 'parse_cv.done'
   | 'parse_cv.failed'
+  | 'parse_cv.duplicate'
   | 'add_fact.done'
-  | 'profile.fact_invalid';
+  | 'profile.fact_invalid'
+  | 'profile.reset';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

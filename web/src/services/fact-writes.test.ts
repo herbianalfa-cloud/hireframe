@@ -7,6 +7,7 @@ import {
   buildCriteriaWrite,
   buildFactWrite,
   buildKeepReview,
+  buildUploadRemoval,
 } from './fact-writes';
 
 const CREATED = Timestamp.fromDate(new Date('2026-10-01T09:00:00Z'));
@@ -63,6 +64,24 @@ describe('buildFactWrite', () => {
     expect(write.update).toEqual({ status: 'archived', version: 4, updatedAt: NOW });
   });
 
+  it('sets, then removes, an evidence link', () => {
+    const url = 'https://example.com/portfolio';
+    const set = buildFactWrite(raw, { evidenceUrl: url }, 'edit', NOW);
+    expect(set.update).toEqual({ evidenceUrl: url, version: 4, updatedAt: NOW });
+    expect(set.snapshot.evidenceUrl).toBe(url);
+
+    const linked = { ...raw, evidenceUrl: url };
+    const cleared = buildFactWrite(linked, { evidenceUrl: null }, 'edit', NOW);
+    expect(cleared.update).toEqual({ evidenceUrl: deleteField(), version: 4, updatedAt: NOW });
+    expect(cleared.snapshot).toEqual({ ...raw, version: 4, updatedAt: NOW });
+  });
+
+  it('never removes a required field, even when patched with null', () => {
+    const write = buildFactWrite(raw, { text: null, tags: ['b2b'] }, 'edit', NOW);
+    expect(write.update).toEqual({ tags: ['b2b'], version: 4, updatedAt: NOW });
+    expect(write.snapshot.text).toBe(raw.text);
+  });
+
   it('keeps a pending review on a plain edit', () => {
     const write = buildFactWrite(flagged, { tags: ['b2b'] }, 'edit', NOW);
     expect(write.update).not.toHaveProperty('review');
@@ -113,5 +132,58 @@ describe('buildCriteriaWrite', () => {
 
   it('rejects invalid content before anything is written', () => {
     expect(() => buildCriteriaWrite({ ...CRITERIA_SEED_V1, freshness_days: 0 }, 2, NOW)).toThrow();
+  });
+});
+
+describe('buildUploadRemoval', () => {
+  const rawById = new Map<string, DocumentData>([
+    ['a', { ...raw, version: 1 }],
+    ['b', { ...raw, version: 1 }],
+    ['c', flagged],
+  ]);
+
+  it('archives, drops reviews and marks the document in one batch', () => {
+    const batches = buildUploadRemoval(
+      { archive: ['a', 'b'], dropReviews: ['c'], skippedEdited: 0 },
+      rawById,
+      NOW,
+    );
+    expect(batches).toHaveLength(1);
+    const [batch] = batches;
+    expect(batch?.facts.map(({ factId, write }) => [factId, write.change, write.version])).toEqual([
+      ['a', 'archive', 2],
+      ['b', 'archive', 2],
+      ['c', 'review_kept', 4],
+    ]);
+    expect(batch?.facts[0]?.write.update).toEqual({
+      status: 'archived',
+      version: 2,
+      updatedAt: NOW,
+    });
+    expect(batch?.document).toEqual({ removedAt: NOW, updatedAt: NOW });
+  });
+
+  it('splits large removals and marks the document only in the last batch', () => {
+    const batches = buildUploadRemoval(
+      { archive: ['a', 'b'], dropReviews: ['c'], skippedEdited: 0 },
+      rawById,
+      NOW,
+      2,
+    );
+    expect(batches.map((batch) => batch.facts.length)).toEqual([2, 1]);
+    expect(batches[0]?.document).toBeUndefined();
+    expect(batches[1]?.document).toBeDefined();
+  });
+
+  it('still marks the document when there is nothing to archive', () => {
+    expect(
+      buildUploadRemoval({ archive: [], dropReviews: [], skippedEdited: 2 }, rawById, NOW),
+    ).toEqual([{ facts: [], document: { removedAt: NOW, updatedAt: NOW } }]);
+  });
+
+  it('refuses when a planned fact is not loaded', () => {
+    expect(() =>
+      buildUploadRemoval({ archive: ['zzz'], dropReviews: [], skippedEdited: 0 }, rawById, NOW),
+    ).toThrow(/Reload/);
   });
 });

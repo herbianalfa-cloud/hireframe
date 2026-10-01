@@ -7,6 +7,8 @@ import {
   MAX_CV_BYTES,
   ParseCvResultSchema,
   PATHS,
+  planUploadRemoval,
+  ResetProfileResultSchema,
   ProfileDocumentSchema,
   STORAGE_PATHS,
   type AddFactResult,
@@ -15,6 +17,8 @@ import {
   type FactVersion,
   type ParseCvResult,
   type ProfileDocument,
+  type ResetProfileResult,
+  type UploadRemovalPlan,
 } from '@hireframe/shared';
 import {
   collection,
@@ -34,6 +38,7 @@ import {
   buildAcceptReview,
   buildFactWrite,
   buildKeepReview,
+  buildUploadRemoval,
   type FactPatch,
   type FactWrite,
 } from './fact-writes';
@@ -255,6 +260,20 @@ export async function addFact(text: string): Promise<AddFactResult> {
   return AddFactResultSchema.parse(result.data);
 }
 
+/**
+ * Reset profile (ADR-023): the server hard-deletes every fact, version, upload and file. Never
+ * retried; the caller passes what the owner typed and the server checks it again.
+ */
+export async function resetProfile(confirm: string): Promise<ResetProfileResult> {
+  const functions = await getFunctionsClient();
+  const call = httpsCallable(functions, 'resetProfile', {
+    timeout: clientTimeoutMs('resetProfile'),
+    limitedUseAppCheckTokens: true,
+  });
+  const result = await call({ confirm });
+  return ResetProfileResultSchema.parse(result.data);
+}
+
 /** A user-facing message for a failed callable (HttpsError messages are written for users). */
 export function callableErrorMessage(error: unknown): string {
   const code = errorCode(error);
@@ -267,20 +286,35 @@ export function callableErrorMessage(error: unknown): string {
   return 'Something went wrong. Try again.';
 }
 
-async function commitFactWrite(factId: string, write: FactWrite): Promise<void> {
-  const { db } = await getFirebase();
-  const batch = writeBatch(db);
+type Batch = ReturnType<typeof writeBatch>;
+
+function addFactWrite(
+  db: Parameters<typeof writeBatch>[0],
+  batch: Batch,
+  factId: string,
+  write: FactWrite,
+): void {
   batch.update(doc(db, PATHS.fact(factId)), write.update);
   batch.set(doc(db, PATHS.factVersion(factId, write.version)), {
     snapshot: write.snapshot,
     change: write.change,
     at: serverTimestamp(),
   });
-  await withRetry(() => withTimeout(batch.commit(), WRITE_TIMEOUT_MS, 'fact write'), {
+}
+
+function commitBatch(batch: Batch, label: string): Promise<void> {
+  return withRetry(() => withTimeout(batch.commit(), WRITE_TIMEOUT_MS, label), {
     label: 'profile.fact_write',
     // A committed-but-timed-out batch must not be sent twice: only retry clear rejections.
     isRetryable: (error) => errorCode(error) === 'unavailable',
   });
+}
+
+async function commitFactWrite(factId: string, write: FactWrite): Promise<void> {
+  const { db } = await getFirebase();
+  const batch = writeBatch(db);
+  addFactWrite(db, batch, factId, write);
+  await commitBatch(batch, 'fact write');
 }
 
 export function updateFact(view: FactView, patch: FactPatch): Promise<void> {
@@ -307,6 +341,27 @@ export function acceptReview(view: FactView): Promise<void> {
 
 export function keepReview(view: FactView): Promise<void> {
   return commitFactWrite(view.id, buildKeepReview(view.raw, serverTimestamp()));
+}
+
+/**
+ * "Remove upload" (ADR-023): archive the upload's untouched facts, drop its proposed changes and
+ * mark the document removed, as versioned client batches (the document mark goes last). Safe to
+ * retry after a partial failure: facts already archived are not planned again.
+ */
+export async function removeUpload(
+  docId: string,
+  facts: readonly FactView[],
+): Promise<UploadRemovalPlan> {
+  const plan = planUploadRemoval(facts, docId);
+  const rawById = new Map(facts.map((view) => [view.id, view.raw]));
+  const { db } = await getFirebase();
+  for (const removal of buildUploadRemoval(plan, rawById, serverTimestamp())) {
+    const batch = writeBatch(db);
+    for (const { factId, write } of removal.facts) addFactWrite(db, batch, factId, write);
+    if (removal.document) batch.update(doc(db, PATHS.document(docId)), removal.document);
+    await commitBatch(batch, 'upload removal');
+  }
+  return plan;
 }
 
 /** Messages for failed edits. `permission-denied` usually means the fact changed elsewhere. */

@@ -3,6 +3,7 @@
  * The owner may update a fact only as a new version: bump `version`, set `updatedAt` to the
  * server time and write the matching snapshot in the same batch. `review` can only be removed
  * (accept or keep a proposed change). Facts are never created or deleted from the client.
+ * "Remove upload" (ADR-023) may only stamp `removedAt` on a finished upload document.
  */
 import { readFileSync } from 'node:fs';
 
@@ -26,12 +27,13 @@ import {
   writeBatch,
   type DocumentData,
 } from 'firebase/firestore';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   buildAcceptReview,
   buildFactWrite,
   buildKeepReview,
+  buildUploadRemoval,
   type FactWrite,
 } from '../../web/src/services/fact-writes.ts';
 
@@ -97,15 +99,17 @@ function dbFor(who: 'anon' | 'stranger' | 'owner'): TestFirestore {
   return env.authenticatedContext(who === 'owner' ? OWNER : STRANGER).firestore();
 }
 
-async function seed(options: { withOwner?: boolean; withReview?: boolean } = {}): Promise<void> {
-  const { withOwner = true, withReview = false } = options;
+async function seed(
+  options: { withOwner?: boolean; withReview?: boolean; extra?: DocumentData } = {},
+): Promise<void> {
+  const { withOwner = true, withReview = false, extra = {} } = options;
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
     if (withOwner) await setDoc(doc(db, DOCS.appConfig), { ownerUid: OWNER, schemaVersion: 1 });
-    await setDoc(doc(db, PATHS.fact(FACT_ID)), seededFact(withReview));
+    await setDoc(doc(db, PATHS.fact(FACT_ID)), { ...seededFact(withReview), ...extra });
     await setDoc(doc(db, PATHS.factVersion(FACT_ID, 1)), {
-      snapshot: seededFact(false),
+      snapshot: { ...seededFact(false), ...extra },
       change: 'created',
       at: CREATED,
     });
@@ -287,6 +291,65 @@ describe('fact edits (owner)', () => {
   });
 });
 
+describe('evidence links (ADR-024)', () => {
+  const LINK = 'https://example.com/portfolio';
+
+  beforeEach(async () => {
+    await seed();
+  });
+
+  it('allows the owner to add a link as a new version', async () => {
+    await assertSucceeds(edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump } }));
+  });
+
+  it('allows changing and removing a link', async () => {
+    await seed({ extra: { evidenceUrl: LINK } });
+    const changed = 'https://example.org/certificate';
+    await assertSucceeds(
+      edit(dbFor('owner'), {
+        factPatch: { evidenceUrl: changed, ...bump },
+        snapshot: factAfter({ evidenceUrl: changed }),
+      }),
+    );
+    await seed({ extra: { evidenceUrl: LINK } });
+    await assertSucceeds(
+      edit(dbFor('owner'), {
+        factPatch: { evidenceUrl: deleteField(), ...bump },
+        snapshot: factAfter({}),
+      }),
+    );
+  });
+
+  it.each([
+    ['http', 'http://example.com'],
+    ['a javascript: link', 'javascript:alert(1)'],
+    ['a link with whitespace', 'https://example.com/a b'],
+    ['a bare scheme', 'https://'],
+    ['an oversized link', `https://example.com/${'a'.repeat(481)}`],
+    ['a non-string', 42],
+  ])('denies %s', async (_name, evidenceUrl) => {
+    await assertFails(edit(dbFor('owner'), { factPatch: { evidenceUrl, ...bump } }));
+  });
+
+  it('denies a link without the snapshot, or with a snapshot that lacks it', async () => {
+    await assertFails(
+      edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump }, withSnapshot: false }),
+    );
+    await assertFails(
+      edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump }, snapshot: factAfter({}) }),
+    );
+  });
+
+  it.each(['anon', 'stranger'] as const)('denies %s', async (who) => {
+    await assertFails(edit(dbFor(who), { factPatch: { evidenceUrl: LINK, ...bump } }));
+  });
+
+  it('denies the owner before config/app exists (fails closed)', async () => {
+    await seed({ withOwner: false });
+    await assertFails(edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump } }));
+  });
+});
+
 describe('accepting or keeping a flagged change', () => {
   beforeEach(async () => {
     await seed({ withReview: true });
@@ -431,6 +494,19 @@ describe('batches built by web/src/services/fact-writes.ts', () => {
     );
   });
 
+  it('passes the rules for adding, then removing, an evidence link', async () => {
+    await seed();
+    const link = 'https://example.com/portfolio';
+    await assertSucceeds(
+      commit((raw) => buildFactWrite(raw, { evidenceUrl: link }, 'edit', serverTimestamp())),
+    );
+    await assertSucceeds(
+      commit((raw) => buildFactWrite(raw, { evidenceUrl: null }, 'edit', serverTimestamp())),
+    );
+    const after = await getDoc(doc(dbFor('owner'), PATHS.fact(FACT_ID)));
+    expect(after.data()).not.toHaveProperty('evidenceUrl');
+  });
+
   it('passes the rules for accepting a proposed change', async () => {
     await seed({ withReview: true });
     await assertSucceeds(commit((raw) => buildAcceptReview(raw, serverTimestamp())));
@@ -439,5 +515,152 @@ describe('batches built by web/src/services/fact-writes.ts', () => {
   it('passes the rules for keeping the current fact', async () => {
     await seed({ withReview: true });
     await assertSucceeds(commit((raw) => buildKeepReview(raw, serverTimestamp())));
+  });
+});
+
+describe('removing an upload (ADR-023)', () => {
+  const DOC_ID = 'abcdefghij0123456789';
+  const OTHER_FACT = 'fact-2';
+  const document = (overrides: DocumentData = {}): DocumentData => ({
+    kind: 'pdf',
+    storagePath: `profile/documents/${DOC_ID}/cv.pdf`,
+    status: 'parsed',
+    sha256: 'a'.repeat(64),
+    summary: { added: 1 },
+    createdAt: CREATED,
+    updatedAt: CREATED,
+    schemaVersion: 1,
+    ...overrides,
+  });
+  const mark = { removedAt: serverTimestamp(), updatedAt: serverTimestamp() };
+
+  /** fact-1 was added by the upload; fact-2 is older and has a proposed change from it. */
+  async function seedUpload(overrides: DocumentData = {}, withOwner = true): Promise<void> {
+    await seed({ withOwner });
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, PATHS.document(DOC_ID)), document(overrides));
+      const older = {
+        ...seededFact(true),
+        sourceDocId: 'zyxwvutsrq9876543210',
+        version: 3,
+      };
+      await setDoc(doc(db, PATHS.fact(OTHER_FACT)), older);
+    });
+  }
+
+  const docRef = (db: TestFirestore, path = PATHS.document(DOC_ID)) => doc(db, path);
+
+  it.each(['parsed', 'failed'])('allows the owner to mark a %s upload removed', async (status) => {
+    await seedUpload({ status });
+    await assertSucceeds(updateDoc(docRef(dbFor('owner')), mark));
+  });
+
+  it('denies an upload that is still being read', async () => {
+    await seedUpload({ status: 'parsing' });
+    await assertFails(updateDoc(docRef(dbFor('owner')), mark));
+  });
+
+  it('denies removing twice', async () => {
+    await seedUpload({ removedAt: CREATED });
+    await assertFails(updateDoc(docRef(dbFor('owner')), mark));
+  });
+
+  it('denies a client-chosen time or a mark without updatedAt', async () => {
+    await seedUpload();
+    const at = Timestamp.fromDate(new Date('2026-10-02T09:00:00Z'));
+    await assertFails(updateDoc(docRef(dbFor('owner')), { removedAt: at, updatedAt: at }));
+    await assertFails(updateDoc(docRef(dbFor('owner')), { removedAt: serverTimestamp() }));
+  });
+
+  it.each([
+    ['status', { status: 'failed' }],
+    ['summary', { summary: { added: 0 } }],
+    ['sha256', { sha256: 'b'.repeat(64) }],
+    ['duplicateOf', { duplicateOf: 'zyxwvutsrq9876543210' }],
+    ['storagePath', { storagePath: 'elsewhere' }],
+  ])('denies also changing %s', async (_name, patch) => {
+    await seedUpload();
+    await assertFails(updateDoc(docRef(dbFor('owner')), { ...mark, ...patch }));
+  });
+
+  it('denies changing a document without removing it', async () => {
+    await seedUpload();
+    await assertFails(updateDoc(docRef(dbFor('owner')), { status: 'failed' }));
+  });
+
+  it('denies creating or deleting a document', async () => {
+    await seedUpload();
+    const db = dbFor('owner');
+    await assertFails(
+      setDoc(docRef(db, PATHS.document('zyxwvutsrq9876543210')), document({ ...mark })),
+    );
+    await assertFails(deleteDoc(docRef(db)));
+  });
+
+  it('denies documents outside profile/main', async () => {
+    await seedUpload();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `profile/other/documents/${DOC_ID}`), document());
+    });
+    await assertFails(updateDoc(docRef(dbFor('owner'), `profile/other/documents/${DOC_ID}`), mark));
+  });
+
+  it.each(['anon', 'stranger'] as const)('denies %s', async (who) => {
+    await seedUpload();
+    await assertFails(updateDoc(docRef(dbFor(who)), mark));
+  });
+
+  it('denies the owner before config/app exists (fails closed)', async () => {
+    await seedUpload({}, false);
+    await assertFails(updateDoc(docRef(dbFor('owner')), mark));
+  });
+
+  describe('batches built by buildUploadRemoval', () => {
+    /** Builds the removal from the stored facts; the returned function commits it. */
+    async function buildRemoval(db: TestFirestore): Promise<() => Promise<void>> {
+      const rawById = new Map<string, DocumentData>();
+      for (const id of [FACT_ID, OTHER_FACT]) {
+        rawById.set(id, (await getDoc(doc(db, PATHS.fact(id)))).data() ?? {});
+      }
+      const plan = { archive: [FACT_ID], dropReviews: [OTHER_FACT], skippedEdited: 0 };
+      const removals = buildUploadRemoval(plan, rawById, serverTimestamp());
+      return async () => {
+        for (const removal of removals) {
+          const batch = writeBatch(db);
+          for (const { factId, write } of removal.facts) {
+            batch.update(doc(db, PATHS.fact(factId)), write.update);
+            batch.set(doc(db, PATHS.factVersion(factId, write.version)), {
+              snapshot: write.snapshot,
+              change: write.change,
+              at: serverTimestamp(),
+            });
+          }
+          if (removal.document) batch.update(docRef(db), removal.document);
+          await batch.commit();
+        }
+      };
+    }
+
+    it('archive + drop proposed change + document mark pass the rules', async () => {
+      await seedUpload();
+      const db = dbFor('owner');
+      await assertSucceeds((await buildRemoval(db))());
+      const [added, older] = await Promise.all([
+        getDoc(doc(db, PATHS.fact(FACT_ID))),
+        getDoc(doc(db, PATHS.fact(OTHER_FACT))),
+      ]);
+      expect(added.data()).toMatchObject({ status: 'archived', version: 2 });
+      expect(older.data()).toMatchObject({ status: 'active', version: 4 });
+      expect(older.data()).not.toHaveProperty('review');
+    });
+
+    it('replaying the same removal is denied', async () => {
+      await seedUpload();
+      const db = dbFor('owner');
+      const commit = await buildRemoval(db);
+      await commit();
+      await assertFails(commit());
+    });
   });
 });

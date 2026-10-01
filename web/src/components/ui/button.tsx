@@ -13,6 +13,7 @@ const buttonVariants = cva(
         default: 'bg-accent text-accent-foreground hover:bg-accent/90',
         secondary: 'border bg-surface-raised text-foreground hover:bg-surface-raised/70',
         ghost: 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
+        danger: 'border border-danger/50 bg-danger/10 text-danger hover:bg-danger/20',
       },
       size: {
         default: 'h-11 px-4',

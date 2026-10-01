@@ -2,6 +2,7 @@ import { FACT_TYPES } from '@hireframe/shared';
 import {
   Archive,
   ArchiveRestore,
+  ExternalLink,
   History,
   Pencil,
   TriangleAlert,
@@ -84,6 +85,18 @@ function FactRow({
         <summary className="flex min-h-11 cursor-pointer items-center">Evidence</summary>
         <blockquote className="border-l-2 pl-3 pb-2">{fact.evidence}</blockquote>
       </details>
+      {fact.evidenceUrl ? (
+        <a
+          href={fact.evidenceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-11 items-center gap-1.5 text-xs text-accent underline-offset-4 hover:underline"
+        >
+          <ExternalLink aria-hidden="true" className="size-3.5 shrink-0" />
+          Evidence link
+          <span className="sr-only">(opens in a new tab)</span>
+        </a>
+      ) : null}
       <div className="mt-1 flex flex-wrap gap-2">
         <Button
           variant="secondary"

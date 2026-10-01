@@ -1,4 +1,5 @@
 import { AddFactForm } from './AddFactForm';
+import { DangerZone } from './DangerZone';
 import { FactList } from './FactList';
 import { useDocuments, useFacts } from './hooks';
 import { ReviewSection } from './ReviewSection';
@@ -26,10 +27,11 @@ export function ProfilePage() {
         </p>
       ) : null}
       <div className="mt-6 space-y-6">
-        <UploadCard documents={documents} />
+        <UploadCard documents={documents} facts={facts} />
         {facts.status === 'ready' ? <ReviewSection facts={facts.data} /> : null}
         <AddFactForm />
         <FactList state={facts} />
+        <DangerZone />
       </div>
     </section>
   );

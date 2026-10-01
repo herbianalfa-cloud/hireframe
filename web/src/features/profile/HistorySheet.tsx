@@ -34,6 +34,11 @@ function Versions({ factId }: { factId: string }) {
             v{version} · {CHANGE_LABELS[entry.change]} · {formatDate(entry.at)}
           </p>
           <p className="mt-1 text-sm">{entry.snapshot.text}</p>
+          {entry.snapshot.evidenceUrl ? (
+            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+              {entry.snapshot.evidenceUrl}
+            </p>
+          ) : null}
         </li>
       ))}
     </ol>

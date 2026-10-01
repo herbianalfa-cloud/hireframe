@@ -5,7 +5,8 @@ rules_version = '2';
 // - `config/*` is never writable from a client, so no signed-in user can claim ownership.
 // - Client writes are opened one milestone at a time, each with rules tests (tests/rules/).
 //   M2 opens fact edits with versioned snapshots (ADR-018) and criteria versions (ADR-019);
-//   everything else, including every write by the Admin SDK paths, stays client-deny.
+//   M2.1 lets the owner mark an upload removed (ADR-023). Everything else, including every
+//   write by the Admin SDK paths, stays client-deny.
 //   Unknown paths fall through to the default deny.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -31,7 +32,11 @@ service cloud.firestore {
         && data.tags is list && data.tags.size() <= 20
         && data.lanes is list && data.lanes.size() <= 4
         && data.lanes.hasOnly(['primary', 'secondary', 'opportunistic', 'wildcard'])
-        && data.status in ['active', 'archived'];
+        && data.status in ['active', 'archived']
+        // Optional owner-set link (ADR-024): https only, no whitespace, mirrors EvidenceUrlSchema.
+        && (!('evidenceUrl' in data)
+            || (data.evidenceUrl is string && data.evidenceUrl.size() <= 500
+                && data.evidenceUrl.matches('^https://\\S+$')));
     }
 
     function factPath(profileId, factId) {
@@ -45,8 +50,8 @@ service cloud.firestore {
       let before = resource.data;
       let after = request.resource.data;
       let changed = after.diff(before).affectedKeys();
-      return changed.hasOnly(['type', 'text', 'evidence', 'dates', 'tags', 'lanes', 'status',
-                              'review', 'version', 'updatedAt'])
+      return changed.hasOnly(['type', 'text', 'evidence', 'evidenceUrl', 'dates', 'tags', 'lanes',
+                              'status', 'review', 'version', 'updatedAt'])
         && after.version == before.version + 1
         && after.updatedAt == request.time
         && validFactContent(after)
@@ -69,6 +74,20 @@ service cloud.firestore {
         // Removing a review is exactly what accepting or keeping a proposed change means.
         && (('review' in factNow && !('review' in factAfter))
             == (data.change in ['review_accepted', 'review_kept']));
+    }
+
+    // "Remove upload" (ADR-023): the owner may only stamp `removedAt` (and `updatedAt`) with the
+    // server time, once, on an upload that finished. Its facts are archived by versioned fact
+    // edits in the same or earlier batches; nothing else about the document can change.
+    function validDocumentRemoval() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return after.diff(before).affectedKeys().hasOnly(['removedAt', 'updatedAt'])
+        && after.diff(before).affectedKeys().hasAll(['removedAt', 'updatedAt'])
+        && !('removedAt' in before)
+        && before.status in ['parsed', 'failed']
+        && after.removedAt == request.time
+        && after.updatedAt == request.time;
     }
 
     // ---- Criteria (packages/shared/src/criteria.ts) ----
@@ -161,6 +180,7 @@ service cloud.firestore {
 
       match /documents/{docId} {
         allow read: if isOwner();
+        allow update: if isOwner() && profileId == 'main' && validDocumentRemoval();
       }
     }
 

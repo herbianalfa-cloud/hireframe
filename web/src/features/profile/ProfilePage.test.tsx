@@ -10,6 +10,8 @@ import {
   cvKindOf,
   keepReview,
   parseCv,
+  removeUpload,
+  resetProfile,
   unarchiveFact,
   updateFact,
   uploadCv,
@@ -29,6 +31,8 @@ vi.mock('@/services/profile', () => ({
   cvKindOf: vi.fn(),
   uploadCv: vi.fn(),
   parseCv: vi.fn(),
+  removeUpload: vi.fn(),
+  resetProfile: vi.fn(),
   addFact: vi.fn(),
   updateFact: vi.fn(),
   archiveFact: vi.fn(),
@@ -298,6 +302,45 @@ describe('Edit dialog', () => {
     expect(updateFact).not.toHaveBeenCalled();
   });
 
+  it('adds an https evidence link and rejects anything else', async () => {
+    const user = userEvent.setup();
+    const view = makeFact('a');
+    givenFacts([view]);
+    vi.mocked(updateFact).mockResolvedValue();
+    render(<ProfilePage />);
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit fact' });
+    const link = within(dialog).getByLabelText('Evidence link');
+    await user.type(link, 'http://example.com');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(within(dialog).getByText(/Enter a full https:\/\/ link/)).toBeDefined();
+    expect(updateFact).not.toHaveBeenCalled();
+
+    await user.clear(link);
+    await user.type(link, 'https://example.com/portfolio');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(updateFact).toHaveBeenCalledWith(view, { evidenceUrl: 'https://example.com/portfolio' });
+  });
+
+  it('removes an evidence link when the field is cleared', async () => {
+    const user = userEvent.setup();
+    const view = makeFact('a', { evidenceUrl: 'https://example.com/portfolio' });
+    givenFacts([view]);
+    vi.mocked(updateFact).mockResolvedValue();
+    render(<ProfilePage />);
+
+    const card = screen.getByRole('link', { name: /Evidence link/ });
+    expect(card.getAttribute('href')).toBe('https://example.com/portfolio');
+    expect(card.getAttribute('rel')).toBe('noopener noreferrer');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit fact' });
+    await user.clear(within(dialog).getByLabelText('Evidence link'));
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(updateFact).toHaveBeenCalledWith(view, { evidenceUrl: null });
+  });
+
   it('shows the write error and stays open when saving fails', async () => {
     const user = userEvent.setup();
     givenFacts([makeFact('a')]);
@@ -451,5 +494,196 @@ describe('Upload CV', () => {
     expect(screen.getByText('Timed out')).toBeDefined();
     expect(screen.getByText(/Upload it again to retry/)).toBeDefined();
     expect(screen.queryByText('Reading')).toBeNull();
+  });
+});
+
+function parsedDocument(
+  id: string,
+  overrides: Partial<DocumentView['document']> = {},
+): DocumentView {
+  return {
+    id,
+    document: {
+      kind: 'pdf',
+      storagePath: 'x',
+      status: 'parsed',
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+      ...overrides,
+    },
+  };
+}
+
+describe('Remove upload', () => {
+  const flagged = makeFact('older', {
+    sourceDocId: 'doc-0',
+    version: 2,
+    review: {
+      kind: 'changed',
+      proposed: {
+        type: 'skill',
+        text: 'Builds dashboards in SQL and dbt',
+        evidence: 'x',
+        dates: {},
+        tags: [],
+        lanes: [],
+      },
+      docId: 'doc-1',
+      at: NOW,
+    },
+  });
+
+  it('previews the counts, then archives and reports what it did', async () => {
+    const user = userEvent.setup();
+    const facts = [makeFact('a'), makeFact('b'), makeFact('edited', { version: 3 }), flagged];
+    givenFacts(facts);
+    givenDocuments([parsedDocument('doc-1')]);
+    vi.mocked(removeUpload).mockResolvedValue({
+      archive: ['a', 'b'],
+      dropReviews: ['older'],
+      skippedEdited: 1,
+    });
+    render(<ProfilePage />);
+
+    await user.click(screen.getByRole('button', { name: /Remove upload from/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove this upload?' });
+    expect(
+      within(dialog).getByText(
+        'Archives 2 facts and drops 1 proposed change. Keeps 1 fact you edited.',
+      ),
+    ).toBeDefined();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove upload' }));
+
+    expect(removeUpload).toHaveBeenCalledWith('doc-1', facts);
+    expect(
+      await screen.findByText(
+        'Upload removed. Archived 2 facts and dropped 1 proposed change. Kept 1 fact you edited.',
+      ),
+    ).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows the write error and stays open when removing fails', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    givenDocuments([parsedDocument('doc-1')]);
+    vi.mocked(removeUpload).mockRejectedValue(new Error('offline'));
+    render(<ProfilePage />);
+
+    await user.click(screen.getByRole('button', { name: /Remove upload from/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove this upload?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Remove upload' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toContain("Couldn't save");
+  });
+
+  it('marks a removed upload and offers no second removal', () => {
+    givenFacts([]);
+    givenDocuments([parsedDocument('doc-1', { removedAt: NOW })]);
+    render(<ProfilePage />);
+
+    expect(screen.getByText('Removed')).toBeDefined();
+    expect(screen.queryByRole('button', { name: /Remove upload/ })).toBeNull();
+  });
+
+  it('offers nothing to remove while an upload is still being read', () => {
+    givenFacts([]);
+    givenDocuments([parsedDocument('doc-1', { status: 'parsing', updatedAt: new Date() })]);
+    render(<ProfilePage />);
+    expect(screen.queryByRole('button', { name: /Remove upload/ })).toBeNull();
+  });
+});
+
+describe('Identical uploads', () => {
+  it('says a re-uploaded identical file was not read again', async () => {
+    const user = userEvent.setup();
+    givenFacts([]);
+    vi.mocked(uploadCv).mockResolvedValue('doc2');
+    vi.mocked(parseCv).mockResolvedValue({
+      docId: 'doc2',
+      duplicateOf: 'doc1',
+      summary: {
+        factsExtracted: 0,
+        added: 0,
+        unchanged: 0,
+        flagged: 0,
+        skippedArchived: 0,
+        duplicatesInCv: 0,
+        unverified: 0,
+        missingFromCv: 0,
+      },
+    });
+    render(<ProfilePage />);
+
+    await user.upload(
+      screen.getByLabelText('CV file (PDF or Word)'),
+      new File(['fake cv'], 'alex-example.pdf', { type: 'application/pdf' }),
+    );
+    expect(await screen.findByText(/same file as an earlier upload/)).toBeDefined();
+  });
+
+  it('names the original upload in the list', () => {
+    givenFacts([]);
+    givenDocuments([
+      parsedDocument('doc-2', { duplicateOf: 'doc-1aaaaaaaaaaaaaaa' }),
+      parsedDocument('doc-1aaaaaaaaaaaaaaa'),
+    ]);
+    render(<ProfilePage />);
+    expect(screen.getByText(/^Same file as the upload from .+\. Nothing changed\.$/)).toBeDefined();
+    // Only the original can be removed; the copy changed nothing.
+    expect(screen.getAllByRole('button', { name: /Remove upload from/ })).toHaveLength(1);
+  });
+});
+
+describe('Danger zone', () => {
+  async function openReset(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Reset profile' }));
+    return screen.getByRole('dialog', { name: 'Reset your profile?' });
+  }
+
+  it('enables the reset only when RESET is typed exactly', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    render(<ProfilePage />);
+
+    const dialog = await openReset(user);
+    const input = within(dialog).getByLabelText('Type RESET to confirm');
+    const submit = within(dialog).getByRole('button', { name: 'Delete everything' });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    await user.type(input, 'reset');
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    await user.clear(input);
+    await user.type(input, 'RESET');
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('resets and reports what was deleted', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    vi.mocked(resetProfile).mockResolvedValue({ facts: 141, documents: 2, files: 1 });
+    render(<ProfilePage />);
+
+    const dialog = await openReset(user);
+    await user.type(within(dialog).getByLabelText('Type RESET to confirm'), 'RESET{Enter}');
+
+    expect(resetProfile).toHaveBeenCalledWith('RESET');
+    expect(
+      await screen.findByText('Profile reset. Deleted 141 facts, 2 uploads and 1 file.'),
+    ).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps the dialog open with the server message when the reset fails', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    vi.mocked(resetProfile).mockRejectedValue(new Error('busy'));
+    render(<ProfilePage />);
+
+    const dialog = await openReset(user);
+    await user.type(within(dialog).getByLabelText('Type RESET to confirm'), 'RESET');
+    await user.click(within(dialog).getByRole('button', { name: 'Delete everything' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toContain(
+      'Something went wrong',
+    );
   });
 });

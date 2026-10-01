@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   countCompound,
   CvExtractionSchema,
@@ -48,6 +50,17 @@ const USER_ERRORS: Record<Exclude<ParseErrorCode, 'internal'>, [FunctionsErrorCo
   model_failed: ['unavailable', "The CV couldn't be read right now. Try again in a few minutes."],
 };
 
+const EMPTY_SUMMARY: ParseSummary = {
+  factsExtracted: 0,
+  added: 0,
+  unchanged: 0,
+  flagged: 0,
+  skippedArchived: 0,
+  duplicatesInCv: 0,
+  unverified: 0,
+  missingFromCv: 0,
+};
+
 class ParseFailure extends Error {
   override name = 'ParseFailure';
   readonly code: ParseErrorCode;
@@ -79,14 +92,27 @@ export async function parseCvHandler(data: unknown, deps: ParseCvDeps): Promise<
 
   const upload = await findUpload(docId, deps.readFile);
   if (!upload) throw new HttpsError(...USER_ERRORS.file_missing);
+  const sha256 = createHash('sha256').update(upload.bytes).digest('hex');
 
-  await deps.store.beginParse(docId, upload.kind, upload.path, deps.now());
+  await deps.store.beginParse(
+    docId,
+    { kind: upload.kind, storagePath: upload.path, sha256 },
+    deps.now(),
+  );
   log.info('parse_cv.started', { docId, kind: upload.kind, bytes: upload.bytes.length });
 
   try {
     if (upload.bytes.length > MAX_CV_BYTES) throw new ParseFailure('file_too_large');
     // The first bytes must match the extension; the client's content type isn't trusted.
     if (detectKind(upload.bytes) !== upload.kind) throw new ParseFailure('file_type');
+
+    // The same file read again would only cost money and reword facts (ADR-022).
+    const duplicateOf = await deps.store.findParsedDuplicate(sha256, docId);
+    if (duplicateOf) {
+      await deps.store.markDuplicate(docId, duplicateOf, deps.now());
+      log.info('parse_cv.duplicate', { docId, duplicateOf });
+      return { docId, summary: EMPTY_SUMMARY, duplicateOf };
+    }
 
     const text = await deps.extract(upload.bytes, upload.kind);
     if (text.replace(/\s+/g, '').length < MIN_CV_TEXT_CHARS) throw new ParseFailure('no_text');

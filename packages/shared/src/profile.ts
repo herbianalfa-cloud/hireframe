@@ -42,6 +42,7 @@ export const FACT_LIMITS = {
   /** Model drafts: short, because each draft is one claim. */
   draftText: 300,
   evidence: 1000,
+  evidenceUrl: 500,
   tags: 20,
   tag: 40,
   /** One parse writes each fact plus its v1 snapshot, so 200 facts stay under 500 batch writes. */
@@ -84,6 +85,15 @@ export const FactReviewSchema = z.object({
 });
 export type FactReview = z.infer<typeof FactReviewSchema>;
 
+/**
+ * A link to outside evidence (a portfolio page, a certificate). Owner-set only (ADR-024): it is
+ * not part of FactContent, so a model drafting from CV or note text can never set one.
+ */
+export const EvidenceUrlSchema = z
+  .url({ protocol: /^https$/ })
+  .max(FACT_LIMITS.evidenceUrl)
+  .regex(/^https:\/\/\S+$/);
+
 export const FactSchema = FactContentSchema.extend({
   source: z.enum(FACT_SOURCES),
   sourceDocId: z.string().min(1).exactOptional(),
@@ -92,6 +102,7 @@ export const FactSchema = FactContentSchema.extend({
   review: FactReviewSchema.exactOptional(),
   /** False when `evidence` is not a verbatim quote of the source text (shown in the UI). */
   evidenceVerified: z.boolean(),
+  evidenceUrl: EvidenceUrlSchema.exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),
@@ -141,15 +152,30 @@ export const PARSE_ERROR_CODES = [
 ] as const;
 export type ParseErrorCode = (typeof PARSE_ERROR_CODES)[number];
 
+/** Firestore auto-IDs: 20 alphanumeric characters. Also enforced by storage.rules. */
+export const DOC_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
+
+/** Lower-case hex SHA-256 of an uploaded file. */
+export const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
 export const ProfileDocumentSchema = z.object({
   kind: z.enum(CV_KINDS),
   storagePath: z.string().min(1),
   status: z.enum(['parsing', 'parsed', 'failed']),
+  /** Set by parseCv from the uploaded bytes (ADR-022). Missing on uploads before v0.2.2. */
+  sha256: z.string().regex(SHA256_PATTERN).exactOptional(),
   errorCode: z.enum(PARSE_ERROR_CODES).exactOptional(),
   summary: ParseSummarySchema.exactOptional(),
+  /**
+   * The earlier parsed upload with the same bytes. Set instead of `summary`: the file was not
+   * read again and no fact changed (ADR-022).
+   */
+  duplicateOf: z.string().regex(DOC_ID_PATTERN).exactOptional(),
   model: z.string().min(1).exactOptional(),
   promptVersion: z.string().min(1).exactOptional(),
   costPence: z.number().min(0).exactOptional(),
+  /** Set by "Remove upload" (ADR-023): its untouched facts were archived. The file stays. */
+  removedAt: z.date().exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),
@@ -169,9 +195,6 @@ export function isParseStalled(document: ProfileDocument, now: Date): boolean {
   );
 }
 
-/** Firestore auto-IDs: 20 alphanumeric characters. Also enforced by storage.rules. */
-export const DOC_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
-
 export const ParseCvInputSchema = z.object({
   docId: z.string().regex(DOC_ID_PATTERN),
 });
@@ -180,6 +203,8 @@ export type ParseCvInput = z.infer<typeof ParseCvInputSchema>;
 export const ParseCvResultSchema = z.object({
   docId: z.string(),
   summary: ParseSummarySchema,
+  /** Same file as this earlier upload: nothing was read and the summary is all zeros. */
+  duplicateOf: z.string().exactOptional(),
 });
 export type ParseCvResult = z.infer<typeof ParseCvResultSchema>;
 
@@ -205,3 +230,21 @@ export const AddFactExtractionSchema = z.object({
   facts: z.array(FactDraftSchema).min(1).max(FACT_LIMITS.factsPerAdd),
 });
 export type AddFactExtraction = z.infer<typeof AddFactExtractionSchema>;
+
+/**
+ * Reset profile (ADR-023): hard-deletes every fact, version, upload document and uploaded file.
+ * The client must send the exact word the owner typed; the server checks it again.
+ */
+export const RESET_CONFIRMATION = 'RESET';
+
+export const ResetProfileInputSchema = z.object({
+  confirm: z.literal(RESET_CONFIRMATION),
+});
+export type ResetProfileInput = z.infer<typeof ResetProfileInputSchema>;
+
+export const ResetProfileResultSchema = z.object({
+  facts: z.int().min(0),
+  documents: z.int().min(0),
+  files: z.int().min(0),
+});
+export type ResetProfileResult = z.infer<typeof ResetProfileResultSchema>;

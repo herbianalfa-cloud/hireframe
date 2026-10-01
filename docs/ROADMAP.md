@@ -13,7 +13,7 @@ Each milestone = one PR, demoable, docs + CHANGELOG updated.
 | M5 | Dashboard | Today, Jobs, Job detail, System screens; actions + 👍/👎 feedback; responsive; a11y ≥ 95 |
 | M6 | Gmail bridge + Lookup | Apps Script ingest (HMAC), alert parsers (LinkedIn first), Lookup screen incl. LinkedIn ID matching |
 | M7 | Digest + CV tailoring | Morning digest email (explicit in-progress/failed notice if the run isn't done, ADR-009); on-demand CV + cover note (.docx/.pdf) with factId validation |
-| M8 | Hardening | Security checklist done, backups, retention job, load test a 1,000-job run, runbook complete, v1.0.0 tag |
+| M8 | Hardening | Security checklist done, backups, retention job, load test a 1,000-job run, runbook complete, v1.0.0 tag. Functions builds get a dedicated Cloud Build service account; Editor is removed from the default compute account, and the deployer's `serviceAccountUser` on it is dropped (RUNBOOK Part C step 23) |
 
 **Usable at M6** — start relying on it daily from there.
 
@@ -27,5 +27,5 @@ Referral path finder and recruiter/HM finder (public sources + one-click LinkedI
 Offer & negotiation helper, autofill browser extension.
 
 ## Parking lot
-Telegram bot, case-study page generator for fridgerweb.com. PR preview channels (need a Google sign-in/App Check story for preview domains, ADR-014). Playwright smoke test of sign-in against the emulators. Re-add `eslint-plugin-jsx-a11y` once it supports ESLint 10 (ADR-012). LLM-assisted fact merge as a second opinion on flagged changes (ADR-018). Side-by-side diff view for fact versions and criteria versions; restoring an old criteria version. Marking an excluded-title rule as seniority from the Criteria screen (today a fixed ID list, ADR-020).
+Telegram bot, case-study page generator for fridgerweb.com. PR preview channels (need a Google sign-in/App Check story for preview domains, ADR-014). Playwright smoke test of sign-in against the emulators. Re-add `eslint-plugin-jsx-a11y` once it supports ESLint 10 (ADR-012). LLM-assisted fact merge as a second opinion on flagged changes (ADR-018). Side-by-side diff view for fact versions and criteria versions; restoring an old criteria version. Marking an excluded-title rule as seniority from the Criteria screen (today a fixed ID list, ADR-020). File attachments as evidence on facts (upload a PDF or image per fact: Storage path, rules, size and type limits); until then `evidenceUrl` covers links (ADR-024).
 

@@ -9,6 +9,7 @@ export { COLLECTIONS, DOCS, PATHS, STORAGE_PATHS, SUBCOLLECTIONS } from './fires
 export * from './merge.js';
 export { redactPii } from './pii.js';
 export * from './profile.js';
+export * from './removal.js';
 export * from './usage.js';
 
 /**

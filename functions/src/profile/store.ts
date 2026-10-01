@@ -11,10 +11,12 @@ import {
   type ParseSummary,
 } from '@hireframe/shared';
 import type { Firestore, WriteBatch } from 'firebase-admin/firestore';
+import type { Storage } from 'firebase-admin/storage';
 import { HttpsError } from 'firebase-functions/https';
 
 import { log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
+import type { ResetStore } from './reset.js';
 
 /**
  * Admin SDK writes for the profile brain (ADR-018). New facts are written with their v1
@@ -38,7 +40,15 @@ export interface ApplyParseInput {
 
 export interface ProfileStore {
   /** Marks the document `parsing`; throws if it's already parsed or being parsed. */
-  beginParse(docId: string, kind: CvKind, storagePath: string, now: Date): Promise<void>;
+  beginParse(
+    docId: string,
+    upload: { kind: CvKind; storagePath: string; sha256: string },
+    now: Date,
+  ): Promise<void>;
+  /** An earlier parsed upload with the same bytes, if any (ADR-022). */
+  findParsedDuplicate(sha256: string, docId: string): Promise<string | null>;
+  /** Marks the document parsed as a copy of `duplicateOf`, with no summary. */
+  markDuplicate(docId: string, duplicateOf: string, now: Date): Promise<void>;
   failParse(
     docId: string,
     code: ParseErrorCode,
@@ -91,7 +101,7 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
   }
 
   return {
-    async beginParse(docId, kind, storagePath, now) {
+    async beginParse(docId, { kind, storagePath, sha256 }, now) {
       const ref = firestore.doc(PATHS.document(docId));
       await firestore.runTransaction(async (tx) => {
         const snapshot = await tx.get(ref);
@@ -111,11 +121,30 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
         tx.set(ref, {
           kind,
           storagePath,
+          sha256,
           status: 'parsing',
           createdAt,
           updatedAt: now,
           schemaVersion: 1,
         });
+      });
+    },
+
+    async findParsedDuplicate(sha256, docId) {
+      // Single-field equality, so no composite index; parsed status is checked here.
+      const snapshot = await firestore
+        .collection(PATHS.documents)
+        .where('sha256', '==', sha256)
+        .get();
+      const match = snapshot.docs.find((doc) => doc.id !== docId && doc.get('status') === 'parsed');
+      return match?.id ?? null;
+    },
+
+    async markDuplicate(docId, duplicateOf, now) {
+      await firestore.doc(PATHS.document(docId)).update({
+        status: 'parsed',
+        duplicateOf,
+        updatedAt: now,
       });
     },
 
@@ -175,5 +204,40 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
       await batch.commit();
       return ids;
     },
+  };
+}
+
+/** Admin SDK side of resetProfile (ADR-023). */
+export function firestoreResetStore(firestore: Firestore): ResetStore {
+  return {
+    async parsingDocuments() {
+      const snapshot = await firestore
+        .collection(PATHS.documents)
+        .where('status', '==', 'parsing')
+        .get();
+      return snapshot.docs.map((doc) => timestampsToDates(doc.data()));
+    },
+
+    async deleteProfile() {
+      const facts = firestore.collection(PATHS.facts);
+      const documents = firestore.collection(PATHS.documents);
+      const [factCount, documentCount] = await Promise.all([
+        facts.count().get(),
+        documents.count().get(),
+      ]);
+      // recursiveDelete also removes each fact's versions subcollection.
+      await firestore.recursiveDelete(facts);
+      await firestore.recursiveDelete(documents);
+      return { facts: factCount.data().count, documents: documentCount.data().count };
+    },
+  };
+}
+
+/** Deletes every object under a prefix and returns how many there were (resetProfile). */
+export function bucketFileDeleter(bucket: ReturnType<Storage['bucket']>) {
+  return async (prefix: string): Promise<number> => {
+    const [files] = await bucket.getFiles({ prefix });
+    await bucket.deleteFiles({ prefix });
+    return files.length;
   };
 }

@@ -2,15 +2,15 @@
 
 ## One-time setup (user)
 1. **GitHub:** create public repo `hireframe`, push this docs pack. Enable secret scanning + push protection, Dependabot, branch protection on `main` (PR required now; add required status checks after M0 CI has run once). *Done:* ruleset `protect-main` requires a PR, blocks force-push and deletion, and requires the `check`, `gitleaks` and `audit` CI jobs (plus `rules` from M1).
-2. **Firebase:** new project → upgrade to Blaze → GCP Billing budget alerts at £5 and £10. Enable Google sign-in. Then follow **Firebase setup (M1)** below.
+2. **Firebase:** new project → upgrade to Blaze → GCP Billing budget alerts at £5 and £10. Enable Google sign-in. Then follow **Firebase setup** below.
 3. **Anthropic:** create API key at console.anthropic.com, set a monthly spend limit (e.g. £20).
 4. **Reed:** free Jobseeker API key. **Adzuna:** free developer app_id + app_key.
 5. **Gmail:** create labels `hireframe/alerts` and `hireframe/done`; filters that label job-alert senders (LinkedIn, Wellfound, Work at a Startup, Welcome to the Jungle, Reed, Indeed alerts).
 6. **Job alerts:** set up LinkedIn/Wellfound/WaaS/WTTJ alerts for the lane titles in `FUNNEL.md`, UK/London, daily.
 7. Secrets go into Secret Manager via `firebase functions:secrets:set`. Never paste them into chat or code.
 
-## Firebase setup (M1)
-Project `hireframe-f6b03`, region **europe-west2 (London)**. Design: ADR-011 (owner allowlist), ADR-014 (deploy).
+## Firebase setup
+Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
 
 ### Part A: before the first deploy
 1. **Create Firestore.**
@@ -93,6 +93,110 @@ Project `hireframe-f6b03`, region **europe-west2 (London)**. Design: ADR-011 (ow
     2. When Cloud Firestore shows mostly *Verified* requests, **Enforce** it. Then do the same for Cloud Storage.
     3. Reload the app to confirm it still works.
 
+### Part C: Functions (M2)
+Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.call()`), ADR-017 (functions build and runtime), ADR-023 (Reset profile). Do these in **Cloud Shell** (the **>_** icon in the Google Cloud console). Every block is safe to paste as is; it prints nothing secret. The deploy account can't change IAM or enable APIs, by design, so everything here is done once by hand.
+
+17. **Pick the project.** Run `gcloud config set project hireframe-f6b03`.
+18. **Enable the Functions APIs.** The last three aren't used by the app, but the Firebase CLI checks them before a functions deploy and the deploy account can't enable them itself.
+    ```bash
+    gcloud services enable cloudfunctions.googleapis.com run.googleapis.com cloudbuild.googleapis.com \
+      artifactregistry.googleapis.com secretmanager.googleapis.com firebaseappcheck.googleapis.com \
+      eventarc.googleapis.com firebaseextensions.googleapis.com cloudbilling.googleapis.com
+    ```
+19. **Create the runtime account** the functions run as (instead of the default account, which has Editor):
+    `gcloud iam service-accounts create hireframe-fns --display-name="Hireframe functions runtime"`
+20. **Grant the runtime account its roles.** First find your bucket name: Firebase console → **Build → Storage**, the name after `gs://` (for example `hireframe-f6b03.firebasestorage.app`). Put it in the first line, then paste the block. `storage.objectUser` lets the functions read uploaded CVs and delete them for **Reset profile**. It's the narrowest built-in role that can delete (ADR-023).
+    ```bash
+    BUCKET=hireframe-f6b03.firebasestorage.app   # replace with the name from the console if different
+    PROJECT_ID=hireframe-f6b03
+    FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+    for ROLE in roles/datastore.user roles/firebaseappcheck.tokenVerifier; do
+      gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$FNS" --role="$ROLE" --condition=None
+    done
+    gcloud storage buckets add-iam-policy-binding gs://$BUCKET --member="serviceAccount:$FNS" --role=roles/storage.objectUser
+    ```
+21. **Check the Anthropic secret's name.** The key is already in Secret Manager. Run
+    `gcloud secrets describe ANTHROPIC_API_KEY --format='value(name)'`
+    It must print a path ending in `/secrets/ANTHROPIC_API_KEY` (exact spelling; the code reads that name). If it's spelled differently, create a new secret with this exact name rather than renaming (secrets can't be renamed).
+22. **Let only the runtime account read the key.**
+    ```bash
+    PROJECT_ID=hireframe-f6b03
+    FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+    gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --member="serviceAccount:$FNS" \
+      --role=roles/secretmanager.secretAccessor
+    ```
+23. **Give the deploy account its new roles.** Besides deploying as `hireframe-fns`, the deploy must be allowed to act as two Google-managed accounts. The Firebase CLI pre-checks the App Engine default account. Cloud Build builds the functions as the default compute account; M8 moves builds to their own account (ROADMAP).
+    ```bash
+    PROJECT_ID=hireframe-f6b03
+    PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+    SA=github-deployer@$PROJECT_ID.iam.gserviceaccount.com
+    FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+    gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA" --role=roles/cloudfunctions.developer --condition=None
+    gcloud iam service-accounts add-iam-policy-binding $FNS --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
+    gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --member="serviceAccount:$SA" --role=roles/secretmanager.viewer
+    for TARGET in $PROJECT_ID@appspot.gserviceaccount.com $PROJECT_NUMBER-compute@developer.gserviceaccount.com; do
+      gcloud iam service-accounts add-iam-policy-binding $TARGET \
+        --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
+    done
+    ```
+24. **Create the image repository with a cleanup policy**, so the deploy doesn't stop to ask for one (ADR-017):
+    ```bash
+    cat > cleanup.json <<'JSON'
+    [{"name": "firebase-functions-cleanup", "action": {"type": "Delete"}, "condition": {"tagState": "any", "olderThan": "86400s"}}]
+    JSON
+    gcloud artifacts repositories create gcf-artifacts --repository-format=docker --location=europe-west2 \
+      --description="Cloud Functions images"
+    gcloud artifacts repositories set-cleanup-policies gcf-artifacts --location=europe-west2 --policy=cleanup.json
+    rm cleanup.json
+    ```
+    If `create` says the repository already exists, just run the `set-cleanup-policies` line.
+25. **Check that Storage rules can read Firestore.** Storage rules read `config/app` to find the owner, which needs the Storage service agent to have `roles/firebaserules.firestoreServiceAgent`. Part A step 7 grants it, but on this project it was missing at the v0.2.1 deploy and had to be granted by hand. This should print the role once:
+    ```bash
+    PROJECT_ID=hireframe-f6b03
+    PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+    AGENT=service-$PROJECT_NUMBER@gcp-sa-firebasestorage.iam.gserviceaccount.com
+    gcloud projects get-iam-policy $PROJECT_ID --flatten='bindings[].members' \
+      --filter="bindings.role=roles/firebaserules.firestoreServiceAgent AND bindings.members:$AGENT" \
+      --format='value(bindings.role)'
+    ```
+    If it prints nothing, grant it:
+    `gcloud projects add-iam-policy-binding $PROJECT_ID --condition=None --member="serviceAccount:$AGENT" --role=roles/firebaserules.firestoreServiceAgent`
+26. **Check the Anthropic limit.** In the Anthropic console, the monthly spend limit should still be set (One-time setup step 3).
+27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
+28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
+    ```bash
+    for FN in parseCv addFact resetProfile; do
+      gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers
+    done
+    ```
+    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list.
+29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` are listed in `europe-west2`.
+30. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
+31. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
+32. **Check versioning.** Edit one fact, then open its **History**: v1 and v2 are both there. Add an **Evidence link** (https only) while you're there.
+33. **Check the merge.**
+    1. Upload the same file again: it says it's the same file, nothing is read, and `usage/{yyyy-mm}` doesn't change.
+    2. Upload the same CV in the other format (.docx if you used PDF): the summary says 0 added and 0 flagged, or very close.
+    3. To try a flagged change, upload a copy with one bullet reworded and **Accept change**: its history shows "Accepted proposed change".
+34. **Check Remove upload** on the reworded copy from step 33: the dialog previews the counts, the row then shows **Removed**, and the facts it added are under **Archived**.
+35. **Add a fact from a note**, for example "Finished a SQL course on window functions".
+36. **Check the meter.** Firestore → `usage/{yyyy-mm}`: `spendPence` roughly matches the calls so far, and `reservations` is empty.
+
+To change the cap or the exchange rate later, add `monthlyCapPence` (number, pence) or `fxUsdToGbp` (number) to `config/app` in the Firestore console (ADR-016).
+
+**Upgrading a v0.2.1 project to v0.2.2.** Before tagging:
+1. Run step 23 again; only the compute-account line is new.
+2. Swap the runtime account's bucket role (replace the bucket name if yours differs):
+   ```bash
+   BUCKET=hireframe-f6b03.firebasestorage.app
+   FNS=hireframe-fns@hireframe-f6b03.iam.gserviceaccount.com
+   gcloud storage buckets add-iam-policy-binding gs://$BUCKET --member="serviceAccount:$FNS" --role=roles/storage.objectUser
+   gcloud storage buckets remove-iam-policy-binding gs://$BUCKET --member="serviceAccount:$FNS" --role=roles/storage.objectViewer
+   ```
+3. Do step 25.
+
+Then deploy (step 27), do step 28 for `resetProfile`, and steps 33–34. To clean up the duplicates from the v0.2.1 re-upload, use **Remove upload** on the second upload, or **Reset profile** (Profile → Danger zone) and upload once more.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -100,76 +204,13 @@ Project `hireframe-f6b03`, region **europe-west2 (London)**. Design: ADR-011 (ow
 - **Deploy fails with "Firebase Storage has not been set up":** enable the API and create the bucket from the Firebase console (Part A step 2).
 - **Google sign-in shows "Error 400: redirect_uri_mismatch":** the OAuth client is missing the `web.app` origin or redirect URI (Part A step 4).
 - **Owner account lost or deleted:** briefly tick **Enable create (sign-up)**, then sign in. Set `config/app.ownerUid` to the new UID, then untick sign-up again.
-- **Functions deploy stops with "could not set up cleanup policy":** the functions deployed, but the image repository has no cleanup policy. Do Functions setup step 8, then re-run the deploy.
-- **Functions deploy fails with 403 on `iam.serviceAccounts.actAs` or a secret:** the deploy account is missing a role from Functions setup step 7.
+- **Functions deploy stops with "could not set up cleanup policy":** the functions deployed, but the image repository has no cleanup policy. Do Part C step 24, then re-run the deploy.
+- **Functions deploy fails with 403 on `iam.serviceAccounts.actAs` or a secret:** the deploy account is missing a role from Part C step 23. The error names the account it couldn't act as: the App Engine default, the default compute account, or `hireframe-fns`.
+- **Functions deploy fails because an API is disabled** (eventarc, firebaseextensions, cloudbilling): enable it with Part C step 18.
+- **A callable fails in the browser with a CORS error or 403:** it isn't publicly invocable yet. Do Part C step 28 for it.
+- **Reset profile fails, and the logs show 403 on `storage.objects.delete`:** the runtime account still has `storage.objectViewer` instead of `storage.objectUser`. See "Upgrading a v0.2.1 project" in Part C.
+- **The Storage rules deploy asks to grant `firebaserules.firestoreServiceAgent`, or the owner gets "permission denied" on uploads:** do the Part C step 25 check.
 - **"The monthly AI spend cap has been reached":** check `usage/{yyyy-mm}` in Firestore. Raise `config/app.monthlyCapPence` deliberately, or wait for next month. Stale `reservations` entries expire on their own after 15 minutes.
-
-## Functions setup (M2)
-Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.call()`), ADR-017 (functions build and runtime). Do these in **Cloud Shell** (the **>_** icon in the Google Cloud console). Every block is safe to paste as is; it prints nothing secret.
-
-1. **Pick the project.** Run `gcloud config set project hireframe-f6b03`.
-2. **Enable the Functions APIs.**
-   ```bash
-   gcloud services enable cloudfunctions.googleapis.com run.googleapis.com cloudbuild.googleapis.com \
-     artifactregistry.googleapis.com secretmanager.googleapis.com firebaseappcheck.googleapis.com \
-     eventarc.googleapis.com firebaseextensions.googleapis.com cloudbilling.googleapis.com
-   ```
-3. **Create the runtime account** the functions run as (instead of the default account, which has Editor):
-   `gcloud iam service-accounts create hireframe-fns --display-name="Hireframe functions runtime"`
-4. **Grant the runtime account its roles.** First find your bucket name: Firebase console → **Build → Storage**, the name after `gs://` (for example `hireframe-f6b03.firebasestorage.app`). Put it in the first line, then paste the block:
-   ```bash
-   BUCKET=hireframe-f6b03.firebasestorage.app   # replace with the name from the console if different
-   PROJECT_ID=hireframe-f6b03
-   FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
-   for ROLE in roles/datastore.user roles/firebaseappcheck.tokenVerifier; do
-     gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$FNS" --role="$ROLE" --condition=None
-   done
-   gcloud storage buckets add-iam-policy-binding gs://$BUCKET --member="serviceAccount:$FNS" --role=roles/storage.objectViewer
-   ```
-5. **Check the Anthropic secret's name.** The key is already in Secret Manager. Run
-   `gcloud secrets describe ANTHROPIC_API_KEY --format='value(name)'`
-   It must print a path ending in `/secrets/ANTHROPIC_API_KEY` (exact spelling; the code reads that name). If it's spelled differently, create a new secret with this exact name rather than renaming (secrets can't be renamed).
-6. **Let only the runtime account read the key.**
-   ```bash
-   PROJECT_ID=hireframe-f6b03
-   FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
-   gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --member="serviceAccount:$FNS" \
-     --role=roles/secretmanager.secretAccessor
-   ```
-7. **Give the deploy account its new roles.**
-   ```bash
-   PROJECT_ID=hireframe-f6b03
-   SA=github-deployer@$PROJECT_ID.iam.gserviceaccount.com
-   FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
-   gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA" --role=roles/cloudfunctions.developer --condition=None
-   gcloud iam service-accounts add-iam-policy-binding $FNS --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
-   gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --member="serviceAccount:$SA" --role=roles/secretmanager.viewer
-   # The Firebase CLI pre-checks that the deployer may act as the App Engine default account.
-   gcloud iam service-accounts add-iam-policy-binding $PROJECT_ID@appspot.gserviceaccount.com \
-     --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
-   ```
-8. **Create the image repository with a cleanup policy**, so the deploy doesn't stop to ask for one (ADR-017):
-   ```bash
-   cat > cleanup.json <<'JSON'
-   [{"name": "firebase-functions-cleanup", "action": {"type": "Delete"}, "condition": {"tagState": "any", "olderThan": "86400s"}}]
-   JSON
-   gcloud artifacts repositories create gcf-artifacts --repository-format=docker --location=europe-west2 \
-     --description="Cloud Functions images"
-   gcloud artifacts repositories set-cleanup-policies gcf-artifacts --location=europe-west2 --policy=cleanup.json
-   rm cleanup.json
-   ```
-   If `create` says the repository already exists, just run the `set-cleanup-policies` line.
-9. **Check the Anthropic limit.** In the Anthropic console, the monthly spend limit should still be set (One-time setup step 3).
-10. **Deploy.** Merge the M2 PR, push tag `v0.2.0`, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
-11. **Check the functions.** Firebase console → **Build → Functions**: `parseCv` and `addFact` are listed in `europe-west2`.
-12. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
-13. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
-14. **Check versioning.** Edit one fact, then open its **History**: v1 and v2 are both there.
-15. **Check the merge.** Upload the same CV again: the summary says 0 added and 0 flagged. To try a flagged change, upload a copy with one bullet reworded and **Accept change**: its history shows "Accepted proposed change".
-16. **Add a fact from a note**, for example "Finished a SQL course on window functions".
-17. **Check the meter.** Firestore → `usage/2026-10`: `spendPence` roughly matches the calls so far, and `reservations` is empty.
-
-To change the cap or the exchange rate later, add `monthlyCapPence` (number, pence) or `fxUsdToGbp` (number) to `config/app` in the Firestore console (ADR-016).
 
 ## Local setup (per machine)
 1. **Node 22:** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.

@@ -58,9 +58,9 @@ All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 
 - `config/app` — owner UID, schedules, model names, caps (in pence), `fxUsdToGbp` (converts Anthropic's USD costs to pence), feature flags. Fields so far: `ownerUid`, `schemaVersion`, `createdAt`, `updatedAt` (M1), optional `monthlyCapPence` and `fxUsdToGbp` overrides (M2, ADR-016) (`AppConfigSchema` in `packages/shared`). Written only by the Admin SDK or the Firebase console, never by clients (ADR-011)
 - `criteria/v{n}` (immutable) + `criteria/current` pointer `{ version }` — content keys as in the FUNNEL.md seed; the owner writes a version and the pointer move in one batch (ADR-019)
-- `profile/main/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', sourceDocId?, dates{start?,end?}, tags[], lanes[], status: 'active'|'archived', version, review?: {kind: 'changed', proposed, docId, at}, evidenceVerified }`. Created by `parseCv`/`addFact`; the owner edits with a versioned client batch (ADR-018)
+- `profile/main/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', sourceDocId?, dates{start?,end?}, tags[], lanes[], status: 'active'|'archived', version, review?: {kind: 'changed', proposed, docId, at}, evidenceVerified, evidenceUrl? }`. Created by `parseCv`/`addFact`; the owner edits with a versioned client batch (ADR-018). `evidenceUrl` is an owner-set https link, never model-drafted (ADR-024)
 - `profile/main/facts/{factId}/versions/{n}` — immutable `{ snapshot, change, at }`: the fact exactly as it was at version n
-- `profile/main/documents/{docId}` — uploaded CV (file at Storage `profile/documents/{docId}/cv.{pdf|docx}`, max 5 MiB, immutable) and its parse status, summary, model, prompt version and cost
+- `profile/main/documents/{docId}` — uploaded CV (file at Storage `profile/documents/{docId}/cv.{pdf|docx}`, max 5 MiB, immutable) and its parse status, summary, model, prompt version and cost; `sha256` of the file, `duplicateOf?` when the same file was already read (not read again, ADR-022), and `removedAt?` once the owner removed the upload (ADR-023)
 - `companies/{companyId}` — `{ name, domain, ats: {type, token}, size?, stage?, hq, watch: bool, lastScannedAt }`
 - `jobs/{jobId}` — `{ dedupeKey, title, company, companyId?, location, remote, url, sources[{id, url, externalId, seenAt}], postedAt, firstSeenAt, descriptionRef, salary?, stage: 's0'..'s3', verdict?, fitScore?, luckScore?, reason?, matchedFactIds[], gaps[{type, text}], criteriaVersion, promptVersion, status: 'new'|'saved'|'applied'|'skipped'|'interview'|'offer'|'rejected', feedback?: {agree: bool, note?} }`
 - `jobs/{jobId}/description/raw` — full text (kept separate to keep list reads cheap). Purged after 60 days for `skip` jobs.
@@ -81,11 +81,12 @@ All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 | `getDigest` | HTTPS, HMAC-signed, from Apps Script | Returns digest HTML for latest morning run, or an explicit in-progress/failed notice |
 | `lookup` | Callable | URL/text → match or run funnel |
 | `parseCv` / `addFact` | Callable (owner, App Check) | Profile brain: CV → atomic facts merged into the profile; free-text note → facts (M2, ADR-018) |
+| `resetProfile` | Callable (owner, App Check) | Hard-deletes every fact, version, upload document and uploaded file after the owner types RESET; refuses while a CV is being read (M2.1, ADR-023) |
 | `rescore` | Callable | Re-run S2–S3 on last 14 days with current criteria |
 | `generateCv` | Callable | Tailored CV + cover note |
 | `weeklyBackup` | Scheduled Sun 03:00 | JSON export of all collections to Storage (keep 8) |
 
-Timeouts: scan functions 540 s, memory 1 GiB, max instances 1. All functions run in `europe-west2` as the `hireframe-fns` service account and are bundled with esbuild for deploy (ADR-017). `parseCv` allows 540 s, `addFact` 120 s.
+Timeouts: scan functions 540 s, memory 1 GiB, max instances 1. All functions run in `europe-west2` as the `hireframe-fns` service account and are bundled with esbuild for deploy (ADR-017). `parseCv` allows 540 s, `addFact` and `resetProfile` 120 s. Only the model callables mount the Anthropic key.
 
 ## Gmail bridge (Apps Script)
 - Gmail filters label alert emails `hireframe/alerts` (LinkedIn, Wellfound, WaaS, WTTJ, Reed, etc.).

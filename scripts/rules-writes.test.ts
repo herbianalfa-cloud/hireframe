@@ -42,10 +42,11 @@ function allowedWrites(rules: string): Record<string, string[]> {
 }
 
 describe('client-writable paths', () => {
-  it('firestore.rules opens only the M2 writes', () => {
+  it('firestore.rules opens only the M2 and M2.1 writes', () => {
     expect(allowedWrites(readFileSync('firestore.rules', 'utf8'))).toEqual({
       '/criteria/current': ['create', 'update'],
       '/criteria/{versionId}': ['create'],
+      '/profile/{profileId}/documents/{docId}': ['update'],
       '/profile/{profileId}/facts/{factId}': ['update'],
       '/profile/{profileId}/facts/{factId}/versions/{versionId}': ['create'],
     });

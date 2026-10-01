@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import Anthropic from '@anthropic-ai/sdk';
 import { STORAGE_PATHS, type CvExtraction } from '@hireframe/shared';
 import { HttpsError } from 'firebase-functions/https';
@@ -6,7 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { extractText } from '../cv/extract.js';
 import { safeHandler } from '../errors.js';
 import { makeDocx, makePdf } from '../fixtures/fake-cv-files.js';
-import { FAKE_CV_EXTRACTION, FAKE_CV_REVISED_EXTRACTION } from '../fixtures/fake-cv-response.js';
+import {
+  FAKE_CV_EXTRACTION,
+  FAKE_CV_REVISED_EXTRACTION,
+  FAKE_CV_REWORDED_EXTRACTION,
+} from '../fixtures/fake-cv-response.js';
 import { FAKE_CV_LINES, FAKE_CV_REVISED_LINES } from '../fixtures/fake-cv-text.js';
 import type { LlmCallInput, LlmCallResult } from '../llm/call.js';
 import { LlmOutputError, SpendCapExceededError } from '../llm/errors.js';
@@ -111,10 +117,88 @@ describe('parseCvHandler', () => {
       ),
     );
     expect(second.summary).toMatchObject({ added: 0, flagged: 1, unverified: 0 });
+    expect(second.duplicateOf).toBeUndefined();
     expect(state.applied[1]?.flag[0]?.proposed.text).toBe('Led onboarding for 14 clients');
     expect(state.facts.some((fact) => fact.content.text === 'Led onboarding for 12 clients')).toBe(
       true,
     );
+  });
+
+  it('is stable when the same CV is read again as a PDF with every fact reworded', async () => {
+    const { store, state } = memoryProfileStore();
+    await parseCvHandler(
+      { docId: DOC_ID },
+      deps(
+        { [docxPath]: await makeDocx(FAKE_CV_LINES) },
+        llmReturning(FAKE_CV_EXTRACTION).llm,
+        store,
+      ),
+    );
+    const secondId = 'zyxwvutsrq9876543210';
+    const second = await parseCvHandler(
+      { docId: secondId },
+      deps(
+        { [STORAGE_PATHS.profileDocument(secondId, 'pdf')]: makePdf(FAKE_CV_LINES) },
+        llmReturning(FAKE_CV_REWORDED_EXTRACTION).llm,
+        store,
+      ),
+    );
+    expect(second.summary).toMatchObject({
+      added: 0,
+      flagged: 0,
+      unchanged: FAKE_CV_EXTRACTION.facts.length,
+      unverified: 0,
+      missingFromCv: 0,
+    });
+    expect(state.facts).toHaveLength(FAKE_CV_EXTRACTION.facts.length);
+  });
+
+  describe('an identical file', () => {
+    const secondId = 'zyxwvutsrq9876543210';
+    const pdf = makePdf(FAKE_CV_LINES);
+
+    async function parseTwice(firstOutcome: CvExtraction | Error = FAKE_CV_EXTRACTION) {
+      const { store, state } = memoryProfileStore();
+      await parseCvHandler(
+        { docId: DOC_ID },
+        deps({ [pdfPath]: pdf }, llmReturning(firstOutcome).llm, store),
+      ).catch(() => undefined);
+      const second = llmReturning(FAKE_CV_REWORDED_EXTRACTION);
+      const result = await parseCvHandler(
+        { docId: secondId },
+        deps({ [STORAGE_PATHS.profileDocument(secondId, 'pdf')]: pdf }, second.llm, store),
+      );
+      return { result, state, secondCalls: second.calls };
+    }
+
+    it('records the SHA-256 of every upload', async () => {
+      const { state } = await parseTwice();
+      const sha256 = createHash('sha256').update(pdf).digest('hex');
+      expect(state.documents.get(DOC_ID)?.sha256).toBe(sha256);
+      expect(state.documents.get(secondId)?.sha256).toBe(sha256);
+    });
+
+    it('is not read again: no model call, no fact touched', async () => {
+      const { result, state, secondCalls } = await parseTwice();
+      expect(secondCalls).toHaveLength(0);
+      expect(result).toEqual({
+        docId: secondId,
+        duplicateOf: DOC_ID,
+        summary: expect.objectContaining({ factsExtracted: 0, added: 0, flagged: 0 }) as unknown,
+      });
+      expect(state.applied).toHaveLength(1);
+      expect(state.documents.get(secondId)).toMatchObject({
+        status: 'parsed',
+        duplicateOf: DOC_ID,
+      });
+    });
+
+    it('is read normally when the earlier upload failed', async () => {
+      const { result, secondCalls } = await parseTwice(new LlmOutputError('schema', 1));
+      expect(secondCalls).toHaveLength(1);
+      expect(result.duplicateOf).toBeUndefined();
+      expect(result.summary.added).toBe(FAKE_CV_EXTRACTION.facts.length);
+    });
   });
 
   it('marks evidence that is not in the CV as unverified instead of dropping the fact', async () => {
@@ -234,6 +318,20 @@ describe('parseCvHandler', () => {
     ])('when the model step fails: %s', async (_name, error) => {
       await expect(run(deps({ [pdfPath]: pdf() }, llmReturning(error).llm))).rejects.toThrow();
       expectNoCvText();
+    });
+
+    it('when the same file is uploaded twice', async () => {
+      const { store } = memoryProfileStore();
+      const { llm } = llmReturning(FAKE_CV_EXTRACTION);
+      const file = pdf();
+      await run(deps({ [pdfPath]: file }, llm, store));
+      const secondId = 'zyxwvutsrq9876543210';
+      await parseCvHandler(
+        { docId: secondId },
+        deps({ [STORAGE_PATHS.profileDocument(secondId, 'pdf')]: file }, llm, store),
+      );
+      expectNoCvText();
+      expect(logs.map((line) => line.event)).toContain('parse_cv.duplicate');
     });
 
     it('when extraction throws an error that echoes the CV', async () => {

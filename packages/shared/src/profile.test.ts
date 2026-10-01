@@ -5,6 +5,7 @@ import { redactPii } from './pii.js';
 import {
   AddFactInputSchema,
   CvExtractionSchema,
+  EvidenceUrlSchema,
   FactDraftSchema,
   FactSchema,
   isParseStalled,
@@ -107,5 +108,29 @@ describe('isParseStalled', () => {
 
   it('outlasts the parseCv callable timeout', () => {
     expect(STALE_PARSE_MS).toBeGreaterThan(CALLABLE_TIMEOUT_SECONDS.parseCv * 1000);
+  });
+});
+
+describe('EvidenceUrlSchema', () => {
+  it.each(['https://example.com', 'https://example.com/a/b?c=d#e'])('accepts %s', (url) => {
+    expect(EvidenceUrlSchema.safeParse(url).success).toBe(true);
+  });
+
+  it.each([
+    'http://example.com',
+    'javascript:alert(1)',
+    'ftp://example.com/file',
+    'example.com',
+    'https://example.com/a b',
+    `https://example.com/${'a'.repeat(500)}`,
+  ])('rejects %s', (url) => {
+    expect(EvidenceUrlSchema.safeParse(url).success).toBe(false);
+  });
+});
+
+describe('evidence links are owner-set only', () => {
+  it('a model draft cannot carry one', () => {
+    const parsed = FactDraftSchema.safeParse({ ...draft, evidenceUrl: 'https://example.com' });
+    expect(parsed.success && 'evidenceUrl' in parsed.data).toBe(false);
   });
 });
