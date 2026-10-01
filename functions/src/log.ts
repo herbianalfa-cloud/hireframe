@@ -20,6 +20,7 @@ export type LogEvent =
   | 'parse_cv.started'
   | 'parse_cv.done'
   | 'parse_cv.failed'
+  | 'parse_cv.duplicate'
   | 'add_fact.done'
   | 'profile.fact_invalid';
 

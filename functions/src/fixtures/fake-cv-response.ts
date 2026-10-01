@@ -313,3 +313,31 @@ export const FAKE_CV_REVISED_EXTRACTION: CvExtraction = {
       : draft,
   ),
 };
+
+const REWORDED: Readonly<Record<string, string>> = {
+  'Customer Onboarding Intern at Example Cloud Ltd':
+    'Worked as a Customer Onboarding Intern for Example Cloud Ltd',
+  'Led onboarding for 12 clients': 'Onboarded 12 clients as their lead',
+  'Cut client time-to-live by 30%': '30% faster time-to-live for clients',
+  'Resolved 200 support tickets': 'Closed 200 customer support tickets',
+  'Built a SQL dashboard in Metabase': 'Created a Metabase dashboard using SQL',
+  'Grew weekly active users by 45%': '45% growth in weekly active users',
+  SQL: 'SQL querying',
+  Python: 'Python scripting',
+  Figma: 'Figma prototyping',
+  'Available to start immediately': 'Can start straight away',
+};
+
+/**
+ * The same CV read a second time, from the PDF instead of the .docx: the model words every fact
+ * differently, and the quotes carry PDF extraction noise (doubled spaces, Unicode hyphens) that
+ * still verifies against the CV. A re-upload must add and flag nothing (ADR-022).
+ */
+export const FAKE_CV_REWORDED_EXTRACTION: CvExtraction = {
+  facts: FAKE_CV_FACTS.map((draft, index) => ({
+    ...draft,
+    text: REWORDED[draft.text] ?? `${draft.text}, per the CV`,
+    evidence:
+      index % 2 === 0 ? draft.evidence.replace(/ /g, '  ') : draft.evidence.replace(/-/g, '‐'),
+  })),
+};

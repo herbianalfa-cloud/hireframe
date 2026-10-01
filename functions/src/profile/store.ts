@@ -38,7 +38,15 @@ export interface ApplyParseInput {
 
 export interface ProfileStore {
   /** Marks the document `parsing`; throws if it's already parsed or being parsed. */
-  beginParse(docId: string, kind: CvKind, storagePath: string, now: Date): Promise<void>;
+  beginParse(
+    docId: string,
+    upload: { kind: CvKind; storagePath: string; sha256: string },
+    now: Date,
+  ): Promise<void>;
+  /** An earlier parsed upload with the same bytes, if any (ADR-022). */
+  findParsedDuplicate(sha256: string, docId: string): Promise<string | null>;
+  /** Marks the document parsed as a copy of `duplicateOf`, with no summary. */
+  markDuplicate(docId: string, duplicateOf: string, now: Date): Promise<void>;
   failParse(
     docId: string,
     code: ParseErrorCode,
@@ -91,7 +99,7 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
   }
 
   return {
-    async beginParse(docId, kind, storagePath, now) {
+    async beginParse(docId, { kind, storagePath, sha256 }, now) {
       const ref = firestore.doc(PATHS.document(docId));
       await firestore.runTransaction(async (tx) => {
         const snapshot = await tx.get(ref);
@@ -111,11 +119,30 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
         tx.set(ref, {
           kind,
           storagePath,
+          sha256,
           status: 'parsing',
           createdAt,
           updatedAt: now,
           schemaVersion: 1,
         });
+      });
+    },
+
+    async findParsedDuplicate(sha256, docId) {
+      // Single-field equality, so no composite index; parsed status is checked here.
+      const snapshot = await firestore
+        .collection(PATHS.documents)
+        .where('sha256', '==', sha256)
+        .get();
+      const match = snapshot.docs.find((doc) => doc.id !== docId && doc.get('status') === 'parsed');
+      return match?.id ?? null;
+    },
+
+    async markDuplicate(docId, duplicateOf, now) {
+      await firestore.doc(PATHS.document(docId)).update({
+        status: 'parsed',
+        duplicateOf,
+        updatedAt: now,
       });
     },
 

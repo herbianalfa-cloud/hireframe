@@ -141,12 +141,25 @@ export const PARSE_ERROR_CODES = [
 ] as const;
 export type ParseErrorCode = (typeof PARSE_ERROR_CODES)[number];
 
+/** Firestore auto-IDs: 20 alphanumeric characters. Also enforced by storage.rules. */
+export const DOC_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
+
+/** Lower-case hex SHA-256 of an uploaded file. */
+export const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
 export const ProfileDocumentSchema = z.object({
   kind: z.enum(CV_KINDS),
   storagePath: z.string().min(1),
   status: z.enum(['parsing', 'parsed', 'failed']),
+  /** Set by parseCv from the uploaded bytes (ADR-022). Missing on uploads before v0.2.2. */
+  sha256: z.string().regex(SHA256_PATTERN).exactOptional(),
   errorCode: z.enum(PARSE_ERROR_CODES).exactOptional(),
   summary: ParseSummarySchema.exactOptional(),
+  /**
+   * The earlier parsed upload with the same bytes. Set instead of `summary`: the file was not
+   * read again and no fact changed (ADR-022).
+   */
+  duplicateOf: z.string().regex(DOC_ID_PATTERN).exactOptional(),
   model: z.string().min(1).exactOptional(),
   promptVersion: z.string().min(1).exactOptional(),
   costPence: z.number().min(0).exactOptional(),
@@ -169,9 +182,6 @@ export function isParseStalled(document: ProfileDocument, now: Date): boolean {
   );
 }
 
-/** Firestore auto-IDs: 20 alphanumeric characters. Also enforced by storage.rules. */
-export const DOC_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
-
 export const ParseCvInputSchema = z.object({
   docId: z.string().regex(DOC_ID_PATTERN),
 });
@@ -180,6 +190,8 @@ export type ParseCvInput = z.infer<typeof ParseCvInputSchema>;
 export const ParseCvResultSchema = z.object({
   docId: z.string(),
   summary: ParseSummarySchema,
+  /** Same file as this earlier upload: nothing was read and the summary is all zeros. */
+  duplicateOf: z.string().exactOptional(),
 });
 export type ParseCvResult = z.infer<typeof ParseCvResultSchema>;
 

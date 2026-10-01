@@ -8,19 +8,39 @@ export function memoryProfileStore(existing: ExistingFact[] = []) {
     facts: [...existing],
     documents: new Map<
       string,
-      { status: string; errorCode?: ParseErrorCode; costPence?: number }
+      {
+        status: string;
+        sha256?: string;
+        duplicateOf?: string;
+        errorCode?: ParseErrorCode;
+        costPence?: number;
+      }
     >(),
     applied: [] as ApplyParseInput[],
     manual: [] as NewFact[],
   };
   let nextId = 0;
   const store: ProfileStore = {
-    beginParse(docId) {
-      state.documents.set(docId, { status: 'parsing' });
+    beginParse(docId, { sha256 }) {
+      state.documents.set(docId, { status: 'parsing', sha256 });
+      return Promise.resolve();
+    },
+    findParsedDuplicate(sha256, docId) {
+      for (const [id, document] of state.documents) {
+        if (id !== docId && document.status === 'parsed' && document.sha256 === sha256) {
+          return Promise.resolve(id);
+        }
+      }
+      return Promise.resolve(null);
+    },
+    markDuplicate(docId, duplicateOf) {
+      const document = state.documents.get(docId);
+      state.documents.set(docId, { ...document, status: 'parsed', duplicateOf });
       return Promise.resolve();
     },
     failParse(docId, code, costPence) {
       state.documents.set(docId, {
+        ...state.documents.get(docId),
         status: 'failed',
         errorCode: code,
         ...(costPence === undefined ? {} : { costPence }),
@@ -30,7 +50,7 @@ export function memoryProfileStore(existing: ExistingFact[] = []) {
     listFacts: () => Promise.resolve([...state.facts]),
     applyParse(input) {
       state.applied.push(input);
-      state.documents.set(input.docId, { status: 'parsed' });
+      state.documents.set(input.docId, { ...state.documents.get(input.docId), status: 'parsed' });
       for (const fact of input.add) {
         state.facts.push({
           id: `f${String(++nextId)}`,
