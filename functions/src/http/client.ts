@@ -28,12 +28,14 @@ export type HttpErrorCode =
 
 export class HttpError extends Error {
   override name = 'HttpError';
-  constructor(
-    readonly code: HttpErrorCode,
-    readonly status?: number,
-    readonly issues?: number,
-  ) {
+  readonly code: HttpErrorCode;
+  readonly status: number | undefined;
+  readonly issues: number | undefined;
+  constructor(code: HttpErrorCode, status?: number, issues?: number) {
     super(code);
+    this.code = code;
+    this.status = status;
+    this.issues = issues;
   }
 }
 

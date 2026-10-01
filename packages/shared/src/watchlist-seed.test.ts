@@ -9,8 +9,8 @@ describe('WATCHLIST_SEED (ADR-031)', () => {
     const unique = (values: string[]) => new Set(values).size === values.length;
     expect(unique(WATCHLIST_SEED.map((company) => company.id))).toBe(true);
     expect(unique(WATCHLIST_SEED.map((company) => company.domain))).toBe(true);
-    const boards = WATCHLIST_SEED.filter((company) => company.ats.type !== 'none').map(
-      (company) => `${company.ats.type}:${company.ats.token ?? ''}`.toLowerCase(),
+    const boards = WATCHLIST_SEED.filter((company) => company.ats.type !== 'none').map((company) =>
+      `${company.ats.type}:${company.ats.token ?? ''}`.toLowerCase(),
     );
     expect(unique(boards)).toBe(true);
   });

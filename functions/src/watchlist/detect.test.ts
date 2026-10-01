@@ -1,0 +1,251 @@
+import { CompanySeedSchema } from '@hireframe/shared';
+import { describe, expect, it } from 'vitest';
+
+import { createHttpClient } from '../http/client.js';
+import {
+  atsFromUrl,
+  boardPageUrl,
+  classify,
+  detectCandidate,
+  namesMatch,
+  parseCsv,
+  REVIEW_HEADER,
+  reviewRow,
+  seedFromReview,
+  seedModule,
+  slugify,
+  toCsv,
+  tokenCandidates,
+  type BoardHit,
+} from './detect.js';
+
+const ACME = { name: 'Acme Analytics Ltd', domain: 'acme-analytics.example.com', hq: 'London' };
+
+describe('token guesses and URL parsing', () => {
+  it('guesses joined, hyphenated, domain and first-word tokens', () => {
+    expect(tokenCandidates(ACME.name, ACME.domain)).toEqual([
+      'acmeanalytics',
+      'acme-analytics',
+      'acme',
+    ]);
+    expect(tokenCandidates('Bloom', 'www.bloomhq.example')).toEqual(['bloom', 'bloomhq']);
+  });
+
+  it.each([
+    ['https://boards.greenhouse.io/acme', { type: 'greenhouse', token: 'acme' }],
+    ['https://job-boards.greenhouse.io/acme/jobs/123', { type: 'greenhouse', token: 'acme' }],
+    [
+      'https://boards.greenhouse.io/embed/job_board?for=acme',
+      { type: 'greenhouse', token: 'acme' },
+    ],
+    ['https://jobs.lever.co/acme/abc', { type: 'lever', token: 'acme' }],
+    ['https://jobs.eu.lever.co/acme', { type: 'lever', token: 'acme', host: 'eu' }],
+    ['https://jobs.ashbyhq.com/acme', { type: 'ashby', token: 'acme' }],
+    ['https://apply.workable.com/acme/', { type: 'workable', token: 'acme' }],
+    ['https://acme.workable.com/', { type: 'workable', token: 'acme' }],
+    ['https://apply.workable.com/j/ABC123', null],
+    ['https://acme.example.com/careers', null],
+    ['not a url', null],
+  ])('%s', (url, expected) => {
+    expect(atsFromUrl(url)).toEqual(expected);
+  });
+
+  it('matches board names loosely but not unrelated ones', () => {
+    expect(namesMatch('Acme Analytics', 'Acme Analytics Ltd')).toBe(true);
+    expect(namesMatch('ACME', 'Acme Analytics')).toBe(true);
+    expect(namesMatch('Bloom Credit', 'Bloom & Wild')).toBe(false);
+  });
+
+  it('builds human board URLs', () => {
+    expect(boardPageUrl({ type: 'lever', token: 'acme', host: 'eu' })).toBe(
+      'https://jobs.eu.lever.co/acme',
+    );
+  });
+});
+
+describe('classify', () => {
+  const gh: BoardHit = {
+    type: 'greenhouse',
+    token: 'acme',
+    boardName: 'Acme Analytics',
+    jobs: 4,
+    ukJobs: 3,
+  };
+  const lever: BoardHit = { type: 'lever', token: 'acme', jobs: 2, ukJobs: 0 };
+
+  it('confirms a single board whose name matches', () => {
+    expect(classify(ACME, [gh], false)).toMatchObject({ status: 'confirmed', hit: gh });
+  });
+
+  it('sends nameless boards and multiple hits to review', () => {
+    expect(classify(ACME, [lever], false).status).toBe('review');
+    expect(classify(ACME, [lever, gh], false)).toMatchObject({
+      status: 'review',
+      hit: gh,
+      others: [lever],
+    });
+    expect(classify(ACME, [{ ...gh, boardName: 'Other Co' }], false).status).toBe('review');
+  });
+
+  it('prefers a board with open jobs over an empty one', () => {
+    const emptyWorkable: BoardHit = {
+      type: 'workable',
+      token: 'acme',
+      boardName: 'Acme Analytics',
+      jobs: 0,
+      ukJobs: 0,
+    };
+    const ashby: BoardHit = { type: 'ashby', token: 'acme', jobs: 12, ukJobs: 5 };
+    expect(classify(ACME, [emptyWorkable, ashby], false)).toMatchObject({
+      status: 'review',
+      hit: ashby,
+      others: [emptyWorkable],
+    });
+  });
+
+  it('confirms a board from a URL the owner pasted', () => {
+    expect(classify(ACME, [lever], true).status).toBe('confirmed');
+  });
+});
+
+describe('CSV round trip and seed generation', () => {
+  it('parses quotes, commas and blank lines', () => {
+    expect(parseCsv('name,notes\n"Acme, Inc","said ""hi"""\n\nBeta,\n')).toEqual([
+      { name: 'Acme, Inc', notes: 'said "hi"' },
+      { name: 'Beta', notes: '' },
+    ]);
+  });
+
+  it('turns reviewed rows into a sorted, valid seed', () => {
+    const rows = [
+      reviewRow({
+        candidate: ACME,
+        status: 'confirmed',
+        hit: {
+          type: 'greenhouse',
+          token: 'acmeanalytics',
+          boardName: 'Acme Analytics',
+          jobs: 3,
+          ukJobs: 2,
+        },
+        others: [],
+      }),
+      reviewRow({
+        candidate: { name: 'Bramble', domain: 'bramble.example.com', hq: 'Leeds' },
+        status: 'review',
+        hit: { type: 'lever', token: 'bramble', host: 'eu', jobs: 1, ukJobs: 1 },
+        others: [],
+      }),
+      reviewRow({
+        candidate: { name: 'Cobalt', domain: 'cobalt.example.com', hq: 'London' },
+        status: 'not-found',
+        others: [],
+      }),
+    ];
+    const csv = toCsv(REVIEW_HEADER, rows);
+    const parsed = parseCsv(csv);
+    expect(seedFromReview(parsed).undecided).toEqual(['Bramble']);
+
+    const decided = parsed.map((row) =>
+      row.name === 'Bramble'
+        ? { ...row, decision: 'keep' }
+        : row.name === 'Cobalt'
+          ? { ...row, decision: 'keep-none' }
+          : row,
+    );
+    const { seed, undecided } = seedFromReview(decided);
+    expect(undecided).toEqual([]);
+    expect(seed).toEqual([
+      {
+        id: 'acme-analytics',
+        name: 'Acme Analytics Ltd',
+        domain: 'acme-analytics.example.com',
+        ats: { type: 'greenhouse', token: 'acmeanalytics' },
+        hq: 'London',
+      },
+      {
+        id: 'bramble',
+        name: 'Bramble',
+        domain: 'bramble.example.com',
+        ats: { type: 'lever', token: 'bramble', host: 'eu' },
+        hq: 'Leeds',
+      },
+      {
+        id: 'cobalt',
+        name: 'Cobalt',
+        domain: 'cobalt.example.com',
+        ats: { type: 'none' },
+        hq: 'London',
+      },
+    ]);
+    for (const company of seed) expect(CompanySeedSchema.safeParse(company).success).toBe(true);
+    expect(seedFromReview(decided.map((row) => ({ ...row, decision: 'drop' }))).seed).toEqual([]);
+    expect(seedModule(seed)).toContain('export const WATCHLIST_SEED: readonly CompanySeed[] = [');
+  });
+
+  it('slugifies names into document IDs', () => {
+    expect(slugify('Smith & Jones Ltd')).toBe('smith-and-jones');
+  });
+});
+
+describe('detectCandidate', () => {
+  it('probes official APIs only, stopping at the first token that hits', async () => {
+    const requested: string[] = [];
+    const http = createHttpClient({
+      fetch: ((url: URL) => {
+        requested.push(url.toString());
+        const href = url.toString();
+        if (href === 'https://boards-api.greenhouse.io/v1/boards/acmeanalytics/jobs') {
+          return Promise.resolve(
+            Response.json({
+              jobs: [
+                {
+                  id: 1,
+                  title: 'Product Analyst',
+                  absolute_url: 'https://job-boards.greenhouse.io/acmeanalytics/jobs/1',
+                  location: { name: 'London' },
+                },
+              ],
+            }),
+          );
+        }
+        if (href === 'https://boards-api.greenhouse.io/v1/boards/acmeanalytics') {
+          return Promise.resolve(Response.json({ name: 'Acme Analytics', content: '' }));
+        }
+        return Promise.resolve(new Response('', { status: 404 }));
+      }) as typeof fetch,
+      now: () => 0,
+      sleep: () => Promise.resolve(),
+      random: () => 0,
+      userAgent: 'test',
+      productToken: 'HireframeBot',
+      hostPolicy: () => ({ robots: 'enforce', intervalMs: 0, timeoutMs: 1000 }),
+      maxAttempts: 1,
+      backoffBaseMs: 0,
+      retryAfterCapMs: 0,
+      maxBodyBytes: 1_000_000,
+      log: () => undefined,
+    });
+    const detection = await detectCandidate(http, ACME);
+    expect(detection).toMatchObject({
+      status: 'confirmed',
+      hit: {
+        type: 'greenhouse',
+        token: 'acmeanalytics',
+        boardName: 'Acme Analytics',
+        jobs: 1,
+        ukJobs: 1,
+      },
+    });
+    // Only robots.txt and the four job-board APIs, and only the first token.
+    const hosts = new Set(requested.map((url) => new URL(url).host));
+    expect([...hosts].sort()).toEqual([
+      'api.ashbyhq.com',
+      'api.eu.lever.co',
+      'api.lever.co',
+      'boards-api.greenhouse.io',
+      'www.workable.com',
+    ]);
+    expect(requested.some((url) => url.includes('acme-analytics'))).toBe(false);
+  });
+});
