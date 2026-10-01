@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { jaccard, mergeFacts, normaliseText, type ExistingFact } from './merge.js';
+import { evidenceKey, jaccard, mergeFacts, normaliseText, type ExistingFact } from './merge.js';
 import type { FactDraft } from './profile.js';
 
 const OPTIONS = { similar: 0.6 };
@@ -15,6 +15,14 @@ function draft(overrides: Partial<FactDraft> = {}): FactDraft {
     lanes: ['secondary'],
     ...overrides,
   };
+}
+
+/** The same bullet edited in the CV: both the fact and its quote change. */
+function reworded12(): FactDraft {
+  return draft({
+    text: 'Ran onboarding for 12 new B2B clients at Example Ltd',
+    evidence: 'Ran onboarding for 12 new B2B clients',
+  });
 }
 
 function existing(
@@ -34,6 +42,21 @@ describe('normaliseText / jaccard', () => {
     expect(jaccard('a b c d', 'a b c d')).toBe(1);
     expect(jaccard('a b', 'c d')).toBe(0);
     expect(jaccard('a b c', 'a b d')).toBeCloseTo(0.5);
+  });
+});
+
+describe('evidenceKey', () => {
+  it('agrees across PDF and DOCX extraction noise', () => {
+    const docx = evidenceKey({ type: 'skill', evidence: 'Identified “key” self-serve flows' });
+    const pdf = evidenceKey({ type: 'skill', evidence: '• Identiﬁed  "key" self-\nserve ﬂows' });
+    expect(pdf).toBe(docx);
+  });
+
+  it('keeps types apart and is empty without letters or digits', () => {
+    expect(evidenceKey({ type: 'skill', evidence: 'SQL' })).not.toBe(
+      evidenceKey({ type: 'metric', evidence: 'SQL' }),
+    );
+    expect(evidenceKey({ type: 'skill', evidence: ' — ' })).toBe('');
   });
 });
 
@@ -59,7 +82,7 @@ describe('mergeFacts', () => {
 
   it('flags a reworded fact for review and never overwrites it', () => {
     const facts = [existing('f1')];
-    const reworded = draft({ text: 'Ran onboarding for 12 new B2B clients at Example Ltd' });
+    const reworded = reworded12();
     const plan = mergeFacts(facts, [reworded], OPTIONS);
     expect(plan.flag).toEqual([{ id: 'f1', proposed: reworded }]);
     expect(plan.add).toEqual([]);
@@ -100,11 +123,7 @@ describe('mergeFacts', () => {
   });
 
   it('never flags an archived fact for a similar draft; it adds instead', () => {
-    const plan = mergeFacts(
-      [existing('f1', { status: 'archived' })],
-      [draft({ text: 'Ran onboarding for 12 new B2B clients at Example Ltd' })],
-      OPTIONS,
-    );
+    const plan = mergeFacts([existing('f1', { status: 'archived' })], [reworded12()], OPTIONS);
     expect(plan.flag).toEqual([]);
     expect(plan.add).toHaveLength(1);
   });
@@ -135,7 +154,7 @@ describe('mergeFacts', () => {
 
   it('matches each existing fact at most once: exact matches win over similar ones', () => {
     const facts = [existing('f1')];
-    const similar = draft({ text: 'Ran onboarding for 12 new B2B clients at Example Ltd' });
+    const similar = reworded12();
     const plan = mergeFacts(facts, [similar, draft()], OPTIONS);
     expect(plan.unchanged).toBe(1);
     expect(plan.flag).toEqual([]);
@@ -386,6 +405,25 @@ describe('mergeFacts: the same CV read twice with different wording', () => {
     ];
     const plan = mergeFacts(facts, [pdfAvailable], OPTIONS);
     expect(plan).toMatchObject({ add: [], unchanged: 1, skippedArchived: 0 });
+  });
+
+  it('skips the archived claim of a split bullet instead of pairing it with an active one', () => {
+    const facts = [
+      existing('sql', {}, fact('skill', 'SQL', skills)),
+      existing('python', { status: 'archived' }, fact('skill', 'Python', skills)),
+    ];
+    const plan = mergeFacts(
+      facts,
+      [fact('skill', 'Python scripting', pdfSkills), fact('skill', 'SQL querying', pdfSkills)],
+      OPTIONS,
+    );
+    expect(plan).toMatchObject({ add: [], flag: [], unchanged: 1, skippedArchived: 1 });
+  });
+
+  it('never groups quotes with no letters or digits', () => {
+    const facts = profileFrom([fact('skill', 'SQL', '—')]);
+    const plan = mergeFacts(facts, [fact('skill', 'Spreadsheets', '–')], OPTIONS);
+    expect(plan.add).toHaveLength(1);
   });
 
   it('matches each fact at most once when a CV repeats a quote', () => {
