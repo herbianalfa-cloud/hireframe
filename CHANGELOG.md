@@ -3,6 +3,15 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+
+## [0.2.1] - 2026-10-01
+### Fixed
+- The v0.2.0 deploy failed with "Invalid service account (hireframe-fns@)" from Secret Manager. The runtime account is now the full email, from one constant in `functions/src/config.ts`, with a test that it stays a full email.
+
+### Changed
+- RUNBOOK Functions setup: step 2 also enables `eventarc`, `firebaseextensions` and `cloudbilling`; step 7 also grants the deployer `roles/iam.serviceAccountUser` on the App Engine default account (the Firebase CLI pre-check).
+
+## [0.2.0] - 2026-10-01
 ### Added
 - M2 Profile brain:
   - **CV → facts:** `parseCv` reads an uploaded PDF or DOCX (up to 5 MB), extracts the text and asks a Sonnet-class model for atomic facts (one claim each, multi-claim bullets split), each with a verbatim evidence quote checked against the CV. See ADR-018.
@@ -34,13 +43,6 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - add the `web.app` origin and `/__/auth/handler` redirect URI to the OAuth web client;
   - close sign-ups and account deletion under User actions, with no Identity Platform upgrade (ADR-015).
 - New recovery entries, and the SECURITY checklist is updated.
-
-## [0.2.1] - 2026-10-01
-### Fixed
-- The v0.2.0 deploy failed with "Invalid service account (hireframe-fns@)" from Secret Manager. The runtime account is now the full email, from one constant in `functions/src/config.ts`, with a test that it stays a full email.
-
-### Changed
-- RUNBOOK Functions setup: step 2 also enables `eventarc`, `firebaseextensions` and `cloudbilling`; step 7 also grants the deployer `roles/iam.serviceAccountUser` on the App Engine default account (the Firebase CLI pre-check).
 
 ## [0.1.0] - 2026-09-30
 ### Added
