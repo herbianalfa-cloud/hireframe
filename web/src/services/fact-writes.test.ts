@@ -63,6 +63,24 @@ describe('buildFactWrite', () => {
     expect(write.update).toEqual({ status: 'archived', version: 4, updatedAt: NOW });
   });
 
+  it('sets, then removes, an evidence link', () => {
+    const url = 'https://example.com/portfolio';
+    const set = buildFactWrite(raw, { evidenceUrl: url }, 'edit', NOW);
+    expect(set.update).toEqual({ evidenceUrl: url, version: 4, updatedAt: NOW });
+    expect(set.snapshot.evidenceUrl).toBe(url);
+
+    const linked = { ...raw, evidenceUrl: url };
+    const cleared = buildFactWrite(linked, { evidenceUrl: null }, 'edit', NOW);
+    expect(cleared.update).toEqual({ evidenceUrl: deleteField(), version: 4, updatedAt: NOW });
+    expect(cleared.snapshot).toEqual({ ...raw, version: 4, updatedAt: NOW });
+  });
+
+  it('never removes a required field, even when patched with null', () => {
+    const write = buildFactWrite(raw, { text: null, tags: ['b2b'] }, 'edit', NOW);
+    expect(write.update).toEqual({ tags: ['b2b'], version: 4, updatedAt: NOW });
+    expect(write.snapshot.text).toBe(raw.text);
+  });
+
   it('keeps a pending review on a plain edit', () => {
     const write = buildFactWrite(flagged, { tags: ['b2b'] }, 'edit', NOW);
     expect(write.update).not.toHaveProperty('review');

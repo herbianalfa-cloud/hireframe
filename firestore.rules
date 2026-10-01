@@ -31,7 +31,11 @@ service cloud.firestore {
         && data.tags is list && data.tags.size() <= 20
         && data.lanes is list && data.lanes.size() <= 4
         && data.lanes.hasOnly(['primary', 'secondary', 'opportunistic', 'wildcard'])
-        && data.status in ['active', 'archived'];
+        && data.status in ['active', 'archived']
+        // Optional owner-set link (ADR-024): https only, no whitespace, mirrors EvidenceUrlSchema.
+        && (!('evidenceUrl' in data)
+            || (data.evidenceUrl is string && data.evidenceUrl.size() <= 500
+                && data.evidenceUrl.matches('^https://\\S+$')));
     }
 
     function factPath(profileId, factId) {
@@ -45,8 +49,8 @@ service cloud.firestore {
       let before = resource.data;
       let after = request.resource.data;
       let changed = after.diff(before).affectedKeys();
-      return changed.hasOnly(['type', 'text', 'evidence', 'dates', 'tags', 'lanes', 'status',
-                              'review', 'version', 'updatedAt'])
+      return changed.hasOnly(['type', 'text', 'evidence', 'evidenceUrl', 'dates', 'tags', 'lanes',
+                              'status', 'review', 'version', 'updatedAt'])
         && after.version == before.version + 1
         && after.updatedAt == request.time
         && validFactContent(after)

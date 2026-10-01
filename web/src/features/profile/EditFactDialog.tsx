@@ -1,4 +1,10 @@
-import { FACT_TYPES, FactContentSchema, LANES, type Fact } from '@hireframe/shared';
+import {
+  EvidenceUrlSchema,
+  FACT_TYPES,
+  FactContentSchema,
+  LANES,
+  type Fact,
+} from '@hireframe/shared';
 import { Loader2 } from 'lucide-react';
 import { useState, type SubmitEvent } from 'react';
 
@@ -18,6 +24,7 @@ interface FormState {
   type: Fact['type'];
   text: string;
   evidence: string;
+  evidenceUrl: string;
   tags: string;
   lanes: readonly Lane[];
   start: string;
@@ -28,6 +35,7 @@ const FIELD_MESSAGES: Record<string, string> = {
   type: 'Choose a type.',
   text: 'Enter the fact, up to 500 characters.',
   evidence: 'Enter the supporting quote, up to 1000 characters.',
+  evidenceUrl: 'Enter a full https:// link, up to 500 characters, or leave it empty.',
   tags: 'Use up to 20 tags, each up to 40 characters.',
   lanes: 'Choose from the listed lanes.',
   start: 'Use YYYY or YYYY-MM, for example 2021 or 2021-03.',
@@ -39,6 +47,7 @@ function initialState(fact: Fact): FormState {
     type: fact.type,
     text: fact.text,
     evidence: fact.evidence,
+    evidenceUrl: fact.evidenceUrl ?? '',
     tags: fact.tags.join(', '),
     lanes: fact.lanes,
     start: fact.dates.start ?? '',
@@ -78,13 +87,16 @@ function EditForm({ view, onClose }: { view: FactView; onClose: () => void }) {
         .filter(Boolean),
       lanes: form.lanes,
     });
-    if (!parsed.success) {
+    const evidenceUrl = form.evidenceUrl.trim();
+    const urlValid = evidenceUrl === '' || EvidenceUrlSchema.safeParse(evidenceUrl).success;
+    if (!parsed.success || !urlValid) {
       const next: Record<string, string> = {};
-      for (const issue of parsed.error.issues) {
+      for (const issue of parsed.error?.issues ?? []) {
         const [first, second] = issue.path;
         const key = String(first === 'dates' ? second : first);
         next[key] ??= FIELD_MESSAGES[key] ?? issue.message;
       }
+      if (!urlValid) next.evidenceUrl = FIELD_MESSAGES.evidenceUrl ?? '';
       setErrors(next);
       return;
     }
@@ -96,6 +108,7 @@ function EditForm({ view, onClose }: { view: FactView; onClose: () => void }) {
     if (content.type !== fact.type) patch.type = content.type;
     if (content.text !== fact.text) patch.text = content.text;
     if (evidenceEditable && content.evidence !== fact.evidence) patch.evidence = content.evidence;
+    if (evidenceUrl !== (fact.evidenceUrl ?? '')) patch.evidenceUrl = evidenceUrl || null;
     if (content.dates.start !== fact.dates.start || content.dates.end !== fact.dates.end) {
       patch.dates = content.dates;
     }
@@ -169,6 +182,25 @@ function EditForm({ view, onClose }: { view: FactView; onClose: () => void }) {
             maxLength={1000}
             onChange={(event) => {
               set('evidence', event.target.value);
+            }}
+          />
+        )}
+      </Field>
+      <Field
+        label="Evidence link"
+        hint="Optional. A page that backs this up, for example a portfolio or certificate."
+        error={errors.evidenceUrl}
+      >
+        {(control) => (
+          <Input
+            {...control}
+            type="url"
+            inputMode="url"
+            value={form.evidenceUrl}
+            placeholder="https://"
+            maxLength={500}
+            onChange={(event) => {
+              set('evidenceUrl', event.target.value);
             }}
           />
         )}

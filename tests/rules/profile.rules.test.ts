@@ -26,7 +26,7 @@ import {
   writeBatch,
   type DocumentData,
 } from 'firebase/firestore';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   buildAcceptReview,
@@ -97,15 +97,17 @@ function dbFor(who: 'anon' | 'stranger' | 'owner'): TestFirestore {
   return env.authenticatedContext(who === 'owner' ? OWNER : STRANGER).firestore();
 }
 
-async function seed(options: { withOwner?: boolean; withReview?: boolean } = {}): Promise<void> {
-  const { withOwner = true, withReview = false } = options;
+async function seed(
+  options: { withOwner?: boolean; withReview?: boolean; extra?: DocumentData } = {},
+): Promise<void> {
+  const { withOwner = true, withReview = false, extra = {} } = options;
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
     if (withOwner) await setDoc(doc(db, DOCS.appConfig), { ownerUid: OWNER, schemaVersion: 1 });
-    await setDoc(doc(db, PATHS.fact(FACT_ID)), seededFact(withReview));
+    await setDoc(doc(db, PATHS.fact(FACT_ID)), { ...seededFact(withReview), ...extra });
     await setDoc(doc(db, PATHS.factVersion(FACT_ID, 1)), {
-      snapshot: seededFact(false),
+      snapshot: { ...seededFact(false), ...extra },
       change: 'created',
       at: CREATED,
     });
@@ -287,6 +289,65 @@ describe('fact edits (owner)', () => {
   });
 });
 
+describe('evidence links (ADR-024)', () => {
+  const LINK = 'https://example.com/portfolio';
+
+  beforeEach(async () => {
+    await seed();
+  });
+
+  it('allows the owner to add a link as a new version', async () => {
+    await assertSucceeds(edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump } }));
+  });
+
+  it('allows changing and removing a link', async () => {
+    await seed({ extra: { evidenceUrl: LINK } });
+    const changed = 'https://example.org/certificate';
+    await assertSucceeds(
+      edit(dbFor('owner'), {
+        factPatch: { evidenceUrl: changed, ...bump },
+        snapshot: factAfter({ evidenceUrl: changed }),
+      }),
+    );
+    await seed({ extra: { evidenceUrl: LINK } });
+    await assertSucceeds(
+      edit(dbFor('owner'), {
+        factPatch: { evidenceUrl: deleteField(), ...bump },
+        snapshot: factAfter({}),
+      }),
+    );
+  });
+
+  it.each([
+    ['http', 'http://example.com'],
+    ['a javascript: link', 'javascript:alert(1)'],
+    ['a link with whitespace', 'https://example.com/a b'],
+    ['a bare scheme', 'https://'],
+    ['an oversized link', `https://example.com/${'a'.repeat(481)}`],
+    ['a non-string', 42],
+  ])('denies %s', async (_name, evidenceUrl) => {
+    await assertFails(edit(dbFor('owner'), { factPatch: { evidenceUrl, ...bump } }));
+  });
+
+  it('denies a link without the snapshot, or with a snapshot that lacks it', async () => {
+    await assertFails(
+      edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump }, withSnapshot: false }),
+    );
+    await assertFails(
+      edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump }, snapshot: factAfter({}) }),
+    );
+  });
+
+  it.each(['anon', 'stranger'] as const)('denies %s', async (who) => {
+    await assertFails(edit(dbFor(who), { factPatch: { evidenceUrl: LINK, ...bump } }));
+  });
+
+  it('denies the owner before config/app exists (fails closed)', async () => {
+    await seed({ withOwner: false });
+    await assertFails(edit(dbFor('owner'), { factPatch: { evidenceUrl: LINK, ...bump } }));
+  });
+});
+
 describe('accepting or keeping a flagged change', () => {
   beforeEach(async () => {
     await seed({ withReview: true });
@@ -429,6 +490,19 @@ describe('batches built by web/src/services/fact-writes.ts', () => {
     await assertSucceeds(
       commit((raw) => buildFactWrite(raw, { status: 'active' }, 'unarchive', serverTimestamp())),
     );
+  });
+
+  it('passes the rules for adding, then removing, an evidence link', async () => {
+    await seed();
+    const link = 'https://example.com/portfolio';
+    await assertSucceeds(
+      commit((raw) => buildFactWrite(raw, { evidenceUrl: link }, 'edit', serverTimestamp())),
+    );
+    await assertSucceeds(
+      commit((raw) => buildFactWrite(raw, { evidenceUrl: null }, 'edit', serverTimestamp())),
+    );
+    const after = await getDoc(doc(dbFor('owner'), PATHS.fact(FACT_ID)));
+    expect(after.data()).not.toHaveProperty('evidenceUrl');
   });
 
   it('passes the rules for accepting a proposed change', async () => {

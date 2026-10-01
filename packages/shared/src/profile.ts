@@ -42,6 +42,7 @@ export const FACT_LIMITS = {
   /** Model drafts: short, because each draft is one claim. */
   draftText: 300,
   evidence: 1000,
+  evidenceUrl: 500,
   tags: 20,
   tag: 40,
   /** One parse writes each fact plus its v1 snapshot, so 200 facts stay under 500 batch writes. */
@@ -84,6 +85,15 @@ export const FactReviewSchema = z.object({
 });
 export type FactReview = z.infer<typeof FactReviewSchema>;
 
+/**
+ * A link to outside evidence (a portfolio page, a certificate). Owner-set only (ADR-024): it is
+ * not part of FactContent, so a model drafting from CV or note text can never set one.
+ */
+export const EvidenceUrlSchema = z
+  .url({ protocol: /^https$/ })
+  .max(FACT_LIMITS.evidenceUrl)
+  .regex(/^https:\/\/\S+$/);
+
 export const FactSchema = FactContentSchema.extend({
   source: z.enum(FACT_SOURCES),
   sourceDocId: z.string().min(1).exactOptional(),
@@ -92,6 +102,7 @@ export const FactSchema = FactContentSchema.extend({
   review: FactReviewSchema.exactOptional(),
   /** False when `evidence` is not a verbatim quote of the source text (shown in the UI). */
   evidenceVerified: z.boolean(),
+  evidenceUrl: EvidenceUrlSchema.exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),

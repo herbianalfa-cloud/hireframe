@@ -18,12 +18,17 @@ export const EDITABLE_FACT_FIELDS = [
   'type',
   'text',
   'evidence',
+  'evidenceUrl',
   'dates',
   'tags',
   'lanes',
   'status',
 ] as const;
 export type EditableFactField = (typeof EDITABLE_FACT_FIELDS)[number];
+/** Editable fields a fact may lack. A `null` in a patch removes one; elsewhere it is ignored. */
+const OPTIONAL_FACT_FIELDS: readonly string[] = ['evidenceUrl'];
+
+/** `undefined` leaves a field alone; `null` removes an optional one. */
 export type FactPatch = Partial<Record<EditableFactField, unknown>>;
 
 export interface FactWrite {
@@ -51,20 +56,26 @@ export function buildFactWrite(
   options: { clearReview?: boolean } = {},
 ): FactWrite {
   const version = Number(raw.version) + 1;
-  const cleanPatch = Object.fromEntries(
-    Object.entries(patch).filter(
-      ([key, value]) =>
-        (EDITABLE_FACT_FIELDS as readonly string[]).includes(key) && value !== undefined,
-    ),
+  const entries = Object.entries(patch).filter(
+    ([key, value]) =>
+      (EDITABLE_FACT_FIELDS as readonly string[]).includes(key) && value !== undefined,
   );
+  const cleanPatch = Object.fromEntries(entries.filter(([, value]) => value !== null));
+  const removed = entries
+    .filter(([key, value]) => value === null && OPTIONAL_FACT_FIELDS.includes(key))
+    .map(([key]) => key);
+  if (options.clearReview) removed.push('review');
   const update: DocumentData = {
     ...cleanPatch,
+    ...Object.fromEntries(removed.map((key) => [key, deleteField()])),
     version,
     updatedAt: serverNow,
-    ...(options.clearReview ? { review: deleteField() } : {}),
   };
-  const snapshot: DocumentData = { ...raw, ...cleanPatch, version, updatedAt: serverNow };
-  if (options.clearReview) delete snapshot.review;
+  const snapshot: DocumentData = Object.fromEntries(
+    Object.entries({ ...raw, ...cleanPatch, version, updatedAt: serverNow }).filter(
+      ([key]) => !removed.includes(key),
+    ),
+  );
   return { version, update, snapshot, change };
 }
 

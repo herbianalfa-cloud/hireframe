@@ -298,6 +298,45 @@ describe('Edit dialog', () => {
     expect(updateFact).not.toHaveBeenCalled();
   });
 
+  it('adds an https evidence link and rejects anything else', async () => {
+    const user = userEvent.setup();
+    const view = makeFact('a');
+    givenFacts([view]);
+    vi.mocked(updateFact).mockResolvedValue();
+    render(<ProfilePage />);
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit fact' });
+    const link = within(dialog).getByLabelText('Evidence link');
+    await user.type(link, 'http://example.com');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(within(dialog).getByText(/Enter a full https:\/\/ link/)).toBeDefined();
+    expect(updateFact).not.toHaveBeenCalled();
+
+    await user.clear(link);
+    await user.type(link, 'https://example.com/portfolio');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(updateFact).toHaveBeenCalledWith(view, { evidenceUrl: 'https://example.com/portfolio' });
+  });
+
+  it('removes an evidence link when the field is cleared', async () => {
+    const user = userEvent.setup();
+    const view = makeFact('a', { evidenceUrl: 'https://example.com/portfolio' });
+    givenFacts([view]);
+    vi.mocked(updateFact).mockResolvedValue();
+    render(<ProfilePage />);
+
+    const card = screen.getByRole('link', { name: /Evidence link/ });
+    expect(card.getAttribute('href')).toBe('https://example.com/portfolio');
+    expect(card.getAttribute('rel')).toBe('noopener noreferrer');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit fact' });
+    await user.clear(within(dialog).getByLabelText('Evidence link'));
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(updateFact).toHaveBeenCalledWith(view, { evidenceUrl: null });
+  });
+
   it('shows the write error and stays open when saving fails', async () => {
     const user = userEvent.setup();
     givenFacts([makeFact('a')]);
