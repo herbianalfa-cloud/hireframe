@@ -20,7 +20,7 @@ CV and profile facts; job/application history; alert-email content; API keys (An
 | Data loss | Weekly JSON backup to Storage (8 kept); Firestore PITR optional; events are append-only |
 | Account takeover | Google account 2FA (user); owner-only auth; no password auth enabled; sign-ups disabled |
 | Dependency supply chain | Dependabot; `npm audit` in CI (fail on high); lockfile committed; pinned GitHub Actions by SHA; deploys use keyless Workload Identity Federation limited to this repo, `v*` tags and the approved `production` environment (ADR-014) |
-| Sensitive data in logs | Functions logger takes fixed event names and scalar fields only, redacts emails/phones and truncates strings; errors are logged by class and code, never message (zod issues and SDK errors can echo input); third-party console output is off (Anthropic SDK `logLevel: 'off'`, which `ANTHROPIC_LOG` can't override; pdf.js `verbosity: 0`); tests assert fixture CV text never reaches the log or the console on success and on every failure path (model timeout/abort, unusable output, extraction and store errors). Never log full descriptions or CV text |
+| Sensitive data in logs | Functions logger takes fixed event names and scalar fields only; the source HTTP client logs a host and a fixed label, never a URL (Adzuna's key travels in the query string), and scans log counts, never job text; redacts emails/phones and truncates strings; errors are logged by class and code, never message (zod issues and SDK errors can echo input); third-party console output is off (Anthropic SDK `logLevel: 'off'`, which `ANTHROPIC_LOG` can't override; pdf.js `verbosity: 0`); tests assert fixture CV text never reaches the log or the console on success and on every failure path (model timeout/abort, unusable output, extraction and store errors). Never log full descriptions or CV text |
 
 ## Data retention
 - `skip` job descriptions purged after 60 days (metadata kept for metrics).
@@ -31,7 +31,7 @@ CV and profile facts; job/application history; alert-email content; API keys (An
 ## Security checklist before first deploy
 - [x] Rules tests pass for every collection (owner allow, anon deny, other-user deny) (M1, `npm run test:rules`)
 - [x] App Check enforced on Firestore and Storage (M1 RUNBOOK step 16, 2026-09-30)
-- [ ] All secrets in Secret Manager; gitleaks clean on full history (Anthropic key in Secret Manager, read only by `hireframe-fns`; Reed/Adzuna/HMAC from M3/M6)
+- [ ] All secrets in Secret Manager; gitleaks clean on full history (Anthropic key in Secret Manager, read only by `hireframe-fns`; Reed and Adzuna keys from M3, mounted only on `scanNow` and never logged, ADR-025; HMAC from M6)
 - [x] Budget alerts + Anthropic limit set
 - [ ] HMAC verified with a replay test
 - [ ] Injection eval cases pass

@@ -4,7 +4,7 @@ Principle: **spend in proportion to promise.** Each stage is cheaper than the ne
 
 | Stage | Input | Method | Cost | Output |
 |---|---|---|---|---|
-| S0 Dedupe | Normalised job | Code | Free | Drop duplicates (merge sources). Freshness is an S1 rule, not S0 |
+| S0 Dedupe | Normalised job | Code | Free | Drop duplicates (merge sources). Freshness is an S1 rule, not S0. Built in M3 (ADR-030): jobs wait at `s0` until M4 judges them |
 | S1 Hard rules | Title, metadata, snippet | Code (criteria rules) | Free | `skip` with rule ID, or pass |
 | S2 Triage | Title, company, location, salary, ≤ 600 chars of description | Cheap model | ~£0.001 | Lane (`primary / secondary / opportunistic / wildcard / none`), seniority read, quick blockers; pass or `skip` |
 | S3 Deep read | Full description + company metadata + profile facts | Deep model (batched, cached profile) | ~£0.01–0.02 | Requirements extracted and matched → verdict, fit, luck, reason, gaps |

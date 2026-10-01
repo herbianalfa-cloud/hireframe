@@ -10,7 +10,7 @@
 7. Secrets go into Secret Manager via `firebase functions:secrets:set`. Never paste them into chat or code.
 
 ## Firebase setup
-Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
+Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2); Part D adds the job sources (M3). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
 
 ### Part A: before the first deploy
 1. **Create Firestore.**
@@ -165,12 +165,12 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
 28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
     ```bash
-    for FN in parseCv addFact resetProfile; do
-      gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers
+    for FN in parseCv addFact resetProfile scanNow; do
+      gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers --project=hireframe-f6b03
     done
     ```
     Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list.
-29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` are listed in `europe-west2`.
+29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` (and `scanNow` from M3) are listed in `europe-west2`.
 30. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
 31. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
 32. **Check versioning.** Edit one fact, then open its **History**: v1 and v2 are both there. Add an **Evidence link** (https only) while you're there.
@@ -197,6 +197,55 @@ To change the cap or the exchange rate later, add `monthlyCapPence` (number, pen
 
 Then deploy (step 27), do step 28 for `resetProfile`, and steps 33–34. To clean up the duplicates from the v0.2.1 re-upload, use **Remove upload** on the second upload, or **Reset profile** (Profile → Danger zone) and upload once more.
 
+### Part D: Sources (M3)
+Before the `v0.3.0` deploy. Design: ADR-025 (robots.txt and keyed APIs), ADR-029 (ingest and `scanNow`), ADR-031 (watchlist). The Reed and Adzuna keys are already in Secret Manager.
+
+**A. Reed terms (optional)**
+37. If your Reed sign-up email or developer page shows API terms, paste **only** the clauses about rate limits, attribution and permitted use into the PR or chat. **Never paste the key.** Without them, ADR-025's conservative budget (≤ 30 calls per scan, ≤ 300 a day) stays the basis.
+
+**B. Check the secrets and grant access** (Cloud Shell, the **>_** icon)
+38. Check the exact names; the code reads these spellings. Each line should print a path ending in the secret's name:
+    ```bash
+    gcloud config set project hireframe-f6b03
+    for S in REED_API_KEY ADZUNA_APP_ID ADZUNA_APP_KEY; do gcloud secrets describe $S --format='value(name)'; done
+    ```
+    If one is spelled differently, create a new secret with the exact name (secrets can't be renamed).
+39. Let the functions read the keys, and let the deployer see them. Paste this block; it prints nothing secret.
+    ```bash
+    PROJECT_ID=hireframe-f6b03
+    gcloud config set project $PROJECT_ID
+    FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+    SA=github-deployer@$PROJECT_ID.iam.gserviceaccount.com
+    for S in REED_API_KEY ADZUNA_APP_ID ADZUNA_APP_KEY; do
+      gcloud secrets add-iam-policy-binding $S --member="serviceAccount:$FNS" --role=roles/secretmanager.secretAccessor
+      gcloud secrets add-iam-policy-binding $S --member="serviceAccount:$SA" --role=roles/secretmanager.viewer
+    done
+    ```
+40. *(Optional, for local live scans)* Add three lines to `functions/.secret.local` (gitignored): `REED_API_KEY=…`, `ADZUNA_APP_ID=…`, `ADZUNA_APP_KEY=…`.
+
+**C. Curate the watchlist** (about 30–45 minutes; ADR-031)
+41. Open `tmp/watchlist-candidates.csv` in a spreadsheet app. It's a draft of well-known London/UK B2B SaaS companies and startups, all unverified. Delete rows you don't want, add companies you know (name, domain, hq), and paste a careers or job-board link in `careersUrl` where you have one. Save as CSV.
+42. In the terminal run `node scripts/detect-ats.ts tmp/watchlist-candidates.csv`. It asks only the official job-board APIs (Greenhouse, Lever, Ashby, Workable), 1 request per second per site, so it takes several minutes. It never opens careers pages.
+43. Open `tmp/watchlist-review.csv`. Each row has a `status`:
+    - `confirmed`: the board's own name matches. `decision` is already `keep`.
+    - `review`: a board was found, but its name can't be confirmed, or there's more than one. Click `board_url`, check it's the right company and that it hires in the UK, then type `keep` (use this board), `keep-none` (keep the company, no board) or `drop`.
+    - `not-found`: no board. Type `keep-none` to keep the company for matching aggregator jobs, or leave it blank to leave it out.
+44. Run `node scripts/detect-ats.ts --write tmp/watchlist-review.csv`. It writes `packages/shared/src/watchlist-seed.ts`, or lists the rows that still need a decision. Commit the seed.
+
+**D. Try it locally**
+45. Run `npm run dev`, sign in as **Dev Owner**, open **System** and click **Scan now**. Every source runs against fake APIs. The fake Acme "Product Analyst" posting merges into the seeded LinkedIn-alert job, and Senior and Junior roles at the same company stay separate.
+46. Click **Scan now** again straight away. It says the last scan finished moments ago and skips. After 30 seconds, scan again: **0 new**, everything counted as known.
+47. *(Optional)* `LIVE=1 npm run dev` scans the real public boards with the real seed into the emulator. Nothing reaches production.
+
+**E. Deploy `v0.3.0`**
+48. Merge the PR, push tag `v0.3.0`, then **Actions → Deploy → Review deployments → Approve**.
+49. **Let the browser call `scanNow`** (new callable). In Cloud Shell:
+    `gcloud functions add-invoker-policy-binding scanNow --region=europe-west2 --member=allUsers --project=hireframe-f6b03`
+    If the deploy job failed at the IAM step for `scanNow`, open that run in GitHub Actions and click **Re-run failed jobs** (approve again if asked).
+50. Open the app on your phone → **System** → **Scan now**. It takes 1–3 minutes. Every source card should be **OK**, or show why not.
+51. In Firestore, check `jobs` has documents with `stage: s0`, `runs` has one `succeeded` or `partial` run, and `sources/adzuna.quota.dayCount` is 20 or less.
+52. If a source breaks later, add `disabledSources` (an array of strings, e.g. `adzuna`) to `config/app` in the console. It's off from the next scan, with no deploy.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -210,6 +259,9 @@ Then deploy (step 27), do step 28 for `resetProfile`, and steps 33–34. To clea
 - **A callable fails in the browser with a CORS error or 403:** it isn't publicly invocable yet. Do Part C step 28 for it.
 - **Reset profile fails, and the logs show 403 on `storage.objects.delete`:** the runtime account still has `storage.objectViewer` instead of `storage.objectUser`. See "Upgrading a v0.2.1 project" in Part C.
 - **The Storage rules deploy asks to grant `firebaserules.firestoreServiceAgent`, or the owner gets "permission denied" on uploads:** do the Part C step 25 check.
+- **A source card shows Failing or Degraded:** its "Why" line names the cause. `a board no longer exists`: fix that company's `ats.token` in `companies/{id}` or set `watch` to false (boards missing 3 scans in a row are listed under **Broken job boards**). `the site asked us to slow down`: wait for the next scan; Adzuna's daily quota resets at midnight UK time. `robots.txt does not allow it` or a changed response shape: switch the source off with `disabledSources` and open an issue.
+- **Scan now says "A scan is already running"** long after the last one: a scan that died leaves `locks/scan` for 12 minutes, then the next scan takes over.
+- **Deploy fails with 403 on a Reed or Adzuna secret:** Part D step 39 hasn't run.
 - **"The monthly AI spend cap has been reached":** check `usage/{yyyy-mm}` in Firestore. Raise `config/app.monthlyCapPence` deliberately, or wait for next month. Stale `reservations` entries expire on their own after 15 minutes.
 
 ## Local setup (per machine)
@@ -221,9 +273,9 @@ Then deploy (step 27), do step 28 for `resetProfile`, and steps 33–34. To clea
 6. **Run the app:** `npm run dev` builds the functions, starts the emulators (project `demo-hireframe`, UI on http://127.0.0.1:4000, including Functions) and the app on http://127.0.0.1:5173. Criteria v1 is seeded.
    - In the Google pop-up, pick **Dev Owner** to see the shell.
    - Pick **Add new account** to see "No access".
-   - Nothing touches production. CV reading and "Add a fact" use a fake model, which always returns the fake CV's facts.
+   - Nothing touches production. CV reading and "Add a fact" use a fake model, which always returns the fake CV's facts. **System → Scan now** uses fake job APIs, a fake watchlist and one seeded LinkedIn-alert job.
 7. **Fake CVs to upload:** `node scripts/make-cv-fixtures.ts` writes `tmp/fixtures/fake-cv.pdf`, `fake-cv.docx` and a `fake-cv-revised` pair (one reworded bullet, to try **Accept change**).
-8. **Real model locally (costs money):** put `ANTHROPIC_API_KEY=<key>` in `functions/.secret.local` (gitignored), then run `LIVE=1 npm run dev`. Only upload fake CVs.
+8. **Real model and real job APIs locally (the model costs money):** put `ANTHROPIC_API_KEY=<key>` in `functions/.secret.local` (gitignored), plus `REED_API_KEY`, `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` for those sources, then run `LIVE=1 npm run dev`. Only upload fake CVs. Live scans count against the Reed and Adzuna quotas.
 
 ## Building with Claude Code
 Open the repo in Claude Code and start with:
