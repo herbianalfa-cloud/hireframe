@@ -9,6 +9,7 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   parseCv: 540,
   addFact: 120,
   resetProfile: 120,
+  scanNow: 540,
 } as const;
 
 export type CallableName = keyof typeof CALLABLE_TIMEOUT_SECONDS;
