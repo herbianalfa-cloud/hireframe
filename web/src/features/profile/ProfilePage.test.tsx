@@ -10,6 +10,7 @@ import {
   cvKindOf,
   keepReview,
   parseCv,
+  removeUpload,
   unarchiveFact,
   updateFact,
   uploadCv,
@@ -29,6 +30,7 @@ vi.mock('@/services/profile', () => ({
   cvKindOf: vi.fn(),
   uploadCv: vi.fn(),
   parseCv: vi.fn(),
+  removeUpload: vi.fn(),
   addFact: vi.fn(),
   updateFact: vi.fn(),
   archiveFact: vi.fn(),
@@ -490,5 +492,143 @@ describe('Upload CV', () => {
     expect(screen.getByText('Timed out')).toBeDefined();
     expect(screen.getByText(/Upload it again to retry/)).toBeDefined();
     expect(screen.queryByText('Reading')).toBeNull();
+  });
+});
+
+function parsedDocument(
+  id: string,
+  overrides: Partial<DocumentView['document']> = {},
+): DocumentView {
+  return {
+    id,
+    document: {
+      kind: 'pdf',
+      storagePath: 'x',
+      status: 'parsed',
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+      ...overrides,
+    },
+  };
+}
+
+describe('Remove upload', () => {
+  const flagged = makeFact('older', {
+    sourceDocId: 'doc-0',
+    version: 2,
+    review: {
+      kind: 'changed',
+      proposed: {
+        type: 'skill',
+        text: 'Builds dashboards in SQL and dbt',
+        evidence: 'x',
+        dates: {},
+        tags: [],
+        lanes: [],
+      },
+      docId: 'doc-1',
+      at: NOW,
+    },
+  });
+
+  it('previews the counts, then archives and reports what it did', async () => {
+    const user = userEvent.setup();
+    const facts = [makeFact('a'), makeFact('b'), makeFact('edited', { version: 3 }), flagged];
+    givenFacts(facts);
+    givenDocuments([parsedDocument('doc-1')]);
+    vi.mocked(removeUpload).mockResolvedValue({
+      archive: ['a', 'b'],
+      dropReviews: ['older'],
+      skippedEdited: 1,
+    });
+    render(<ProfilePage />);
+
+    await user.click(screen.getByRole('button', { name: /Remove upload from/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove this upload?' });
+    expect(
+      within(dialog).getByText(
+        'Archives 2 facts and drops 1 proposed change. Keeps 1 fact you edited.',
+      ),
+    ).toBeDefined();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove upload' }));
+
+    expect(removeUpload).toHaveBeenCalledWith('doc-1', facts);
+    expect(
+      await screen.findByText(
+        'Upload removed. Archived 2 facts and dropped 1 proposed change. Kept 1 fact you edited.',
+      ),
+    ).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows the write error and stays open when removing fails', async () => {
+    const user = userEvent.setup();
+    givenFacts([makeFact('a')]);
+    givenDocuments([parsedDocument('doc-1')]);
+    vi.mocked(removeUpload).mockRejectedValue(new Error('offline'));
+    render(<ProfilePage />);
+
+    await user.click(screen.getByRole('button', { name: /Remove upload from/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove this upload?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Remove upload' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toContain("Couldn't save");
+  });
+
+  it('marks a removed upload and offers no second removal', () => {
+    givenFacts([]);
+    givenDocuments([parsedDocument('doc-1', { removedAt: NOW })]);
+    render(<ProfilePage />);
+
+    expect(screen.getByText('Removed')).toBeDefined();
+    expect(screen.queryByRole('button', { name: /Remove upload/ })).toBeNull();
+  });
+
+  it('offers nothing to remove while an upload is still being read', () => {
+    givenFacts([]);
+    givenDocuments([parsedDocument('doc-1', { status: 'parsing', updatedAt: new Date() })]);
+    render(<ProfilePage />);
+    expect(screen.queryByRole('button', { name: /Remove upload/ })).toBeNull();
+  });
+});
+
+describe('Identical uploads', () => {
+  it('says a re-uploaded identical file was not read again', async () => {
+    const user = userEvent.setup();
+    givenFacts([]);
+    vi.mocked(uploadCv).mockResolvedValue('doc2');
+    vi.mocked(parseCv).mockResolvedValue({
+      docId: 'doc2',
+      duplicateOf: 'doc1',
+      summary: {
+        factsExtracted: 0,
+        added: 0,
+        unchanged: 0,
+        flagged: 0,
+        skippedArchived: 0,
+        duplicatesInCv: 0,
+        unverified: 0,
+        missingFromCv: 0,
+      },
+    });
+    render(<ProfilePage />);
+
+    await user.upload(
+      screen.getByLabelText('CV file (PDF or Word)'),
+      new File(['fake cv'], 'alex-example.pdf', { type: 'application/pdf' }),
+    );
+    expect(await screen.findByText(/same file as an earlier upload/)).toBeDefined();
+  });
+
+  it('names the original upload in the list', () => {
+    givenFacts([]);
+    givenDocuments([
+      parsedDocument('doc-2', { duplicateOf: 'doc-1aaaaaaaaaaaaaaa' }),
+      parsedDocument('doc-1aaaaaaaaaaaaaaa'),
+    ]);
+    render(<ProfilePage />);
+    expect(screen.getByText(/^Same file as the upload from .+\. Nothing changed\.$/)).toBeDefined();
+    // Only the original can be removed; the copy changed nothing.
+    expect(screen.getAllByRole('button', { name: /Remove upload from/ })).toHaveLength(1);
   });
 });

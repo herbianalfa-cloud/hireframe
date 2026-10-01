@@ -3,6 +3,7 @@ import {
   criteriaVersionId,
   type CriteriaContent,
   type FactChange,
+  type UploadRemovalPlan,
 } from '@hireframe/shared';
 import { deleteField, type DocumentData, type FieldValue } from 'firebase/firestore';
 
@@ -99,6 +100,53 @@ export function buildAcceptReview(raw: DocumentData, serverNow: FieldValue): Fac
 export function buildKeepReview(raw: DocumentData, serverNow: FieldValue): FactWrite {
   if (!raw.review) throw new Error('This fact has no proposed change.');
   return buildFactWrite(raw, {}, 'review_kept', serverNow, { clearReview: true });
+}
+
+/** Facts per removal batch: two writes each, so a batch stays under Firestore's 500 writes. */
+export const REMOVAL_FACTS_PER_BATCH = 240;
+
+export interface RemovalBatch {
+  facts: { factId: string; write: FactWrite }[];
+  /** The document update `{ removedAt, updatedAt }`; only on the last batch. */
+  document?: DocumentData;
+}
+
+/**
+ * "Remove upload" (ADR-023) as client batches: archive each untouched fact, drop each proposed
+ * change from the upload ("keep current"), and mark the document removed in the last batch, so a
+ * document is only marked once everything before it committed. `rawById` holds the facts as
+ * stored, for exact snapshots.
+ */
+export function buildUploadRemoval(
+  plan: UploadRemovalPlan,
+  rawById: ReadonlyMap<string, DocumentData>,
+  serverNow: FieldValue,
+  factsPerBatch = REMOVAL_FACTS_PER_BATCH,
+): RemovalBatch[] {
+  const raw = (factId: string): DocumentData => {
+    const found = rawById.get(factId);
+    if (!found) throw new Error('A fact to remove is missing. Reload and try again.');
+    return found;
+  };
+  const writes = [
+    ...plan.archive.map((factId) => ({
+      factId,
+      write: buildFactWrite(raw(factId), { status: 'archived' }, 'archive', serverNow),
+    })),
+    ...plan.dropReviews.map((factId) => ({
+      factId,
+      write: buildKeepReview(raw(factId), serverNow),
+    })),
+  ];
+  const batches: RemovalBatch[] = [];
+  for (let start = 0; start < writes.length; start += factsPerBatch) {
+    batches.push({ facts: writes.slice(start, start + factsPerBatch) });
+  }
+  const document = { removedAt: serverNow, updatedAt: serverNow };
+  const last = batches.at(-1);
+  if (last) last.document = document;
+  else batches.push({ facts: [], document });
+  return batches;
 }
 
 export interface CriteriaWrite {

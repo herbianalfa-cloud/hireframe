@@ -174,6 +174,8 @@ export const ProfileDocumentSchema = z.object({
   model: z.string().min(1).exactOptional(),
   promptVersion: z.string().min(1).exactOptional(),
   costPence: z.number().min(0).exactOptional(),
+  /** Set by "Remove upload" (ADR-023): its untouched facts were archived. The file stays. */
+  removedAt: z.date().exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),

@@ -7,6 +7,7 @@ import {
   buildCriteriaWrite,
   buildFactWrite,
   buildKeepReview,
+  buildUploadRemoval,
 } from './fact-writes';
 
 const CREATED = Timestamp.fromDate(new Date('2026-10-01T09:00:00Z'));
@@ -131,5 +132,58 @@ describe('buildCriteriaWrite', () => {
 
   it('rejects invalid content before anything is written', () => {
     expect(() => buildCriteriaWrite({ ...CRITERIA_SEED_V1, freshness_days: 0 }, 2, NOW)).toThrow();
+  });
+});
+
+describe('buildUploadRemoval', () => {
+  const rawById = new Map<string, DocumentData>([
+    ['a', { ...raw, version: 1 }],
+    ['b', { ...raw, version: 1 }],
+    ['c', flagged],
+  ]);
+
+  it('archives, drops reviews and marks the document in one batch', () => {
+    const batches = buildUploadRemoval(
+      { archive: ['a', 'b'], dropReviews: ['c'], skippedEdited: 0 },
+      rawById,
+      NOW,
+    );
+    expect(batches).toHaveLength(1);
+    const [batch] = batches;
+    expect(batch?.facts.map(({ factId, write }) => [factId, write.change, write.version])).toEqual([
+      ['a', 'archive', 2],
+      ['b', 'archive', 2],
+      ['c', 'review_kept', 4],
+    ]);
+    expect(batch?.facts[0]?.write.update).toEqual({
+      status: 'archived',
+      version: 2,
+      updatedAt: NOW,
+    });
+    expect(batch?.document).toEqual({ removedAt: NOW, updatedAt: NOW });
+  });
+
+  it('splits large removals and marks the document only in the last batch', () => {
+    const batches = buildUploadRemoval(
+      { archive: ['a', 'b'], dropReviews: ['c'], skippedEdited: 0 },
+      rawById,
+      NOW,
+      2,
+    );
+    expect(batches.map((batch) => batch.facts.length)).toEqual([2, 1]);
+    expect(batches[0]?.document).toBeUndefined();
+    expect(batches[1]?.document).toBeDefined();
+  });
+
+  it('still marks the document when there is nothing to archive', () => {
+    expect(
+      buildUploadRemoval({ archive: [], dropReviews: [], skippedEdited: 2 }, rawById, NOW),
+    ).toEqual([{ facts: [], document: { removedAt: NOW, updatedAt: NOW } }]);
+  });
+
+  it('refuses when a planned fact is not loaded', () => {
+    expect(() =>
+      buildUploadRemoval({ archive: ['zzz'], dropReviews: [], skippedEdited: 0 }, rawById, NOW),
+    ).toThrow(/Reload/);
   });
 });

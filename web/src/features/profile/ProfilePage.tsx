@@ -26,7 +26,7 @@ export function ProfilePage() {
         </p>
       ) : null}
       <div className="mt-6 space-y-6">
-        <UploadCard documents={documents} />
+        <UploadCard documents={documents} facts={facts} />
         {facts.status === 'ready' ? <ReviewSection facts={facts.data} /> : null}
         <AddFactForm />
         <FactList state={facts} />
