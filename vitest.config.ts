@@ -39,7 +39,10 @@ export default defineConfig({
           setupFiles: ['web/src/test/setup.ts'],
         },
       },
-      { test: { name: 'scripts', include: ['scripts/**/*.test.ts'] } },
+      {
+        ...withSource(NODE_CONDITIONS),
+        test: { name: 'scripts', include: ['scripts/**/*.test.ts'] },
+      },
     ],
     coverage: {
       provider: 'v8',

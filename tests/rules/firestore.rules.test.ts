@@ -2,7 +2,8 @@
  * Firestore rules tests (PRD R1, ADR-011). Run with `npm run test:rules` (needs the emulators).
  * Every collection in the data model: anon deny, other user deny, owner read. Writes that don't
  * match an allowed shape are denied to the owner too; the allowed M2 writes (fact edits, criteria
- * versions) are tested in profile.rules.test.ts and criteria.rules.test.ts.
+ * versions) are tested in profile.rules.test.ts and criteria.rules.test.ts, and
+ * scripts/rules-writes.test.ts fails if any other path gains a client write rule.
  */
 import { readFileSync } from 'node:fs';
 
@@ -14,7 +15,16 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import { DOCS } from '@hireframe/shared';
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 
 const OWNER = 'owner-uid';
@@ -122,6 +132,22 @@ describe('with an owner configured', () => {
       await assertFails(getDoc(doc(dbFor(who), path)));
       await expectAllWritesDenied(dbFor(who), path);
     }
+  });
+
+  it('denies the owner schema-valid writes to Admin-only documents', async () => {
+    const db = dbFor('owner');
+    const at = { createdAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 1 };
+    const usage = { spendPence: 0, capPence: 1500, reservations: {}, calls: {}, tokens: {} };
+    await assertFails(setDoc(doc(db, 'usage/2026-10'), { ...usage, byPurpose: {}, ...at }));
+    await assertFails(updateDoc(doc(db, 'usage/2026-09'), { spendPence: 0 }));
+    const document = {
+      kind: 'pdf',
+      storagePath: 'profile/documents/doc-2/cv.pdf',
+      status: 'parsed',
+      ...at,
+    };
+    await assertFails(setDoc(doc(db, 'profile/main/documents/doc-2'), document));
+    await assertFails(updateDoc(doc(db, 'profile/main/documents/doc-1'), { status: 'parsed' }));
   });
 
   it('does not let a stranger overwrite config/app to claim ownership', async () => {
