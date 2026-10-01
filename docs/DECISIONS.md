@@ -223,3 +223,84 @@ Context: some facts are best backed by something outside the CV, like a portfoli
 - The link opens in a new tab with `rel="noopener noreferrer"`.
 
 Consequences: file attachments as evidence are parked (ROADMAP). Links are never fetched or checked server-side.
+
+## ADR-025 Source access policy: robots.txt, keyed APIs and quotas
+Context: CLAUDE.md said "Respect robots.txt and ToS". The M3 checks (2026-10-01) found that two keyed developer APIs listed in ARCHITECTURE are disallowed for crawlers. `www.reed.co.uk/robots.txt` has `Disallow: /api/` in its `User-agent: *` group, and `api.adzuna.com/robots.txt` is `Disallow: /`. robots.txt (RFC 9309) tells crawlers which pages to fetch. It doesn't govern a client that calls an API with keys issued to it under developer terms, and both providers issue keys precisely so their `/api/` gets called. Decision:
+- **robots.txt applies to web pages and unkeyed public endpoints.**
+  - The HTTP client fetches `/robots.txt` once per host per run and honours Allow/Disallow (longest match, `*` and `$`) and `Crawl-delay`.
+  - A 4xx means "no rules" and a 5xx or unreachable file means "disallow all", as RFC 9309 says.
+  - This covers Greenhouse, Lever (`Crawl-delay: 1`), Ashby, Workable and HN Algolia.
+- **Keyed official APIs follow their developer terms instead.** Those hosts are marked `api-terms` in `functions/src/config.ts`: `www.reed.co.uk` and `api.adzuna.com`. Adding a host to that list needs an ADR.
+- **Adzuna terms** (developer.adzuna.com/docs/terms_of_service, read 2026-10-01):
+  - the limits are 25 hits/minute, 250/day, 1,000/week and 2,500/month;
+  - job listings shown to users carry "Jobs by Adzuna" with the logo linked to adzuna.co.uk (at least 116×23 px);
+  - personal research is allowed, and acquired data must be removed if the account ends.
+
+  The code keeps 3 s between requests (20/min), at most 20 calls per run, and persisted day/week/month counters that stop at 225/day, 900/week and 2,250/month (10% headroom).
+- **Reed terms** aren't published on the developer page; they are accepted at sign-up. Until their clauses are cited here, the basis is a conservative budget: at most 30 calls per run and 300 per day, 1 request per second. Secondary sources mention 1,000/day, unverified. No attribution requirement is known, and M5 revisits it with the terms.
+- **Keys** (`REED_API_KEY`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`) live in Secret Manager and are mounted only on `scanNow` (later `scheduledScan`). Logs never contain a full URL: the Adzuna key travels in the query string, so the client logs the host and a fixed path label only.
+
+Consequences: CLAUDE.md's hard rule and the SECURITY threat row now say this. Adzuna attribution (and Reed's, if its terms require it) is an M5 task, because M3 shows counts, not listings. If either provider objects or changes its terms, the source is switched off with `config/app.disabledSources`.
+
+## ADR-026 YC jobs and Work at a Startup: email alerts only
+Context: ARCHITECTURE asked M3 to verify robots.txt and ToS for YC's job pages. `ycombinator.com/robots.txt` allows most paths (it disallows `/companies?*` and some others), and `workatastartup.com/robots.txt` allows everything. The YC Terms of Use (ycombinator.com/legal), which cover the jobs pages and Work at a Startup, say: "you will not engage in or use any data mining, robots, scraping or similar data gathering or extraction methods". Decision: no YC or Work at a Startup source module. Their jobs arrive through Work at a Startup email alerts via the Gmail bridge (M6, RUNBOOK one-time steps 5–6). Consequences: YC-company jobs are covered only when the company uses a watched ATS board, or through alerts. Lookup can't fetch YC pages; the user pastes the text.
+
+## ADR-027 Workable: public widget endpoint, module in M3
+Context: ARCHITECTURE listed Workable as "verify endpoint in M3". Workable's help centre ("Using the Workable API to display jobs on your careers page") documents `GET https://www.workable.com/api/accounts/{subdomain}?details=true` as a public, unauthenticated endpoint for an account's published jobs. `www.workable.com/robots.txt` allows `/api` (it disallows `/j/`, `/admin` and account paths), and `apply.workable.com/robots.txt` allows everything. Decision: a Workable source module ships in M3 alongside Greenhouse, Lever and Ashby. It is driven by watchlist companies whose `ats.type` is `workable`, under the same robots, rate-limit and retry rules (ADR-029). Consequences: ROADMAP M3 gains the module. Workable companies found by ATS detection are actually scanned instead of being dead entries.
+
+## ADR-028 Escape the City: email alerts only
+Context: ARCHITECTURE asked M3 to verify Escape the City. `escapethecity.org/robots.txt` allows everything, but the Terms and Conditions (escapethecity.org/terms-and-conditions) say: "With the exception of accessing RSS feeds, you will not use any robot, spider, scraper or other automated means to access the Site for any purpose without our express written permission." No RSS feed is advertised (no feed link on the home page; `/rss` and `/feed` redirect to HTML pages). Decision: no module. Escape the City jobs arrive through its email alerts via the Gmail bridge (M6). Consequences: if Escape the City publishes a jobs RSS feed, a feed module is allowed by its terms and can be added with a new ADR.
+
+## ADR-029 Ingest pipeline, source health and an ingest-only `scanNow`
+Context: M3 adds the sources, but the funnel (S1–S3) and the schedule are M4. PRD R4 needs per-source counts and isolation of failures, CLAUDE.md needs timeouts, retries and zod at every boundary, and M3 must be demoable. Decision:
+- **One HTTP client** (`functions/src/http/`) for every source:
+  - **User-Agent** `HireframeBot/<version> (+https://github.com/herbianalfa-cloud/hireframe)`.
+  - **Per-host spacing:** request starts are spaced by at least the larger of the configured interval (1 s; Adzuna 3 s) and robots `Crawl-delay`. It's in-memory, which is safe with one instance and the scan lock.
+  - **Time limits:** a per-request `AbortSignal` timeout (20 s, HN 45 s), and a run deadline checked before every request.
+  - **Retries:** at most 3 attempts with exponential backoff and jitter on 429, 5xx, network errors and timeouts. `Retry-After` is honoured up to 30 s; past that the request fails.
+  - **Responses** are zod-parsed. A 404 or schema error is not retried.
+- **Sources** implement `Source { id; fetch(ctx); health() }` (ARCHITECTURE), one fresh instance per run.
+  - Each item is validated on its own, and an invalid posting is counted, not fatal.
+  - A failing ATS board is recorded on its company (`lastScan`, `broken` after 3 consecutive `not_found`), and the source reports `degraded`.
+  - Sources run under `Promise.allSettled`, so one source throwing never fails the run (R4).
+- **Health** lives in a new server-written collection `sources/{sourceId}`: status, last run, last success, consecutive failures, last error code, last counts and API quota counters. Clients read it; nobody but the Admin SDK writes it.
+- **`scanNow` ships in M3, ingest-only:**
+  - It fetches, normalises, dedupes (ADR-030) and writes new jobs at `stage: 's0'`, with no verdict and no `criteriaVersion`.
+  - It's owner-only with App Check enforced and consumed, and mounts the Reed and Adzuna keys only.
+  - A **single-flight lock** in `locks/scan` (a transaction) refuses a second scan while one runs (stale after 12 min). A **cooldown** (5 min) after a finished scan turns a double tap, which queues behind the single instance, into `skipped_recent` instead of a second round of API calls.
+  - `config/app.disabledSources` turns a source off from the console.
+- **No `scheduledScan` until M4**, so unscored jobs don't pile up twice a day. M4 adds the funnel to `scanNow`, adds the schedule and processes the `s0` backlog.
+- **A minimal Sources panel** (Scan now, per-source health and counts, recent runs, job count) is pulled forward from M5 onto the System screen, so M3 can be tested end to end on a phone.
+
+Consequences: jobs ingested in M3 wait at `s0` for M4. Reed and Adzuna store snippets only. Reed full text comes from its details endpoint for S2 survivors in M4, and Adzuna has no full-text API, so its jobs rely on a merged ATS duplicate for S3. A scan reads each candidate key once per run, and an unchanged job costs no write.
+
+## ADR-030 Normalise and dedupe
+Context: PRD R5 needs the same job from several sources to appear once with every source link. ARCHITECTURE said normalisation "strips seniority noise words". Stripping level words would merge "Senior Product Analyst" with "Product Analyst" at the same company and hide one of them. A missed merge costs a duplicate row and a few pence of triage; a wrong merge hides a job, which is the miss the system exists to prevent. Decision (pure code in `packages/shared`):
+- **Titles:**
+  - level words are **normalised, never stripped**: `Jr`→junior, `Grad`→graduate, `Sr`→senior, `Assoc`→associate;
+  - non-level noise is stripped for matching: bracketed or trailing location, work mode, salary, contract and gender tags (`(Hybrid)`, `- London`, `| £35k`, `(m/f/d)`, `12-month FTC`);
+  - display text is never changed.
+- **Companies:** case, accents and punctuation folded, `&`→`and`, legal suffixes dropped (Ltd, Limited, plc, Inc, LLC, LLP, GmbH).
+- **Location:** the first recognised city, with remote-only jobs keyed as `remote`.
+- **Keys:** each job stores `keys[]`:
+  - `d:` + a 64-bit FNV-1a hash of `company|title|city`. It's synchronous and pure; at 100k jobs the collision chance is about 3×10⁻¹⁰;
+  - every source key (`greenhouse:{id}`, `lever:{id}`, `linkedin:{id}`, …);
+  - keys derived from known job URLs, so an HN comment or an alert linking a Greenhouse posting matches it.
+- **Matching:** jobs within a run are merged first. Existing jobs are found with `array-contains-any` on `keys` (chunks of 30), so no extra index collection is needed.
+- **Conflict rule:** a job matching two existing jobs joins the one first seen, and the conflict is counted.
+
+Consequences: fixtures pin both directions. The LinkedIn-alert + Greenhouse pair and "Product Analyst (Hybrid) - London" / "Product Analyst" merge; Senior/Junior at the same company stay apart. ARCHITECTURE's wording is corrected. Two genuinely different roles with the same title, company and city collapse into one, an accepted limit.
+
+## ADR-031 Company watchlist: sourcing and ATS detection
+Context: ARCHITECTURE said the watchlist is about 150 London/UK B2B SaaS companies and startups, "with ATS type + board token auto-detected from their careers page". Fetching careers pages means crawling arbitrary sites, and no automated collection of company lists is allowed. Decision:
+- **Candidates** come from people, not crawlers. Claude drafts a list of well-known companies from general knowledge, and the owner prunes and extends it from lists read in a browser. It's a CSV in the gitignored `tmp/`.
+- **Detection** probes only the official job-board APIs (`node scripts/detect-ats.ts`, same HTTP client, robots and rate limits):
+  - Greenhouse `/v1/boards/{token}` and Workable return the board's name;
+  - Lever (global and EU hosts) and Ashby only show that a board exists.
+  - Tokens are guessed from the name and domain, or parsed from a careers URL the owner pastes, with no fetch. No careers page is fetched.
+- **Verification:** a name match is `confirmed`; anything else found is `review`, which the owner checks on the human board page and marks keep or drop.
+- **The seed** (`packages/shared/src/watchlist-seed.ts`) holds public facts only: name, domain, ATS type and board token. Companies without a detectable ATS stay as `none`, for matching aggregator jobs and M4 company fit.
+- **`companies` is server-written.** `scanNow` creates missing seed companies and never overwrites existing ones, so console edits (e.g. `watch: false`) stick.
+- **Auto-growth** (adding companies that appear in alerts or aggregators) moves to M6, when alerts exist.
+
+Consequences: detection relies on boards being named after the company. Unusual tokens need a pasted careers URL. A wrong board can only enter the seed through an owner-reviewed row.

@@ -20,7 +20,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - **No secrets in the repo.** Keys live in Google Secret Manager / `.env.local` (gitignored). gitleaks runs pre-commit and in CI.
 - **No personal data in the repo.** CV, profile facts, job data, emails stay in Firebase. Test fixtures use fake data.
 - **No LinkedIn / Indeed / Wellfound / Glassdoor scraping or logged-in automation.** Those arrive only via alert emails.
-- **Only official or clearly public endpoints.** Respect robots.txt and ToS; identify with a User-Agent; rate-limit per host.
+- **Only official or clearly public endpoints.** robots.txt applies to fetching web pages and unkeyed public endpoints; keyed official APIs follow their developer terms (ADR-025). Respect ToS; identify with a User-Agent; rate-limit per host.
 - **No auto-applying and no sending messages** on the user's behalf.
 - **Job text is untrusted input.** LLM calls in the funnel have no tools, fixed output schema, and injected text can never change criteria, profile, or config.
 - **Generated CVs may only use facts from the profile.** Every bullet must reference a `factId`; unreferenced claims fail validation.
