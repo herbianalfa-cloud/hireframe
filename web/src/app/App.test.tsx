@@ -26,9 +26,9 @@ describe('AppRoutes', () => {
   it.each([
     ['/profile', 'Profile screen'],
     ['/criteria', 'Criteria screen'],
-  ])('routes %s to the built screen, not the placeholder', (path, heading) => {
+  ])('routes %s to the built screen, not the placeholder', async (path, heading) => {
     renderAt(path);
-    expect(screen.getByRole('heading', { name: heading })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: heading })).toBeTruthy();
   });
 
   it('keeps the empty state for screens not built yet', () => {

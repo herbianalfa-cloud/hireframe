@@ -33,6 +33,8 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner and criteria, fake LLM unless `LIVE=1`)
 - `npm run test:rules` — Firestore + Storage security rules tests and emulator integration tests (`tests/emulator/`) (needs Java 21)
 - `npm run build` — build all workspaces (functions: esbuild bundle in `functions/deploy/`)
+- `npm run check:bundle` — web bundle budget after `build`: no chunk over 500 kB, initial JS under the gzip budget
+- `node scripts/smoke-functions-bundle.ts` — after `build`: the functions bundle imports and every function is in europe-west2
 - `node scripts/make-cv-fixtures.ts` — write fake CVs (PDF/DOCX) to `tmp/fixtures/` for local uploads
 - `npm run deploy` — deploy (CI only on `v*` tags; refuses to run locally)
 - `npm run eval` — funnel eval against the golden set *(from M4)*

@@ -1,5 +1,6 @@
 import {
   AddFactResultSchema,
+  clientTimeoutMs,
   CV_MIME_TYPES,
   FactSchema,
   FactVersionSchema,
@@ -36,7 +37,7 @@ import {
   type FactPatch,
   type FactWrite,
 } from './fact-writes';
-import { getFirebase } from './firebase';
+import { getFirebase, getFunctionsClient, getStorageClient } from './firebase';
 import { errorCode, logError } from './log';
 import { withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
@@ -64,8 +65,6 @@ export type LiveState<T> =
 export type Unsubscribe = () => void;
 
 const WRITE_TIMEOUT_MS = 15_000;
-const PARSE_TIMEOUT_MS = 560_000; // parseCv may run for up to 540 s
-const ADD_FACT_TIMEOUT_MS = 130_000;
 
 /** Starts a Firestore listener once Firebase is ready; the returned function stops it. */
 export function listen(
@@ -217,7 +216,7 @@ export function cvKindOf(file: Pick<File, 'name' | 'size' | 'type'>): CvKind {
 /** Uploads a CV to a new document ID and returns the ID. Nothing is written to Firestore. */
 export async function uploadCv(file: File): Promise<string> {
   const kind = cvKindOf(file);
-  const { db, storage } = await getFirebase();
+  const [{ db }, storage] = await Promise.all([getFirebase(), getStorageClient()]);
   const docId = doc(collection(db, PATHS.documents)).id;
   await withRetry(
     () =>
@@ -237,9 +236,9 @@ export async function uploadCv(file: File): Promise<string> {
 }
 
 export async function parseCv(docId: string): Promise<ParseCvResult> {
-  const { functions } = await getFirebase();
+  const functions = await getFunctionsClient();
   const call = httpsCallable(functions, 'parseCv', {
-    timeout: PARSE_TIMEOUT_MS,
+    timeout: clientTimeoutMs('parseCv'),
     limitedUseAppCheckTokens: true,
   });
   const result = await call({ docId });
@@ -247,9 +246,9 @@ export async function parseCv(docId: string): Promise<ParseCvResult> {
 }
 
 export async function addFact(text: string): Promise<AddFactResult> {
-  const { functions } = await getFirebase();
+  const functions = await getFunctionsClient();
   const call = httpsCallable(functions, 'addFact', {
-    timeout: ADD_FACT_TIMEOUT_MS,
+    timeout: clientTimeoutMs('addFact'),
     limitedUseAppCheckTokens: true,
   });
   const result = await call({ text });
@@ -260,7 +259,7 @@ export async function addFact(text: string): Promise<AddFactResult> {
 export function callableErrorMessage(error: unknown): string {
   const code = errorCode(error);
   if (code === 'functions/deadline-exceeded') {
-    return 'This is taking longer than usual. The result will appear here when it finishes.';
+    return 'This is taking longer than usual. Its status under Recent uploads shows how it ends.';
   }
   if (code?.startsWith('functions/') && code !== 'functions/internal' && error instanceof Error) {
     return error.message;
