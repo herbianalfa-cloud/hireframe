@@ -49,6 +49,7 @@ export const FACT_LIMITS = {
   factsPerCv: 200,
   factsPerAdd: 5,
   addFactInput: 2000,
+  fileName: 200,
 } as const;
 
 /** `YYYY` or `YYYY-MM`. */
@@ -158,12 +159,16 @@ export const DOC_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
 /** Lower-case hex SHA-256 of an uploaded file. */
 export const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
+export const FileNameSchema = z.string().trim().min(1).max(FACT_LIMITS.fileName);
+
 export const ProfileDocumentSchema = z.object({
   kind: z.enum(CV_KINDS),
   storagePath: z.string().min(1),
   status: z.enum(['parsing', 'parsed', 'failed']),
   /** Set by parseCv from the uploaded bytes (ADR-022). Missing on uploads before v0.2.2. */
   sha256: z.string().regex(SHA256_PATTERN).exactOptional(),
+  /** The name the file had on the owner's device. Missing on uploads before v0.2.3. Never logged. */
+  fileName: FileNameSchema.exactOptional(),
   errorCode: z.enum(PARSE_ERROR_CODES).exactOptional(),
   summary: ParseSummarySchema.exactOptional(),
   /**
@@ -197,6 +202,7 @@ export function isParseStalled(document: ProfileDocument, now: Date): boolean {
 
 export const ParseCvInputSchema = z.object({
   docId: z.string().regex(DOC_ID_PATTERN),
+  fileName: FileNameSchema,
 });
 export type ParseCvInput = z.infer<typeof ParseCvInputSchema>;
 

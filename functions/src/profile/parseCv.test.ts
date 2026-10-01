@@ -73,7 +73,7 @@ describe('parseCvHandler', () => {
     const { store, state } = memoryProfileStore();
     const { llm, calls } = llmReturning(FAKE_CV_EXTRACTION);
     const result = await parseCvHandler(
-      { docId: DOC_ID },
+      { docId: DOC_ID, fileName: 'cv.pdf' },
       deps({ [pdfPath]: makePdf(FAKE_CV_LINES) }, llm, store),
     );
 
@@ -92,10 +92,30 @@ describe('parseCvHandler', () => {
     expect(calls[0]?.system).toContain('exactly one claim');
   });
 
+  it('saves the original file name on the document', async () => {
+    const { store, state } = memoryProfileStore();
+    await parseCvHandler(
+      { docId: DOC_ID, fileName: '  Alex CV (final).pdf ' },
+      deps({ [pdfPath]: makePdf(FAKE_CV_LINES) }, llmReturning(FAKE_CV_EXTRACTION).llm, store),
+    );
+    expect(state.documents.get(DOC_ID)?.fileName).toBe('Alex CV (final).pdf');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', '   '],
+    ['over 200 characters', 'a'.repeat(201)],
+  ])('rejects a %s file name before touching storage', async (_name, fileName) => {
+    await expectHttpsError(
+      parseCvHandler({ docId: DOC_ID, fileName }, deps({}, llmReturning(FAKE_CV_EXTRACTION).llm)),
+      'invalid-argument',
+    );
+  });
+
   it('parses a DOCX CV', async () => {
     const { llm } = llmReturning(FAKE_CV_EXTRACTION);
     const result = await parseCvHandler(
-      { docId: DOC_ID },
+      { docId: DOC_ID, fileName: 'cv.pdf' },
       deps({ [docxPath]: await makeDocx(FAKE_CV_LINES) }, llm),
     );
     expect(result.summary.unverified).toBe(0);
@@ -104,12 +124,12 @@ describe('parseCvHandler', () => {
   it('merges a re-upload: nothing new, one reworded fact flagged, nothing overwritten', async () => {
     const { store, state } = memoryProfileStore();
     await parseCvHandler(
-      { docId: DOC_ID },
+      { docId: DOC_ID, fileName: 'cv.pdf' },
       deps({ [pdfPath]: makePdf(FAKE_CV_LINES) }, llmReturning(FAKE_CV_EXTRACTION).llm, store),
     );
     const secondId = 'zyxwvutsrq9876543210';
     const second = await parseCvHandler(
-      { docId: secondId },
+      { docId: secondId, fileName: 'cv.pdf' },
       deps(
         { [STORAGE_PATHS.profileDocument(secondId, 'pdf')]: makePdf(FAKE_CV_REVISED_LINES) },
         llmReturning(FAKE_CV_REVISED_EXTRACTION).llm,
@@ -127,7 +147,7 @@ describe('parseCvHandler', () => {
   it('is stable when the same CV is read again as a PDF with every fact reworded', async () => {
     const { store, state } = memoryProfileStore();
     await parseCvHandler(
-      { docId: DOC_ID },
+      { docId: DOC_ID, fileName: 'cv.pdf' },
       deps(
         { [docxPath]: await makeDocx(FAKE_CV_LINES) },
         llmReturning(FAKE_CV_EXTRACTION).llm,
@@ -136,7 +156,7 @@ describe('parseCvHandler', () => {
     );
     const secondId = 'zyxwvutsrq9876543210';
     const second = await parseCvHandler(
-      { docId: secondId },
+      { docId: secondId, fileName: 'cv.pdf' },
       deps(
         { [STORAGE_PATHS.profileDocument(secondId, 'pdf')]: makePdf(FAKE_CV_LINES) },
         llmReturning(FAKE_CV_REWORDED_EXTRACTION).llm,
@@ -160,12 +180,12 @@ describe('parseCvHandler', () => {
     async function parseTwice(firstOutcome: CvExtraction | Error = FAKE_CV_EXTRACTION) {
       const { store, state } = memoryProfileStore();
       await parseCvHandler(
-        { docId: DOC_ID },
+        { docId: DOC_ID, fileName: 'cv.pdf' },
         deps({ [pdfPath]: pdf }, llmReturning(firstOutcome).llm, store),
       ).catch(() => undefined);
       const second = llmReturning(FAKE_CV_REWORDED_EXTRACTION);
       const result = await parseCvHandler(
-        { docId: secondId },
+        { docId: secondId, fileName: 'cv.pdf' },
         deps({ [STORAGE_PATHS.profileDocument(secondId, 'pdf')]: pdf }, second.llm, store),
       );
       return { result, state, secondCalls: second.calls };
@@ -209,7 +229,7 @@ describe('parseCvHandler', () => {
     };
     const { store, state } = memoryProfileStore();
     const result = await parseCvHandler(
-      { docId: DOC_ID },
+      { docId: DOC_ID, fileName: 'cv.pdf' },
       deps({ [pdfPath]: makePdf(FAKE_CV_LINES) }, llmReturning(invented).llm, store),
     );
     expect(result.summary).toMatchObject({ added: 1, unverified: 1 });
@@ -234,7 +254,10 @@ describe('parseCvHandler', () => {
   ])('rejects %s', async (_name, files, code, errorCode) => {
     const { store, state } = memoryProfileStore();
     const { llm, calls } = llmReturning(FAKE_CV_EXTRACTION);
-    await expectHttpsError(parseCvHandler({ docId: DOC_ID }, deps(files, llm, store)), code);
+    await expectHttpsError(
+      parseCvHandler({ docId: DOC_ID, fileName: 'cv.pdf' }, deps(files, llm, store)),
+      code,
+    );
     expect(calls).toHaveLength(0);
     if (errorCode)
       expect(state.documents.get(DOC_ID)).toMatchObject({ status: 'failed', errorCode });
@@ -252,7 +275,7 @@ describe('parseCvHandler', () => {
     const capped = memoryProfileStore();
     await expectHttpsError(
       parseCvHandler(
-        { docId: DOC_ID },
+        { docId: DOC_ID, fileName: 'cv.pdf' },
         deps(files, llmReturning(new SpendCapExceededError()).llm, capped.store),
       ),
       'resource-exhausted',
@@ -262,7 +285,7 @@ describe('parseCvHandler', () => {
     const failed = memoryProfileStore();
     await expectHttpsError(
       parseCvHandler(
-        { docId: DOC_ID },
+        { docId: DOC_ID, fileName: 'cv.pdf' },
         deps(files, llmReturning(new LlmOutputError('schema', 3.1)).llm, failed.store),
       ),
       'unavailable',
@@ -298,7 +321,21 @@ describe('parseCvHandler', () => {
 
     /** Runs the handler the way the callable does, behind safeHandler. */
     const run = (d: ParseCvDeps) =>
-      safeHandler('parseCv', (data: unknown) => parseCvHandler(data, d))({ docId: DOC_ID });
+      safeHandler('parseCv', (data: unknown) => parseCvHandler(data, d))({
+        docId: DOC_ID,
+        fileName: 'cv.pdf',
+      });
+
+    it('never writes the file name', async () => {
+      const name = 'Secret Name CV.pdf';
+      const { llm } = llmReturning(FAKE_CV_EXTRACTION);
+      await safeHandler('parseCv', (data: unknown) =>
+        parseCvHandler(data, deps({ [pdfPath]: pdf() }, llm)),
+      )({ docId: DOC_ID, fileName: name });
+      const written = JSON.stringify([logs, spies.flatMap((spy) => spy.mock.calls)]);
+      expect(written).not.toContain(name);
+      expect(written).not.toContain('Secret Name');
+    });
 
     it('on success and on a CV with too little text', async () => {
       const { llm } = llmReturning(FAKE_CV_EXTRACTION);
@@ -327,7 +364,7 @@ describe('parseCvHandler', () => {
       await run(deps({ [pdfPath]: file }, llm, store));
       const secondId = 'zyxwvutsrq9876543210';
       await parseCvHandler(
-        { docId: secondId },
+        { docId: secondId, fileName: 'cv.pdf' },
         deps({ [STORAGE_PATHS.profileDocument(secondId, 'pdf')]: file }, llm, store),
       );
       expectNoCvText();

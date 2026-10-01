@@ -42,7 +42,7 @@ export interface ProfileStore {
   /** Marks the document `parsing`; throws if it's already parsed or being parsed. */
   beginParse(
     docId: string,
-    upload: { kind: CvKind; storagePath: string; sha256: string },
+    upload: { kind: CvKind; storagePath: string; sha256: string; fileName: string },
     now: Date,
   ): Promise<void>;
   /** An earlier parsed upload with the same bytes, if any (ADR-022). */
@@ -101,7 +101,7 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
   }
 
   return {
-    async beginParse(docId, { kind, storagePath, sha256 }, now) {
+    async beginParse(docId, { kind, storagePath, sha256, fileName }, now) {
       const ref = firestore.doc(PATHS.document(docId));
       await firestore.runTransaction(async (tx) => {
         const snapshot = await tx.get(ref);
@@ -122,6 +122,7 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
           kind,
           storagePath,
           sha256,
+          fileName,
           status: 'parsing',
           createdAt,
           updatedAt: now,

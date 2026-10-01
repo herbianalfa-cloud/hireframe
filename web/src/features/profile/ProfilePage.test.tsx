@@ -105,6 +105,30 @@ describe('Profile facts', () => {
     expect(screen.getByText(/active facts/).textContent).toContain('2 active facts');
   });
 
+  it.each([
+    ['CV', 'cv'],
+    ['manual', 'manual'],
+  ] as const)(
+    'shows the evidence quote of a %s fact behind a visible disclosure',
+    async (_n, source) => {
+      const user = userEvent.setup();
+      givenFacts([makeFact('a', { source, evidence: 'Built SQL dashboards for the ops team' })]);
+      render(<ProfilePage />);
+
+      const summary = screen.getByText('Evidence', { selector: 'summary' });
+      const details = summary.closest('details');
+      expect(details?.open).toBe(false);
+      // The closed disclosure must look openable, not like an empty heading.
+      expect(summary.querySelector('svg')).not.toBeNull();
+      const quote = screen.getByText('Built SQL dashboards for the ops team');
+      expect(quote.tagName).toBe('BLOCKQUOTE');
+      expect(details?.contains(quote)).toBe(true);
+
+      await user.click(summary);
+      expect(details?.open).toBe(true);
+    },
+  );
+
   it('shows a designed empty state with no facts', () => {
     givenFacts([]);
     render(<ProfilePage />);
@@ -401,7 +425,7 @@ describe('Upload CV', () => {
 
     expect(uploadCv).toHaveBeenCalledWith(file);
     expect(await screen.findByText(/Reading your CV…/)).toBeDefined();
-    expect(parseCv).toHaveBeenCalledWith('doc123');
+    expect(parseCv).toHaveBeenCalledWith('doc123', 'alex-example.pdf');
 
     finish({
       docId: 'doc123',
@@ -514,6 +538,24 @@ function parsedDocument(
     },
   };
 }
+
+describe('Upload rows', () => {
+  it('show the original file name, truncated with the full name in a tooltip', () => {
+    const long = `${'a'.repeat(150)}.pdf`;
+    givenFacts([]);
+    givenDocuments([
+      parsedDocument('doc-1', { fileName: 'Alex CV.pdf' }),
+      parsedDocument('doc-2', { fileName: long }),
+      parsedDocument('doc-3'),
+    ]);
+    render(<ProfilePage />);
+
+    const names = screen.getAllByTestId('upload-file-name');
+    expect(names.map((el) => el.textContent)).toEqual(['Alex CV.pdf', long]);
+    expect(names[1]?.getAttribute('title')).toBe(long);
+    expect(names[1]?.className).toContain('truncate');
+  });
+});
 
 describe('Remove upload', () => {
   const flagged = makeFact('older', {

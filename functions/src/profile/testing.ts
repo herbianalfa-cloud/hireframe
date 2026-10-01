@@ -11,6 +11,7 @@ export function memoryProfileStore(existing: ExistingFact[] = []) {
       {
         status: string;
         sha256?: string;
+        fileName?: string;
         duplicateOf?: string;
         errorCode?: ParseErrorCode;
         costPence?: number;
@@ -21,8 +22,8 @@ export function memoryProfileStore(existing: ExistingFact[] = []) {
   };
   let nextId = 0;
   const store: ProfileStore = {
-    beginParse(docId, { sha256 }) {
-      state.documents.set(docId, { status: 'parsing', sha256 });
+    beginParse(docId, { sha256, fileName }) {
+      state.documents.set(docId, { status: 'parsing', sha256, fileName });
       return Promise.resolve();
     },
     findParsedDuplicate(sha256, docId) {
