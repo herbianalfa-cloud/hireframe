@@ -1,11 +1,18 @@
 /**
  * `npm run dev`: runs inside `firebase emulators:exec --project demo-hireframe`, seeds a
- * fake owner (Auth user + `config/app`), then starts the Vite dev server. Stopping Vite
- * (Ctrl+C) stops the emulators too.
+ * fake owner (Auth user + `config/app`) and criteria v1, then starts the Vite dev server.
+ * Callables run in the Functions emulator with a fake LLM unless LIVE=1 (ADR-017).
+ * Stopping Vite (Ctrl+C) stops the emulators too.
  */
 import { spawn } from 'node:child_process';
 
-import { appConfigDocument, assertDemoProject, DEV_OWNER, ownerAccountBody } from './dev-seed.ts';
+import {
+  appConfigDocument,
+  assertDemoProject,
+  criteriaSeedDocuments,
+  DEV_OWNER,
+  ownerAccountBody,
+} from './dev-seed.ts';
 
 const projectId = assertDemoProject(process.env.GCLOUD_PROJECT);
 const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST;
@@ -39,15 +46,18 @@ await emulatorRequest(
   `http://${authHost}/identitytoolkit.googleapis.com/v1/projects/${projectId}/accounts:batchCreate`,
   ownerAccountBody(),
 );
-await emulatorRequest(
-  'PATCH',
-  `http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents/config/app`,
-  appConfigDocument(new Date()),
-);
+const documents = `http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents`;
+const now = new Date();
+await emulatorRequest('PATCH', `${documents}/config/app`, appConfigDocument(now));
+const criteria = criteriaSeedDocuments(now);
+await emulatorRequest('PATCH', `${documents}/criteria/v1`, criteria.v1);
+await emulatorRequest('PATCH', `${documents}/criteria/current`, criteria.current);
 
 console.log(
-  `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}). ` +
-    'In the sign-in pop-up pick that account; "Add new account" gives a non-owner.',
+  `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}) and criteria v1. ` +
+    'In the sign-in pop-up pick that account; "Add new account" gives a non-owner. ' +
+    `CV and note parsing use ${process.env.LIVE === '1' ? 'the real Anthropic API (LIVE=1)' : 'a fake model'}; ` +
+    'run `node scripts/make-cv-fixtures.ts` for fake CVs to upload.',
 );
 
 const vite = spawn('npm', ['run', 'dev', '-w', '@hireframe/web'], { stdio: 'inherit' });

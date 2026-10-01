@@ -20,9 +20,10 @@
     "scan:pii": "node scripts/check-pii.ts",
     "check": "npm run lint && npm run typecheck && npm run test && npm run scan:pii",
     "build": "npm run build --workspaces --if-present",
-    "dev": "firebase emulators:exec --only auth,firestore,storage --project demo-hireframe --ui \"node scripts/dev.ts\"",
+    "check:bundle": "node scripts/check-bundle.ts",
+    "dev": "npm run build -w @hireframe/functions && node scripts/prepare-dev-functions.ts && firebase emulators:exec --only auth,firestore,storage,functions --project demo-hireframe --ui \"node scripts/dev.ts\"",
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-hireframe \"vitest run -c vitest.rules.config.ts\"",
-    "deploy": "node scripts/assert-ci.ts && firebase deploy --only hosting,firestore,storage --project prod --non-interactive",
+    "deploy": "node scripts/assert-ci.ts && firebase deploy --only hosting,firestore,storage,functions --project prod --non-interactive",
     "prepare": "husky"
   },
   "devDependencies": {

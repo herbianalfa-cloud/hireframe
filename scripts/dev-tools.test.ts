@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { isCiDeploy } from './assert-ci.ts';
-import { appConfigDocument, assertDemoProject, DEV_OWNER, ownerAccountBody } from './dev-seed.ts';
+import {
+  appConfigDocument,
+  assertDemoProject,
+  criteriaSeedDocuments,
+  DEV_OWNER,
+  ownerAccountBody,
+  toRestValue,
+} from './dev-seed.ts';
 
 describe('isCiDeploy', () => {
   it('allows only GitHub Actions runs on a v* tag', () => {
@@ -30,5 +37,30 @@ describe('dev seed', () => {
     const doc = appConfigDocument(new Date('2026-09-30T08:00:00Z'));
     expect(doc.fields.ownerUid.stringValue).toBe(DEV_OWNER.uid);
     expect(doc.fields.createdAt.timestampValue).toBe('2026-09-30T08:00:00.000Z');
+  });
+});
+
+describe('criteria seed documents', () => {
+  it('encodes criteria v1 and the pointer as Firestore REST values', () => {
+    const { v1, current } = criteriaSeedDocuments(new Date('2026-10-01T09:00:00Z'));
+    expect(v1.fields.version).toEqual({ integerValue: '1' });
+    expect(v1.fields.freshness_days).toEqual({ integerValue: '14' });
+    expect(v1.fields.createdAt).toEqual({ timestampValue: '2026-10-01T09:00:00.000Z' });
+    expect(v1.fields.company_prefs).toMatchObject({
+      mapValue: {
+        fields: {
+          size: { arrayValue: { values: [{ integerValue: '20' }, { integerValue: '300' }] } },
+        },
+      },
+    });
+    expect(current.fields).toEqual({
+      version: { integerValue: '1' },
+      updatedAt: { timestampValue: '2026-10-01T09:00:00.000Z' },
+      schemaVersion: { integerValue: '1' },
+    });
+  });
+
+  it('encodes fractional numbers as doubles', () => {
+    expect(toRestValue(0.5)).toEqual({ doubleValue: 0.5 });
   });
 });

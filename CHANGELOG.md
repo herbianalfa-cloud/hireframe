@@ -3,7 +3,32 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Added
+- M2 Profile brain:
+  - **CV → facts:** `parseCv` reads an uploaded PDF or DOCX (up to 5 MB), extracts the text and asks a Sonnet-class model for atomic facts (one claim each, multi-claim bullets split), each with a verbatim evidence quote checked against the CV. See ADR-018.
+  - **Re-upload merge:** new facts are added, changed facts are flagged for review, archived facts aren't revived, nothing is overwritten.
+  - **Profile screen:** view, search, edit, archive and restore facts; every fact shows its source; accept or keep proposed changes; version history; add a fact from a note (`addFact`, Haiku-class model).
+  - **Criteria:** v1 seeded from FUNNEL.md (with structured excluded titles), an editable Criteria screen, immutable versions with a `criteria/current` pointer, and history. See ADR-019.
+  - **Spend cap from day one:** a minimal `llm.call()` reserves each call's worst case against the monthly cap before it runs and records the actual cost in `usage/{yyyy-mm}`. See ADR-016.
+  - **Rules:** the first client writes (versioned fact edits, criteria versions, CV uploads), each tested for owner allow, anon deny and other-user deny.
+  - **Functions:** first Cloud Functions in europe-west2 on a dedicated runtime account, App Check enforced and consumed, bundled with esbuild; fake model in the emulator. See ADR-017.
+  - **Docs:** RUNBOOK Functions setup (M2) and local-dev steps; `node scripts/make-cv-fixtures.ts` for fake CVs.
+  - **Title rules:** `checkTitle` applies excluded titles as "immediately preceded by", whole words, with lanes winning over every rule except seniority. See ADR-020.
+  - **Checks:** `npm run check:bundle` (web bundle budget) and a static guard listing every client-writable rules path; the CI smoke test now checks every function is in europe-west2.
+
+### Changed
+- `npm run dev` also runs the Functions emulator and seeds criteria v1; `npm run test:rules` also runs emulator integration tests; `npm run deploy` includes functions.
+- Web: Profile and Criteria load on first visit, the Functions and Storage SDKs on first use, and vendors split into cached chunks; initial JS down from 1.08 MB to about 0.97 MB with no chunk over 500 kB (ADR-021).
+- The region and callable timeouts are shared by functions and web (`packages/shared/src/callables.ts`).
+- The emulator's fake model records `fake:<model id>`, so fake spend can't be mistaken for real spend.
+
 ### Fixed
+- PR #4 review:
+  - streamed model calls now have a hard time limit (the SDK timeout stopped at the response headers), and each `llm.call()` has a budget inside its callable timeout;
+  - a call killed mid-flight is charged its worst case instead of vanishing from the month's spend (ADR-016);
+  - the Anthropic SDK logger and pdf.js warnings can no longer print CV text to the function logs;
+  - a CV whose parse was abandoned shows "Timed out" instead of "Reading" forever;
+  - the CSP allows the callables host.
 - RUNBOOK M1 setup:
   - enable the Firebase Storage API and create the bucket from the Firebase console;
   - add the `web.app` origin and `/__/auth/handler` redirect URI to the OAuth web client;

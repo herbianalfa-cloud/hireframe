@@ -3,7 +3,8 @@ rules_version = '2';
 // Owner-only access (docs/SECURITY.md, ADR-011). The owner UID is read from Firestore
 // `config/app` (cross-service rules; the Storage service agent needs
 // roles/firebaserules.firestoreServiceAgent, see docs/RUNBOOK.md). Fails closed.
-// M1 is read-only; CV upload (M2) opens writes with size/type limits and tests.
+// M2 opens one client write: the owner uploads a CV (PDF or DOCX, at most 5 MiB) to a new
+// `profile/documents/{docId}/cv.{pdf|docx}`. Uploads are immutable (no overwrite or delete).
 // `backups/**` and every other path have no client access (Admin SDK only).
 service firebase.storage {
   match /b/{bucket}/o {
@@ -14,8 +15,27 @@ service firebase.storage {
         && request.auth.uid == firestore.get(appConfig).data.get('ownerUid', null);
     }
 
+    // Mirrors MAX_CV_BYTES and CV_MIME_TYPES in packages/shared/src/profile.ts.
+    function validCv(fileName) {
+      let size = request.resource.size;
+      let type = request.resource.contentType;
+      return size > 0 && size <= 5 * 1024 * 1024
+        && ((fileName == 'cv.pdf' && type == 'application/pdf')
+          || (fileName == 'cv.docx'
+            && type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'));
+    }
+
     match /profile/documents/{allPaths=**} {
       allow read: if isOwner();
+    }
+
+    match /profile/documents/{docId}/{fileName} {
+      // `resource == null` makes "create" explicit, so an existing CV can never be overwritten
+      // (the Storage emulator evaluates every upload, including overwrites, as `create`).
+      allow create: if isOwner()
+        && resource == null
+        && docId.matches('^[A-Za-z0-9]{20}$')
+        && validCv(fileName);
     }
 
     match /cvs/{allPaths=**} {

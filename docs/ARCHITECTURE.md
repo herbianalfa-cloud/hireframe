@@ -56,16 +56,17 @@ interface Source { id: string; fetch(ctx): Promise<RawJob[]>; health(): SourceHe
 ## Data model (Firestore)
 All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 
-- `config/app` — owner UID, schedules, model names, caps (in pence), `fxUsdToGbp` (converts Anthropic's USD costs to pence), feature flags. M1 fields: `ownerUid`, `schemaVersion`, `createdAt`, `updatedAt` (`AppConfigSchema` in `packages/shared`). Written only by the Admin SDK or the Firebase console, never by clients (ADR-011)
-- `criteria/{version}` + `criteria/current` pointer — see FUNNEL.md seed
-- `profile/main/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', dates, tags[], lanes[], status: 'active'|'archived', version }`
-- `profile/main/documents/{docId}` — uploaded CVs (file in Storage), parse status
+- `config/app` — owner UID, schedules, model names, caps (in pence), `fxUsdToGbp` (converts Anthropic's USD costs to pence), feature flags. Fields so far: `ownerUid`, `schemaVersion`, `createdAt`, `updatedAt` (M1), optional `monthlyCapPence` and `fxUsdToGbp` overrides (M2, ADR-016) (`AppConfigSchema` in `packages/shared`). Written only by the Admin SDK or the Firebase console, never by clients (ADR-011)
+- `criteria/v{n}` (immutable) + `criteria/current` pointer `{ version }` — content keys as in the FUNNEL.md seed; the owner writes a version and the pointer move in one batch (ADR-019)
+- `profile/main/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', sourceDocId?, dates{start?,end?}, tags[], lanes[], status: 'active'|'archived', version, review?: {kind: 'changed', proposed, docId, at}, evidenceVerified }`. Created by `parseCv`/`addFact`; the owner edits with a versioned client batch (ADR-018)
+- `profile/main/facts/{factId}/versions/{n}` — immutable `{ snapshot, change, at }`: the fact exactly as it was at version n
+- `profile/main/documents/{docId}` — uploaded CV (file at Storage `profile/documents/{docId}/cv.{pdf|docx}`, max 5 MiB, immutable) and its parse status, summary, model, prompt version and cost
 - `companies/{companyId}` — `{ name, domain, ats: {type, token}, size?, stage?, hq, watch: bool, lastScannedAt }`
 - `jobs/{jobId}` — `{ dedupeKey, title, company, companyId?, location, remote, url, sources[{id, url, externalId, seenAt}], postedAt, firstSeenAt, descriptionRef, salary?, stage: 's0'..'s3', verdict?, fitScore?, luckScore?, reason?, matchedFactIds[], gaps[{type, text}], criteriaVersion, promptVersion, status: 'new'|'saved'|'applied'|'skipped'|'interview'|'offer'|'rejected', feedback?: {agree: bool, note?} }`
 - `jobs/{jobId}/description/raw` — full text (kept separate to keep list reads cheap). Purged after 60 days for `skip` jobs.
 - `cvs/{cvId}` — `{ jobId, profileVersion, content (structured), storagePaths {docx, pdf}, notes, createdAt }`
 - `runs/{runId}` — `{ trigger: 'schedule'|'manual', startedAt, finishedAt, status, perSource{}, perStage{}, costPence, errors[] }`
-- `usage/{yyyy-mm}` — `{ spendPence, capPence, calls{model: n}, tokens{} }` (transactional increments)
+- `usage/{yyyy-mm}` — `{ spendPence, capPence, reservations{id: {pence, at}}, calls{model: n}, tokens{model: {input, output, cacheRead, cacheWrite}}, byPurpose{} }`, month in Europe/London. `llm.call()` reserves a call's worst case and settles its actual cost in transactions (ADR-016)
 - `events/{eventId}` — append-only user actions (applied, skipped, feedback, criteria change) for analytics
 - `locks/scan` — single-flight scan lock (kept out of `runs` so run queries never return it)
 
@@ -79,12 +80,12 @@ All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 | `ingestEmailJobs` | HTTPS, HMAC-signed, from Apps Script | Parses alert payloads → jobs |
 | `getDigest` | HTTPS, HMAC-signed, from Apps Script | Returns digest HTML for latest morning run, or an explicit in-progress/failed notice |
 | `lookup` | Callable | URL/text → match or run funnel |
-| `parseCv` / `addFact` | Callable | Profile brain |
+| `parseCv` / `addFact` | Callable (owner, App Check) | Profile brain: CV → atomic facts merged into the profile; free-text note → facts (M2, ADR-018) |
 | `rescore` | Callable | Re-run S2–S3 on last 14 days with current criteria |
 | `generateCv` | Callable | Tailored CV + cover note |
 | `weeklyBackup` | Scheduled Sun 03:00 | JSON export of all collections to Storage (keep 8) |
 
-Timeouts: scan functions 540 s, memory 1 GiB, max instances 1.
+Timeouts: scan functions 540 s, memory 1 GiB, max instances 1. All functions run in `europe-west2` as the `hireframe-fns` service account and are bundled with esbuild for deploy (ADR-017). `parseCv` allows 540 s, `addFact` 120 s.
 
 ## Gmail bridge (Apps Script)
 - Gmail filters label alert emails `hireframe/alerts` (LinkedIn, Wellfound, WaaS, WTTJ, Reed, etc.).
@@ -99,6 +100,6 @@ Timeouts: scan functions 540 s, memory 1 GiB, max instances 1.
 
 ## Web app config and deploy
 - The web app reads its Firebase config from Hosting's `/__/firebase/init.json` at runtime; no Firebase config lives in the repo (ADR-012). App Check uses reCAPTCHA Enterprise; the public site key is a build-time variable.
-- Components never import Firebase; `web/src/services/` wraps auth, access checks and Firestore reads (with timeout + retry).
-- Deploy: `v*` tag → GitHub `production` environment approval → `check` + `test:rules` → build → keyless Workload Identity Federation → `firebase deploy --only hosting,firestore,storage` (ADR-014).
+- Components never import Firebase; `web/src/services/` wraps auth, access checks, Firestore reads and writes (with timeout + retry), Storage uploads and callables. Callables that spend money are never retried by the client.
+- Deploy: `v*` tag → GitHub `production` environment approval → `check` + `test:rules` → build (including the functions bundle) → keyless Workload Identity Federation → `firebase deploy --only hosting,firestore,storage,functions` (ADR-014, ADR-017).
 
