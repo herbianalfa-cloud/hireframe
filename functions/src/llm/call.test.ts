@@ -107,11 +107,23 @@ describe('llmCall', () => {
     expect(usage.doc()?.reservations).toEqual({});
   });
 
-  it('prunes stale reservations when it settles', async () => {
+  it('charges a stale reservation (a call that never settled) its worst case', async () => {
     const stale = { pence: 1_400, at: new Date(NOW.getTime() - 20 * 60_000) };
     const usage = memoryStore({ ...emptyUsage(1500, NOW), reservations: { old: stale } });
     await call(deps({ transport: transport([response('{"answer":"ok"}')]), usage }));
-    expect(usage.doc()?.reservations).toEqual({});
+    expect(usage.doc()).toMatchObject({
+      reservations: {},
+      spendPence: 1_400.16,
+      byPurpose: { unsettled: 1_400, addFact: 0.16 },
+    });
+  });
+
+  it('counts a stale reservation against the cap before the next call runs', async () => {
+    const stale = { pence: 1_499.9, at: new Date(NOW.getTime() - 20 * 60_000) };
+    const usage = memoryStore({ ...emptyUsage(1500, NOW), reservations: { old: stale } });
+    const t = transport([response('{"answer":"ok"}')]);
+    await expect(call(deps({ transport: t, usage }))).rejects.toBeInstanceOf(SpendCapExceededError);
+    expect(t.sent).toHaveLength(0);
   });
 
   it('retries once with the issue codes when the output fails validation, then succeeds', async () => {
@@ -159,12 +171,58 @@ describe('llmCall', () => {
     expect(usage.doc()?.reservations).toEqual({});
   });
 
+  it('charges the worst case when a timeout aborted the send', async () => {
+    const usage = memoryStore();
+    const aborted = new Anthropic.APIUserAbortError();
+    await expect(call(deps({ transport: transport([aborted]), usage }))).rejects.toBe(aborted);
+    expect(usage.doc()?.spendPence).toBeCloseTo(1.728, 4);
+  });
+
+  describe('time budget (addFact: 45 s per send, 90 s per call, 20 s to count tokens)', () => {
+    /** The first send takes `firstSendMs` of wall-clock time and returns invalid JSON. */
+    function slowFirstReply(firstSendMs: number) {
+      let clock = NOW.getTime();
+      const t = transport([response('not json'), response('{"answer":"ok"}')]);
+      const send = t.send.bind(t);
+      t.send = (request) => {
+        const reply = send(request);
+        clock += firstSendMs;
+        return reply;
+      };
+      return { t, now: () => new Date(clock) };
+    }
+
+    it('trims the retry send to what is left of the budget', async () => {
+      const { t, now } = slowFirstReply(50_000);
+      await expect(call(deps({ transport: t, now }))).resolves.toMatchObject({
+        data: { answer: 'ok' },
+      });
+      expect(t.sent.map((request) => request.timeoutMs)).toEqual([45_000, 20_000]);
+    });
+
+    it('skips the retry when too little of the budget is left', async () => {
+      const { t, now } = slowFirstReply(75_000);
+      const error: unknown = await call(deps({ transport: t, now })).catch((e: unknown) => e);
+      expect(error).toMatchObject({ failure: 'invalid_json' });
+      expect(t.sent).toHaveLength(1);
+    });
+  });
+
   it('prices an unknown model at the top rate and says so', async () => {
     const t = transport([response('{"answer":"ok"}', { model: 'claude-future-9' })]);
     const result = await call(deps({ transport: t }));
     // Top rate is Sonnet 5.5: 1000 × $2/M + 200 × $10/M = $0.004 → 0.32p
     expect(result.costPence).toBeCloseTo(0.32, 6);
     expect(logs.some((line) => line.event === 'llm.unknown_model_price')).toBe(true);
+  });
+
+  it('prices a fake-transport model at the real model rate, without a warning', async () => {
+    const t = transport([response('{"answer":"ok"}', { model: 'fake:claude-haiku-4-5' })]);
+    const usage = memoryStore();
+    const result = await call(deps({ transport: t, usage }));
+    expect(result).toMatchObject({ model: 'fake:claude-haiku-4-5', costPence: 0.16 });
+    expect(usage.doc()?.calls).toEqual({ 'fake:claude-haiku-4-5': 1 });
+    expect(logs.some((line) => line.event === 'llm.unknown_model_price')).toBe(false);
   });
 
   it('never logs the prompt or the model output', async () => {

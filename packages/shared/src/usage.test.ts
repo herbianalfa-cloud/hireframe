@@ -6,7 +6,7 @@ import {
   liveReservedPence,
   monthKey,
   RESERVATION_TTL_MS,
-  reservationsToRemove,
+  staleReservationIds,
   UsageSchema,
   worstCasePence,
   type ModelPrice,
@@ -83,10 +83,11 @@ describe('reservations and the cap', () => {
     });
   });
 
-  it('removes its own reservation plus every stale one on settle', () => {
-    const all = { ...reservations, own: { pence: 5, at: minutesAgo(1) } };
-    expect(reservationsToRemove(all, 'own', NOW).sort()).toEqual(['own', 'stale']);
-    expect(reservationsToRemove(all, 'own', NOW, RESERVATION_TTL_MS * 10)).toEqual(['own']);
+  it('finds stale reservations, never the settling call itself', () => {
+    const all = { ...reservations, own: { pence: 5, at: minutesAgo(20) } };
+    expect(staleReservationIds(all, NOW, 'own')).toEqual(['stale']);
+    expect(staleReservationIds(all, NOW).sort()).toEqual(['own', 'stale']);
+    expect(staleReservationIds(all, NOW, 'own', RESERVATION_TTL_MS * 10)).toEqual([]);
   });
 });
 

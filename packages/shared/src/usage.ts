@@ -3,8 +3,9 @@ import { z } from 'zod';
 /**
  * Spend accounting for `llm.call()` (PRD R11, ADR-016). `usage/{yyyy-mm}` holds the month's
  * spend in pence plus live reservations: a call reserves its worst-case cost before it runs, so
- * concurrent calls can never overshoot the cap. Reservations older than the TTL are ignored by
- * the cap check and pruned when a call settles, so a crashed call can't block spending.
+ * concurrent calls can never overshoot the cap. A reservation older than the TTL belongs to a
+ * call that never settled (killed mid-flight, e.g. at the callable timeout): the next reserve or
+ * settle charges it as spent at its worst case, because the call may have been billed.
  */
 
 export interface ModelPrice {
@@ -104,15 +105,18 @@ export function checkCap(input: {
   return { ok: input.requestPence <= available, availablePence: Math.max(0, available) };
 }
 
-/** IDs to delete when settling: this call's reservation plus every stale one. */
-export function reservationsToRemove(
+/** `byPurpose` key for stale reservations charged at their worst case. */
+export const UNSETTLED_PURPOSE = 'unsettled';
+
+/** IDs of reservations whose calls never settled, except `ownId` (the call settling now). */
+export function staleReservationIds(
   reservations: Readonly<Record<string, Reservation>>,
-  ownId: string,
   now: Date,
+  ownId?: string,
   ttlMs = RESERVATION_TTL_MS,
 ): string[] {
   return Object.entries(reservations)
-    .filter(([id, reservation]) => id === ownId || !isLive(reservation, now, ttlMs))
+    .filter(([id, reservation]) => id !== ownId && !isLive(reservation, now, ttlMs))
     .map(([id]) => id);
 }
 

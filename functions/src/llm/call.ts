@@ -3,7 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { costPence, monthKey, worstCasePence, type ModelPrice } from '@hireframe/shared';
 import type { z } from 'zod';
 
-import { MODELS, PRICES_USD_PER_MTOK, TOP_PRICE, type LlmPurpose } from '../config.js';
+import {
+  FAKE_MODEL_PREFIX,
+  LLM,
+  MODELS,
+  PRICES_USD_PER_MTOK,
+  TOP_PRICE,
+  type LlmPurpose,
+} from '../config.js';
 import { errorFields, log } from '../log.js';
 import { LlmOutputError, type LlmOutputFailure } from './errors.js';
 import {
@@ -18,8 +25,9 @@ import type { UsageStore } from './usage-store.js';
  * `llm.call()`: the only way functions call Anthropic (CLAUDE.md, ADR-016). Per attempt:
  * count tokens → reserve the worst case against the monthly cap (throws before any API call if
  * it doesn't fit) → send → settle the actual cost, pruning stale reservations. Output is
- * validated with zod; an invalid answer gets one retry with the issue codes appended.
- * No tools, no beta features, fixed output schema.
+ * validated with zod; an invalid answer gets one retry with the issue codes appended, if the
+ * call's time budget still allows it. Every send is bounded by `MODELS[purpose].timeoutMs`,
+ * trimmed to the remaining budget. No tools, no beta features, fixed output schema.
  */
 export interface LlmCallDeps {
   transport: LlmTransport;
@@ -52,7 +60,8 @@ function inputTokenBound(counted: number): number {
 }
 
 function priceFor(model: string): ModelPrice {
-  const price = PRICES_USD_PER_MTOK[model];
+  const real = model.startsWith(FAKE_MODEL_PREFIX) ? model.slice(FAKE_MODEL_PREFIX.length) : model;
+  const price = PRICES_USD_PER_MTOK[real];
   if (price) return price;
   log.warn('llm.unknown_model_price', { model });
   return TOP_PRICE;
@@ -76,6 +85,8 @@ export async function llmCall<T>(
   const newId = deps.newId ?? randomUUID;
   const model = MODELS[input.purpose];
   const messages: LlmRequest['messages'] = [{ role: 'user', content: input.user }];
+  const deadline = now().getTime() + model.budgetMs;
+  const remainingMs = () => deadline - now().getTime() - LLM.countTokensTimeoutMs;
   let totalPence = 0;
 
   async function attempt(): Promise<LlmResponse> {
@@ -85,6 +96,7 @@ export async function llmCall<T>(
       system: input.system,
       messages,
       schema: input.schema,
+      timeoutMs: Math.min(model.timeoutMs, remainingMs()),
     };
     const inputTokens = inputTokenBound(await deps.transport.countTokens(request));
     const reservedPence = worstCasePence(
@@ -175,7 +187,9 @@ export async function llmCall<T>(
     }
 
     log.warn('llm.output_invalid', { purpose: input.purpose, attempt: attemptNo, failure });
-    if (attemptNo >= MAX_ATTEMPTS) throw new LlmOutputError(failure, totalPence);
+    if (attemptNo >= MAX_ATTEMPTS || remainingMs() < LLM.minSendMs) {
+      throw new LlmOutputError(failure, totalPence);
+    }
     messages.push(
       { role: 'assistant', content: response.text },
       {

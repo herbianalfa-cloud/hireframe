@@ -1,11 +1,12 @@
-import type { ModelPrice } from '@hireframe/shared';
+import { FUNCTIONS_REGION, type ModelPrice } from '@hireframe/shared';
 
 /**
  * Functions configuration (CLAUDE.md: config lives here or in Firestore `config/*`).
  * `config/app.monthlyCapPence` and `config/app.fxUsdToGbp` override the defaults below.
  */
 
-export const REGION = 'europe-west2';
+/** Shared with the web client (packages/shared/src/callables.ts). */
+export const REGION = FUNCTIONS_REGION;
 
 /** Dedicated runtime account (ADR-017); the trailing `@` expands to the project's domain. */
 export const RUNTIME_SERVICE_ACCOUNT = 'hireframe-fns@';
@@ -26,15 +27,44 @@ export interface ModelConfig {
   maxTokens: number;
   /** Omitted for models that reject the effort parameter (Haiku 4.5). */
   effort?: 'low' | 'medium' | 'high';
-  /** Per-attempt request timeout; the SDK retries up to twice. */
+  /**
+   * Hard limit for one send, streamed body and SDK retries included (an AbortSignal; the SDK's
+   * own `timeout` stops counting once response headers arrive).
+   */
   timeoutMs: number;
+  /** Wall-clock budget for the whole `llm.call()`, every attempt included. */
+  budgetMs: number;
 }
 
-/** One model per purpose (ADR-016): Sonnet-class for the CV parse, Haiku-class for addFact. */
+/**
+ * One model per purpose (ADR-016): Sonnet-class for the CV parse, Haiku-class for addFact.
+ * Each budget plus `LLM.callableMarginMs` fits inside its callable's timeout (config.test.ts).
+ */
 export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
-  parseCv: { id: 'claude-sonnet-5-5', effort: 'medium', maxTokens: 32_000, timeoutMs: 150_000 },
-  addFact: { id: 'claude-haiku-4-5', maxTokens: 4_000, timeoutMs: 45_000 },
+  parseCv: {
+    id: 'claude-sonnet-5-5',
+    effort: 'medium',
+    maxTokens: 32_000,
+    timeoutMs: 240_000,
+    budgetMs: 480_000,
+  },
+  addFact: { id: 'claude-haiku-4-5', maxTokens: 4_000, timeoutMs: 45_000, budgetMs: 90_000 },
 };
+
+export const LLM = {
+  /** Hard limit for a token count, SDK retries included. */
+  countTokensTimeoutMs: 20_000,
+  /** A retry starts only if this much of the budget is left after counting tokens. */
+  minSendMs: 10_000,
+  /** Time a callable needs outside `llm.call()`: download, extraction, Firestore writes. */
+  callableMarginMs: 30_000,
+} as const;
+
+/**
+ * The emulator's fake transport reports `fake:<model id>`, so fake spend is never mistaken for
+ * real spend in `usage/*` or on a parsed document. It is priced at the real model's rate.
+ */
+export const FAKE_MODEL_PREFIX = 'fake:';
 
 /** USD per million tokens (Anthropic list prices). Unknown models are charged at the top rate. */
 export const PRICES_USD_PER_MTOK: Readonly<Record<string, ModelPrice>> = {
@@ -60,9 +90,6 @@ export const TOP_PRICE: ModelPrice = Object.values(PRICES_USD_PER_MTOK).reduce((
 }));
 
 export const CALLABLE = {
-  /** parseCv waits for a long model call: 3 attempts at most, each bounded by timeoutMs. */
-  parseCvTimeoutSeconds: 540,
-  addFactTimeoutSeconds: 120,
   memory: '1GiB',
 } as const;
 
@@ -71,6 +98,3 @@ export const MERGE = { similar: 0.6 } as const;
 
 /** Less extracted text than this means a scanned or empty file. */
 export const MIN_CV_TEXT_CHARS = 200;
-
-/** A document stuck in `parsing` longer than this may be parsed again. */
-export const STALE_PARSE_MS = 15 * 60 * 1000;

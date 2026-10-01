@@ -1,9 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
+import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import type { TokenCounts } from '@hireframe/shared';
 import type { z } from 'zod';
 
-import type { LlmPurpose, ModelConfig } from '../config.js';
+import { LLM, type LlmPurpose, type ModelConfig } from '../config.js';
 
 /**
  * The narrow seam between `llm.call()` and the Anthropic SDK, so the spend-cap and validation
@@ -16,6 +16,8 @@ export interface LlmRequest {
   system: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
   schema: z.ZodType;
+  /** Hard limit for this send (llm.call() trims it to the call's remaining budget). */
+  timeoutMs: number;
 }
 
 export interface LlmResponse {
@@ -31,8 +33,6 @@ export interface LlmTransport {
   send(request: LlmRequest): Promise<LlmResponse>;
 }
 
-const COUNT_TOKENS_TIMEOUT_MS = 20_000;
-
 function outputConfig(request: LlmRequest): Anthropic.OutputConfig {
   const { schema } = zodOutputFormat(request.schema);
   return {
@@ -41,9 +41,18 @@ function outputConfig(request: LlmRequest): Anthropic.OutputConfig {
   };
 }
 
-/** The real transport. The SDK retries 408/409/429/5xx and connection errors twice. */
-export function anthropicTransport(apiKey: string): LlmTransport {
-  const client = new Anthropic({ apiKey, maxRetries: 2 });
+/**
+ * The real transport. The SDK retries 408/409/429/5xx and connection errors twice. Each request
+ * also gets an AbortSignal, because the SDK's `timeout` stops counting once headers arrive and
+ * would leave a streamed body unbounded. The SDK's own logger is off: at debug level it logs
+ * request details (CV text), and `ANTHROPIC_LOG` could raise it from outside the code.
+ * `fetch` is a test seam only.
+ */
+export function anthropicTransport(
+  apiKey: string,
+  options: Pick<ClientOptions, 'fetch'> = {},
+): LlmTransport {
+  const client = new Anthropic({ apiKey, maxRetries: 2, logLevel: 'off', ...options });
   return {
     async countTokens(request) {
       const result = await client.messages.countTokens(
@@ -53,7 +62,10 @@ export function anthropicTransport(apiKey: string): LlmTransport {
           messages: request.messages,
           output_config: outputConfig(request),
         },
-        { timeout: COUNT_TOKENS_TIMEOUT_MS },
+        {
+          timeout: LLM.countTokensTimeoutMs,
+          signal: AbortSignal.timeout(LLM.countTokensTimeoutMs),
+        },
       );
       return result.input_tokens;
     },
@@ -69,7 +81,7 @@ export function anthropicTransport(apiKey: string): LlmTransport {
             messages: request.messages,
             output_config: outputConfig(request),
           },
-          { timeout: request.model.timeoutMs },
+          { timeout: request.timeoutMs, signal: AbortSignal.timeout(request.timeoutMs) },
         )
         .finalMessage();
       const text = message.content
@@ -91,10 +103,11 @@ export function anthropicTransport(apiKey: string): LlmTransport {
 }
 
 /**
- * True when a failed request may still have been billed (the connection dropped or timed out
- * after the model started). Requests the API rejected with a status code were not.
+ * True when a failed request may still have been billed (the connection dropped, or a timeout
+ * aborted it after the model started). Requests the API rejected with a status code were not.
  */
 export function mayHaveBeenBilled(error: unknown): boolean {
   if (error instanceof Anthropic.APIConnectionError) return true;
+  if (error instanceof Anthropic.APIUserAbortError) return true;
   return !(error instanceof Anthropic.APIError);
 }

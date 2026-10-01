@@ -1,3 +1,4 @@
+import { FAKE_MODEL_PREFIX } from '../config.js';
 import { FAKE_CV_EXTRACTION, FAKE_CV_REVISED_EXTRACTION } from '../fixtures/fake-cv-response.js';
 import { REVISED_MARKER } from '../fixtures/fake-cv-text.js';
 import type { LlmTransport } from './transport.js';
@@ -6,7 +7,8 @@ import type { LlmTransport } from './transport.js';
  * Emulator-only transport (ADR-017): local dev never calls Anthropic unless LIVE=1.
  * - parseCv returns the fake CV's recorded extraction (the revised one if the CV says so);
  * - addFact turns the note's first sentence into one achievement fact.
- * Token counts are rough estimates so the usage meter still moves.
+ * Token counts are rough estimates so the usage meter still moves. The reported model is
+ * `fake:<id>`, priced at the real model's rate, so fake spend is never mistaken for real spend.
  */
 export function fakeTransport(): LlmTransport {
   const estimate = (text: string) => Math.ceil(text.length / 4);
@@ -37,7 +39,7 @@ export function fakeTransport(): LlmTransport {
       }
       const text = JSON.stringify(output);
       return Promise.resolve({
-        model: request.model.id,
+        model: `${FAKE_MODEL_PREFIX}${request.model.id}`,
         stopReason: 'end_turn',
         text,
         tokens: { input: estimate(user), output: estimate(text), cacheRead: 0, cacheWrite: 0 },

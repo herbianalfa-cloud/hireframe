@@ -1,7 +1,7 @@
 // Must stay the first import: global options apply only to functions defined after it.
 import '../options.js';
 
-import type { AppConfig } from '@hireframe/shared';
+import { CALLABLE_TIMEOUT_SECONDS, type AppConfig } from '@hireframe/shared';
 import { onCall, type CallableOptions } from 'firebase-functions/https';
 import { defineSecret } from 'firebase-functions/params';
 
@@ -61,7 +61,7 @@ const baseOptions: CallableOptions = {
 };
 
 export const parseCv = onCall(
-  { ...baseOptions, timeoutSeconds: CALLABLE.parseCvTimeoutSeconds },
+  { ...baseOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.parseCv },
   safeHandler('parseCv', async (request) => {
     const config = await requireOwner(request);
     return parseCvHandler(request.data, {
@@ -75,7 +75,7 @@ export const parseCv = onCall(
 );
 
 export const addFact = onCall(
-  { ...baseOptions, timeoutSeconds: CALLABLE.addFactTimeoutSeconds },
+  { ...baseOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.addFact },
   safeHandler('addFact', async (request) => {
     const config = await requireOwner(request);
     return addFactHandler(request.data, {

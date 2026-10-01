@@ -1,7 +1,8 @@
 import {
   checkCap,
   PATHS,
-  reservationsToRemove,
+  staleReservationIds,
+  UNSETTLED_PURPOSE,
   UsageSchema,
   type TokenCounts,
   type Usage,
@@ -36,7 +37,7 @@ export interface SettleInput {
 export interface UsageStore {
   /** Throws SpendCapExceededError, writing nothing, when the reservation doesn't fit. */
   reserve(input: ReserveInput): Promise<void>;
-  /** Releases this call's reservation, prunes stale ones and records the actual cost. */
+  /** Releases this call's reservation, charges stale ones and records the actual cost. */
   settle(input: SettleInput): Promise<void>;
 }
 
@@ -55,18 +56,19 @@ export function emptyUsage(capPence: number, now: Date): Usage {
 }
 
 export function applyReserve(current: Usage, input: ReserveInput): Usage {
+  const base = chargeStale(current, input.now);
   const check = checkCap({
-    spendPence: current.spendPence,
-    reservations: current.reservations,
+    spendPence: base.spendPence,
+    reservations: base.reservations,
     capPence: input.capPence,
     requestPence: input.pence,
     now: input.now,
   });
   if (!check.ok) throw new SpendCapExceededError();
   return {
-    ...current,
+    ...base,
     capPence: input.capPence,
-    reservations: { ...current.reservations, [input.id]: { pence: input.pence, at: input.now } },
+    reservations: { ...base.reservations, [input.id]: { pence: input.pence, at: input.now } },
     updatedAt: input.now,
   };
 }
@@ -75,11 +77,37 @@ function round(pence: number): number {
   return Math.round(pence * 10_000) / 10_000;
 }
 
-export function applySettle(current: Usage, input: SettleInput): Usage {
-  const remove = new Set(reservationsToRemove(current.reservations, input.id, input.now));
-  const reservations = Object.fromEntries(
-    Object.entries(current.reservations).filter(([id]) => !remove.has(id)),
-  );
+function without(
+  reservations: Usage['reservations'],
+  ids: readonly string[],
+): Usage['reservations'] {
+  const drop = new Set(ids);
+  return Object.fromEntries(Object.entries(reservations).filter(([id]) => !drop.has(id)));
+}
+
+/**
+ * Charges every stale reservation (except `ownId`) as spent at its worst case (ADR-016). A call
+ * that never settled was killed mid-flight and may have been billed. Deliberately fails safe:
+ * a crash can overstate the month's spend, never understate it.
+ */
+export function chargeStale(current: Usage, now: Date, ownId?: string): Usage {
+  const stale = staleReservationIds(current.reservations, now, ownId);
+  if (stale.length === 0) return current;
+  const pence = stale.reduce((sum, id) => sum + (current.reservations[id]?.pence ?? 0), 0);
+  return {
+    ...current,
+    reservations: without(current.reservations, stale),
+    spendPence: round(current.spendPence + pence),
+    byPurpose: {
+      ...current.byPurpose,
+      [UNSETTLED_PURPOSE]: round((current.byPurpose[UNSETTLED_PURPOSE] ?? 0) + pence),
+    },
+  };
+}
+
+export function applySettle(previous: Usage, input: SettleInput): Usage {
+  const current = chargeStale(previous, input.now, input.id);
+  const reservations = without(current.reservations, [input.id]);
   const tokens = current.tokens[input.model] ?? {
     input: 0,
     output: 0,

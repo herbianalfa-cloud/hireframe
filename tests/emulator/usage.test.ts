@@ -1,7 +1,8 @@
 /**
  * `usage/{yyyy-mm}` transactions against the Firestore emulator (ADR-016). Run with
  * `npm run test:rules`, which starts the emulators. Proves that concurrent reservations can't
- * overshoot the cap together, that stale reservations are ignored, and that settling prunes them.
+ * overshoot the cap together, and that stale reservations (calls that never settled) are charged
+ * their worst case.
  */
 import { PATHS } from '@hireframe/shared';
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
@@ -58,7 +59,7 @@ describe('usage store on the emulator', () => {
     expect(Object.keys(doc?.reservations as object)).toHaveLength(1);
   });
 
-  it('ignores stale reservations in the cap check and prunes them on settle', async () => {
+  it('charges stale reservations their worst case, in the cap check and on settle', async () => {
     await db.doc(PATHS.usage(MONTH)).set({
       spendPence: 0,
       capPence: 100,
@@ -70,14 +71,17 @@ describe('usage store on the emulator', () => {
       updatedAt: minutesAgo(20),
       schemaVersion: 1,
     });
-    await store.reserve({ month: MONTH, id: 'live', pence: 60, capPence: 100, now: NOW });
-    await store.settle(settled('live', 12.5));
+    await expect(
+      store.reserve({ month: MONTH, id: 'big', pence: 60, capPence: 100, now: NOW }),
+    ).rejects.toBeInstanceOf(SpendCapExceededError);
+    await store.reserve({ month: MONTH, id: 'live', pence: 5, capPence: 100, now: NOW });
+    await store.settle(settled('live', 2.5));
     const doc = (await db.doc(PATHS.usage(MONTH)).get()).data();
     expect(doc).toMatchObject({
-      spendPence: 12.5,
+      spendPence: 92.5,
       reservations: {},
       calls: { 'claude-haiku-4-5': 1 },
-      byPurpose: { addFact: 12.5 },
+      byPurpose: { unsettled: 90, addFact: 2.5 },
     });
   });
 

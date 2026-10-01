@@ -1,4 +1,5 @@
 export * from './atomicity.js';
+export * from './callables.js';
 export { AppConfigSchema, type AppConfig } from './config.js';
 export * from './criteria.js';
 export { CRITERIA_SEED_V1 } from './criteria-seed.js';
