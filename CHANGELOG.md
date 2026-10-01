@@ -35,6 +35,13 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - close sign-ups and account deletion under User actions, with no Identity Platform upgrade (ADR-015).
 - New recovery entries, and the SECURITY checklist is updated.
 
+## [0.2.1] - 2026-10-01
+### Fixed
+- The v0.2.0 deploy failed with "Invalid service account (hireframe-fns@)" from Secret Manager. The runtime account is now the full email, from one constant in `functions/src/config.ts`, with a test that it stays a full email.
+
+### Changed
+- RUNBOOK Functions setup: step 2 also enables `eventarc`, `firebaseextensions` and `cloudbilling`; step 7 also grants the deployer `roles/iam.serviceAccountUser` on the App Engine default account (the Firebase CLI pre-check).
+
 ## [0.1.0] - 2026-09-30
 ### Added
 - M1 Firebase foundation:

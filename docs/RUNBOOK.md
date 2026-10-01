@@ -111,7 +111,8 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 2. **Enable the Functions APIs.**
    ```bash
    gcloud services enable cloudfunctions.googleapis.com run.googleapis.com cloudbuild.googleapis.com \
-     artifactregistry.googleapis.com secretmanager.googleapis.com firebaseappcheck.googleapis.com
+     artifactregistry.googleapis.com secretmanager.googleapis.com firebaseappcheck.googleapis.com \
+     eventarc.googleapis.com firebaseextensions.googleapis.com cloudbilling.googleapis.com
    ```
 3. **Create the runtime account** the functions run as (instead of the default account, which has Editor):
    `gcloud iam service-accounts create hireframe-fns --display-name="Hireframe functions runtime"`
@@ -143,6 +144,9 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
    gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$SA" --role=roles/cloudfunctions.developer --condition=None
    gcloud iam service-accounts add-iam-policy-binding $FNS --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
    gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --member="serviceAccount:$SA" --role=roles/secretmanager.viewer
+   # The Firebase CLI pre-checks that the deployer may act as the App Engine default account.
+   gcloud iam service-accounts add-iam-policy-binding $PROJECT_ID@appspot.gserviceaccount.com \
+     --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
    ```
 8. **Create the image repository with a cleanup policy**, so the deploy doesn't stop to ask for one (ADR-017):
    ```bash

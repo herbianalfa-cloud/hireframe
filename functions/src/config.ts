@@ -8,8 +8,11 @@ import { FUNCTIONS_REGION, type ModelPrice } from '@hireframe/shared';
 /** Shared with the web client (packages/shared/src/callables.ts). */
 export const REGION = FUNCTIONS_REGION;
 
-/** Dedicated runtime account (ADR-017); the trailing `@` expands to the project's domain. */
-export const RUNTIME_SERVICE_ACCOUNT = 'hireframe-fns@';
+/**
+ * Dedicated runtime account (ADR-017). Always the full email: the `name@` shorthand is not
+ * accepted everywhere (Secret Manager's setIamPolicy rejects it, which failed the v0.2.0 deploy).
+ */
+export const RUNTIME_SERVICE_ACCOUNT = 'hireframe-fns@hireframe-f6b03.iam.gserviceaccount.com';
 
 /** Secret Manager secret name read through `defineSecret` (docs/RUNBOOK.md Part C). */
 export const ANTHROPIC_SECRET_NAME = 'ANTHROPIC_API_KEY';

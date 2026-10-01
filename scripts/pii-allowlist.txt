@@ -5,3 +5,6 @@ noreply@anthropic.com
 *@example.com
 # Google-managed Firebase Storage service agent (docs/RUNBOOK.md IAM setup).
 *@gcp-sa-firebasestorage.iam.gserviceaccount.com
+# Service accounts (not people): the functions runtime account and the App Engine default account.
+hireframe-fns@hireframe-f6b03.iam.gserviceaccount.com
+*@appspot.gserviceaccount.com
