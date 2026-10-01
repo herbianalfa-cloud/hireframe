@@ -114,6 +114,7 @@ describe('keysFromUrl', () => {
       ['ashby:7c1d0000-0000-4000-8000-0000000000aa'],
     ],
     ['https://apply.workable.com/acme/j/A1B2C3D4E5/', ['workable:a1b2c3d4e5']],
+    ['https://apply.workable.com/j/A1B2C3D4E5', ['workable:a1b2c3d4e5']],
     [
       'https://www.linkedin.com/jobs/view/product-analyst-at-acme-4012345678/?trk=x',
       ['linkedin:4012345678'],

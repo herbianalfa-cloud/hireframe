@@ -415,7 +415,8 @@ export function keysFromUrl(url: string): string[] {
     const id = new RegExp(`^/[^/]+/(${UUID})`, 'i').exec(path)?.[1];
     if (id) keys.add(`ashby:${id.toLowerCase()}`);
   } else if (host === 'apply.workable.com') {
-    const id = /^\/[^/]+\/j\/([a-z0-9]+)/i.exec(path)?.[1];
+    // `apply.workable.com/j/{shortcode}`, or with the account first: `/{account}/j/{shortcode}`.
+    const id = /^\/(?:[^/]+\/)?j\/([a-z0-9]+)/i.exec(path)?.[1];
     if (id) keys.add(`workable:${id.toLowerCase()}`);
   } else if (/(^|\.)linkedin\.com$/.test(host)) {
     const id = /\/jobs\/view\/(?:[^/]*?-)?(\d{6,})/.exec(path)?.[1] ?? param('currentJobId');
