@@ -1,6 +1,6 @@
-import type { ParseSummary } from '@hireframe/shared';
-import { CircleAlert, CircleCheck, Loader2, Upload } from 'lucide-react';
-import { useId, useRef, useState, type ChangeEvent } from 'react';
+import { isParseStalled, type ParseSummary } from '@hireframe/shared';
+import { CircleAlert, CircleCheck, Clock, Loader2, Upload } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -37,7 +37,9 @@ export function summaryText(summary: ParseSummary): string {
   return `Added ${String(summary.added)}, unchanged ${String(summary.unchanged)}, flagged ${String(summary.flagged)} for review, ${String(summary.unverified)} without a matching quote`;
 }
 
-function StatusChip({ status }: { status: DocumentView['document']['status'] }) {
+type UploadStatus = DocumentView['document']['status'] | 'stalled';
+
+function StatusChip({ status }: { status: UploadStatus }) {
   if (status === 'parsing') {
     return (
       <Badge variant="accent">
@@ -54,6 +56,14 @@ function StatusChip({ status }: { status: DocumentView['document']['status'] }) 
       </Badge>
     );
   }
+  if (status === 'stalled') {
+    return (
+      <Badge variant="danger">
+        <Clock aria-hidden="true" />
+        Timed out
+      </Badge>
+    );
+  }
   return (
     <Badge variant="danger">
       <CircleAlert aria-hidden="true" />
@@ -62,7 +72,22 @@ function StatusChip({ status }: { status: DocumentView['document']['status'] }) 
   );
 }
 
+/** The current time, refreshed every minute, so an abandoned parse shows as timed out. */
+function useNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 60_000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+  return now;
+}
+
 function RecentUploads({ state }: { state: LiveState<DocumentView[]> }) {
+  const now = useNow();
   if (state.status === 'loading') {
     return (
       <div role="status" aria-label="Loading uploads" className="mt-4 space-y-2">
@@ -89,7 +114,12 @@ function RecentUploads({ state }: { state: LiveState<DocumentView[]> }) {
           <li key={id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm">
             <span className="font-mono text-xs uppercase">{document.kind}</span>
             <span className="text-muted-foreground">{formatDate(document.createdAt)}</span>
-            <StatusChip status={document.status} />
+            <StatusChip status={isParseStalled(document, now) ? 'stalled' : document.status} />
+            {isParseStalled(document, now) ? (
+              <p className="basis-full text-xs text-muted-foreground">
+                Reading this CV took too long and stopped. Upload it again to retry.
+              </p>
+            ) : null}
             {document.status === 'failed' ? (
               <p className="basis-full text-xs text-muted-foreground">
                 {PARSE_ERROR_MESSAGES[document.errorCode ?? 'internal']}

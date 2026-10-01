@@ -1,5 +1,6 @@
 import {
   FactSchema,
+  isParseStalled,
   PATHS,
   ProfileDocumentSchema,
   type CvKind,
@@ -12,7 +13,6 @@ import {
 import type { Firestore, WriteBatch } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/https';
 
-import { STALE_PARSE_MS } from '../config.js';
 import { log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 
@@ -103,8 +103,7 @@ export function firestoreProfileStore(firestore: Firestore): ProfileStore {
             if (current.data.status === 'parsed') {
               throw new HttpsError('already-exists', 'This CV has already been read.');
             }
-            const busy = now.getTime() - current.data.updatedAt.getTime() < STALE_PARSE_MS;
-            if (current.data.status === 'parsing' && busy) {
+            if (current.data.status === 'parsing' && !isParseStalled(current.data, now)) {
               throw new HttpsError('aborted', 'This CV is already being read.');
             }
           }

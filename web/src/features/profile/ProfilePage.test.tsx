@@ -417,8 +417,8 @@ describe('Upload CV', () => {
           kind: 'docx',
           storagePath: 'y',
           status: 'parsing',
-          createdAt: NOW,
-          updatedAt: NOW,
+          createdAt: new Date(),
+          updatedAt: new Date(),
           schemaVersion: 1,
         },
       },
@@ -428,5 +428,28 @@ describe('Upload CV', () => {
     expect(screen.getByText('Failed')).toBeDefined();
     expect(screen.getByText(/No text could be read/)).toBeDefined();
     expect(screen.getByText('Reading')).toBeDefined();
+  });
+
+  it('shows a parse abandoned by a server timeout as timed out, not reading forever', () => {
+    givenFacts([]);
+    const started = new Date(Date.now() - 20 * 60_000);
+    givenDocuments([
+      {
+        id: 'd1',
+        document: {
+          kind: 'pdf',
+          storagePath: 'x',
+          status: 'parsing',
+          createdAt: started,
+          updatedAt: started,
+          schemaVersion: 1,
+        },
+      },
+    ]);
+    render(<ProfilePage />);
+
+    expect(screen.getByText('Timed out')).toBeDefined();
+    expect(screen.getByText(/Upload it again to retry/)).toBeDefined();
+    expect(screen.queryByText('Reading')).toBeNull();
   });
 });

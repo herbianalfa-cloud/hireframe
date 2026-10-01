@@ -156,6 +156,19 @@ export const ProfileDocumentSchema = z.object({
 });
 export type ProfileDocument = z.infer<typeof ProfileDocumentSchema>;
 
+/**
+ * A document still `parsing` this long after its last update was abandoned (the callable timed
+ * out or crashed): parseCv may start it again, and the Profile screen shows it as timed out.
+ * Longer than the parseCv callable timeout (CALLABLE_TIMEOUT_SECONDS).
+ */
+export const STALE_PARSE_MS = 15 * 60 * 1000;
+
+export function isParseStalled(document: ProfileDocument, now: Date): boolean {
+  return (
+    document.status === 'parsing' && now.getTime() - document.updatedAt.getTime() >= STALE_PARSE_MS
+  );
+}
+
 /** Firestore auto-IDs: 20 alphanumeric characters. Also enforced by storage.rules. */
 export const DOC_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
 

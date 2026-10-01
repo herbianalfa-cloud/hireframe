@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { CALLABLE_TIMEOUT_SECONDS } from './callables.js';
 import { redactPii } from './pii.js';
 import {
   AddFactInputSchema,
   CvExtractionSchema,
   FactDraftSchema,
   FactSchema,
+  isParseStalled,
   ParseCvInputSchema,
+  STALE_PARSE_MS,
   type FactDraft,
+  type ProfileDocument,
 } from './profile.js';
 
 const AT = new Date('2026-10-01T09:00:00Z');
@@ -80,5 +84,28 @@ describe('redactPii', () => {
     expect(redactPii(`mail ${email} or call ${phone}; ref 2024`)).toBe(
       'mail [email] or call [phone]; ref 2024',
     );
+  });
+});
+
+describe('isParseStalled', () => {
+  const at = new Date('2026-10-01T09:00:00Z');
+  const parsing: ProfileDocument = {
+    kind: 'pdf',
+    storagePath: 'profile/documents/abcdefghij0123456789/cv.pdf',
+    status: 'parsing',
+    createdAt: at,
+    updatedAt: at,
+    schemaVersion: 1,
+  };
+  const later = (ms: number) => new Date(at.getTime() + ms);
+
+  it('flags a parse still running after the stale threshold', () => {
+    expect(isParseStalled(parsing, later(STALE_PARSE_MS - 1))).toBe(false);
+    expect(isParseStalled(parsing, later(STALE_PARSE_MS))).toBe(true);
+    expect(isParseStalled({ ...parsing, status: 'failed' }, later(STALE_PARSE_MS))).toBe(false);
+  });
+
+  it('outlasts the parseCv callable timeout', () => {
+    expect(STALE_PARSE_MS).toBeGreaterThan(CALLABLE_TIMEOUT_SECONDS.parseCv * 1000);
   });
 });
