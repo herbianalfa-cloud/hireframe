@@ -114,15 +114,21 @@ export function boardPageUrl(hit: Pick<BoardHit, 'type' | 'token' | 'host'>): st
 const PRIORITY: readonly DetectedAts[] = ['greenhouse', 'ashby', 'lever', 'workable'];
 
 /**
- * confirmed: one live board whose name matches, or the owner pasted the URL. review: anything
- * else found. Boards with open jobs win over empty ones (a dormant account on another ATS).
+ * Boards with open jobs win over empty ones (a dormant account on another ATS). Among the
+ * boards left, the one whose name matches wins, then the one with the most jobs.
+ * - confirmed: exactly one live board (or, with none live, exactly one board), and its name
+ *   matches or the owner pasted its URL.
+ * - review: a tie (several live boards, or several empty ones), or a board whose name can't be
+ *   confirmed.
  */
 export function classify(
   candidate: Candidate,
   hits: readonly BoardHit[],
   fromUrl: boolean,
 ): Detection {
-  const sorted = [...hits].sort((a, b) => PRIORITY.indexOf(a.type) - PRIORITY.indexOf(b.type));
+  const sorted = [...hits].sort(
+    (a, b) => b.jobs - a.jobs || PRIORITY.indexOf(a.type) - PRIORITY.indexOf(b.type),
+  );
   const live = sorted.filter((h) => h.jobs > 0);
   const pool = live.length > 0 ? live : sorted;
   const [first] = pool;
@@ -131,8 +137,8 @@ export function classify(
     (h) => h.boardName !== undefined && namesMatch(h.boardName, candidate.name),
   );
   const best = named ?? first;
-  const single = sorted.length === 1;
-  const confirmed = single && (fromUrl || named !== undefined);
+  const tie = pool.length > 1;
+  const confirmed = !tie && (fromUrl || named !== undefined);
   return {
     candidate,
     status: confirmed ? 'confirmed' : 'review',

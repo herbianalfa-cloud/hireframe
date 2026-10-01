@@ -87,20 +87,49 @@ describe('classify', () => {
     expect(classify(ACME, [{ ...gh, boardName: 'Other Co' }], false).status).toBe('review');
   });
 
-  it('prefers a board with open jobs over an empty one', () => {
-    const emptyWorkable: BoardHit = {
-      type: 'workable',
-      token: 'acme',
-      boardName: 'Acme Analytics',
-      jobs: 0,
-      ukJobs: 0,
-    };
+  const emptyWorkable: BoardHit = {
+    type: 'workable',
+    token: 'acme',
+    boardName: 'Acme Analytics',
+    jobs: 0,
+    ukJobs: 0,
+  };
+
+  it('prefers a live board over a dormant one that matches by name', () => {
+    // The Synthesia case: an empty Workable account must not beat the live Ashby board.
     const ashby: BoardHit = { type: 'ashby', token: 'acme', jobs: 12, ukJobs: 5 };
     expect(classify(ACME, [emptyWorkable, ashby], false)).toMatchObject({
-      status: 'review',
+      status: 'review', // Ashby gives no board name to confirm
       hit: ashby,
       others: [emptyWorkable],
     });
+  });
+
+  it('confirms the one live board when the others are empty', () => {
+    expect(classify(ACME, [emptyWorkable, gh], false)).toMatchObject({
+      status: 'confirmed',
+      hit: gh,
+      others: [emptyWorkable],
+    });
+  });
+
+  it('marks ties as review: several live boards, or several empty ones', () => {
+    const liveWorkable: BoardHit = { ...emptyWorkable, jobs: 9, ukJobs: 9 };
+    expect(classify(ACME, [gh, liveWorkable], false)).toMatchObject({
+      status: 'review',
+      hit: liveWorkable, // both names match, so the one with more jobs leads
+      others: [gh],
+    });
+    const emptyGh: BoardHit = { ...gh, jobs: 0, ukJobs: 0 };
+    expect(classify(ACME, [emptyGh, emptyWorkable], false).status).toBe('review');
+    expect(classify(ACME, [lever, { ...lever, type: 'ashby', jobs: 7 }], true).status).toBe(
+      'review',
+    );
+  });
+
+  it('picks the board with the most jobs when no name matches', () => {
+    const ashby: BoardHit = { type: 'ashby', token: 'acme', jobs: 7, ukJobs: 1 };
+    expect(classify(ACME, [lever, ashby], false)).toMatchObject({ status: 'review', hit: ashby });
   });
 
   it('confirms a board from a URL the owner pasted', () => {
