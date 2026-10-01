@@ -1,8 +1,10 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { STORAGE_PATHS, type CvExtraction } from '@hireframe/shared';
 import { HttpsError } from 'firebase-functions/https';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { extractText } from '../cv/extract.js';
+import { safeHandler } from '../errors.js';
 import { makeDocx, makePdf } from '../fixtures/fake-cv-files.js';
 import { FAKE_CV_EXTRACTION, FAKE_CV_REVISED_EXTRACTION } from '../fixtures/fake-cv-response.js';
 import { FAKE_CV_LINES, FAKE_CV_REVISED_LINES } from '../fixtures/fake-cv-text.js';
@@ -187,18 +189,75 @@ describe('parseCvHandler', () => {
     });
   });
 
-  it('never logs CV text', async () => {
-    const { llm } = llmReturning(FAKE_CV_EXTRACTION);
-    await parseCvHandler({ docId: DOC_ID }, deps({ [pdfPath]: makePdf(FAKE_CV_LINES) }, llm));
-    await parseCvHandler(
-      { docId: DOC_ID },
-      deps({ [pdfPath]: makePdf(['Alex Example', 'too short']) }, llm),
-    ).catch(() => undefined);
-    const logged = JSON.stringify(logs);
-    for (const line of FAKE_CV_LINES) expect(logged).not.toContain(line);
-    for (const draft of FAKE_CV_EXTRACTION.facts.filter((f) => f.text.length > 12)) {
-      expect(logged).not.toContain(draft.text);
+  describe('never lets CV text reach the logs or the console', () => {
+    const spies: MockInstance<(...data: unknown[]) => void>[] = [];
+    const cvLine = FAKE_CV_LINES.find((line) => line.length > 30) ?? '';
+    const pdf = () => makePdf(FAKE_CV_LINES);
+
+    beforeEach(() => {
+      for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {
+        spies.push(vi.spyOn(console, level).mockImplementation(() => undefined));
+      }
+    });
+
+    afterEach(() => {
+      for (const spy of spies.splice(0)) spy.mockRestore();
+    });
+
+    function expectNoCvText(): void {
+      const written = JSON.stringify([logs, spies.flatMap((spy) => spy.mock.calls)]);
+      for (const line of FAKE_CV_LINES) expect(written).not.toContain(line);
+      for (const draft of FAKE_CV_EXTRACTION.facts.filter((f) => f.text.length > 12)) {
+        expect(written).not.toContain(draft.text);
+      }
     }
-    expect(logs.map((line) => line.event)).toContain('parse_cv.done');
+
+    /** Runs the handler the way the callable does, behind safeHandler. */
+    const run = (d: ParseCvDeps) =>
+      safeHandler('parseCv', (data: unknown) => parseCvHandler(data, d))({ docId: DOC_ID });
+
+    it('on success and on a CV with too little text', async () => {
+      const { llm } = llmReturning(FAKE_CV_EXTRACTION);
+      await run(deps({ [pdfPath]: pdf() }, llm));
+      await run(deps({ [pdfPath]: makePdf(['Alex Example', 'too short']) }, llm)).catch(
+        () => undefined,
+      );
+      expectNoCvText();
+      expect(logs.map((line) => line.event)).toContain('parse_cv.done');
+    });
+
+    it.each([
+      ['a timed-out model call', new Anthropic.APIConnectionTimeoutError()],
+      ['an aborted model call', new Anthropic.APIUserAbortError()],
+      ['an SDK error whose message echoes the CV', Object.assign(new Error(cvLine), { code: 'E' })],
+      ['unusable model output', new LlmOutputError('schema', 3.1)],
+    ])('when the model step fails: %s', async (_name, error) => {
+      await expect(run(deps({ [pdfPath]: pdf() }, llmReturning(error).llm))).rejects.toThrow();
+      expectNoCvText();
+    });
+
+    it('when extraction throws an error that echoes the CV', async () => {
+      const d = deps({ [pdfPath]: pdf() }, llmReturning(FAKE_CV_EXTRACTION).llm);
+      d.extract = () => Promise.reject(new Error(cvLine));
+      await expect(run(d)).rejects.toMatchObject({ code: 'internal' });
+      expectNoCvText();
+    });
+
+    it('when the store fails after the model answered', async () => {
+      const { store } = memoryProfileStore();
+      store.applyParse = () => Promise.reject(new Error(FAKE_CV_EXTRACTION.facts[0]?.text));
+      const d = deps({ [pdfPath]: pdf() }, llmReturning(FAKE_CV_EXTRACTION).llm, store);
+      await expect(run(d)).rejects.toMatchObject({ code: 'internal' });
+      expectNoCvText();
+    });
+
+    it('when pdf.js reads a damaged PDF (it would print warnings at its default verbosity)', async () => {
+      const damaged = pdf().slice(0, -200);
+      await run(deps({ [pdfPath]: damaged }, llmReturning(FAKE_CV_EXTRACTION).llm)).catch(
+        () => undefined,
+      );
+      expectNoCvText();
+      expect(spies.flatMap((spy) => spy.mock.calls)).toEqual([]);
+    });
   });
 });

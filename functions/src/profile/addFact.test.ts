@@ -1,8 +1,11 @@
+import Anthropic from '@anthropic-ai/sdk';
 import type { AddFactExtraction, FactDraft } from '@hireframe/shared';
 import type { HttpsError } from 'firebase-functions/https';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { safeHandler } from '../errors.js';
 import type { LlmCallInput, LlmCallResult } from '../llm/call.js';
+import { LlmOutputError } from '../llm/errors.js';
 import { setLogSink, type LogFields } from '../log.js';
 import { addFactHandler } from './addFact.js';
 import { memoryProfileStore } from './testing.js';
@@ -95,6 +98,20 @@ describe('addFactHandler', () => {
   it('never logs the note', async () => {
     const { store } = memoryProfileStore();
     await addFactHandler({ text: NOTE }, { store, llm: llm(extraction).fn, now: () => new Date() });
+    expect(JSON.stringify(logs)).not.toContain('Olist');
+  });
+
+  it.each([
+    ['unusable model output', new LlmOutputError('schema', 0.1)],
+    ['a timed-out model call', new Anthropic.APIConnectionTimeoutError()],
+    ['an error whose message echoes the note', new Error(NOTE)],
+  ])('never logs the note when the model step fails: %s', async (_name, failure) => {
+    const { store } = memoryProfileStore();
+    const failing = () => Promise.reject(failure);
+    const run = safeHandler('addFact', (data: unknown) =>
+      addFactHandler(data, { store, llm: failing, now: () => new Date() }),
+    );
+    await expect(run({ text: NOTE })).rejects.toThrow();
     expect(JSON.stringify(logs)).not.toContain('Olist');
   });
 });

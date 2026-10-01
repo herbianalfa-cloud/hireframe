@@ -21,7 +21,8 @@ export function detectKind(bytes: Uint8Array): CvKind | null {
 
 export async function extractText(bytes: Uint8Array, kind: CvKind): Promise<string> {
   if (kind === 'pdf') {
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    // verbosity 0: pdf.js prints warnings to the console, outside the redacting logger.
+    const pdf = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 });
     const { text } = await extractPdfText(pdf, { mergePages: true });
     return text;
   }
