@@ -20,6 +20,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - Upgrade steps for v0.2.2 and new Recovery entries.
 - The functions runtime account needs `storage.objectUser` instead of `storage.objectViewer` on the bucket (to delete uploads on reset).
 - Only the model callables mount the Anthropic key.
+- Security: scoped npm overrides under firebase-tools: `basic-ftp` 6.2.1 (GHSA-c475-qrg2-pj4r, high; fixes the CI `audit` job) and `uuid` 11.1.1 (GHSA-w5hq-g745-h8pq, Dependabot alert #1). See the ADR-013 addendum.
 - ROADMAP: M8 adds a dedicated Cloud Build account and removes Editor from the default compute account; "file attachments as evidence" is parked.
 
 ## [0.2.1] - 2026-10-01

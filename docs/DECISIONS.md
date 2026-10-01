@@ -87,6 +87,12 @@ Context: local work must never touch production data, and rules tests need emula
 
 Consequences: contributors need Java 21 installed. firebase-tools brings a large dependency tree (currently only moderate `npm audit` findings; CI fails on high). Its lockfile entries include npm deprecation notices containing a third-party maintainer's public contact address, so `scan:pii` skips the generated `package-lock.json` rather than allowlisting a person's address; every hand-written file is still scanned. `@firebase/firestore` pins `@grpc/grpc-js ~1.9.0`, which has high advisories (GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4; server-side, and grpc-js is not in the browser bundle). A root `overrides` entry forces the patched 1.14.5 (rules tests pass on it) so the `audit` gate stays at `high`; remove the override once Firebase bumps its pin.
 
+*Addendum (M2.1):* two more scoped npm overrides, both under `firebase-tools` (dev-only, never in the web or functions bundles). Neither parent has a release that allows the fix, so a direct bump isn't possible, and `npm audit fix --force` would downgrade firebase-tools to 14.
+- `get-uri` → `basic-ftp` 6.2.1 fixes GHSA-c475-qrg2-pj4r (high). It's the only high, and it failed the CI `audit` job. get-uri still pins `^5`.
+- `gaxios` → `uuid` 11.1.1 fixes GHSA-w5hq-g745-h8pq (moderate, Dependabot alert #1). gaxios 6 pins `^9` and only uses `v4`.
+
+The emulator suite (`npm run test:rules`) exercises firebase-tools with both overrides. Drop them when firebase-tools ships the fixed versions. `@opentelemetry/core` < 2.8.0 (moderate, via `@google-cloud/pubsub`) stays open: the fix is a major version, and moderate findings don't fail CI.
+
 ## ADR-014 Deploy: keyless, tag-only, London
 Context: CLAUDE.md says deploys are CI-only on tagged releases, and there must be no long-lived keys. Decision:
 - **Trigger:** `.github/workflows/deploy.yml` runs on `v*` tags in the GitHub `production` environment (owner approval required; only `v*` tags may deploy). It re-runs `check` and `test:rules`, builds, then deploys hosting, Firestore rules/indexes and Storage rules.
