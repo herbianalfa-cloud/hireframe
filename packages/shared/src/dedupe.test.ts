@@ -116,6 +116,7 @@ describe('planIngest', () => {
     id: 'job-gh',
     keys: norm(GREENHOUSE_JOB).keys,
     firstSeenAt: new Date('2026-09-20T00:00:00Z'),
+    sourceCount: 1,
   };
 
   it('creates jobs nothing stored matches', () => {
@@ -148,7 +149,12 @@ describe('planIngest', () => {
   });
 
   it('joins the job seen first when a group matches two stored jobs, and counts a conflict', () => {
-    const older = { id: 'job-old', keys: ['linkedin:4012345678'], firstSeenAt: new Date(0) };
+    const older = {
+      id: 'job-old',
+      keys: ['linkedin:4012345678'],
+      firstSeenAt: new Date(0),
+      sourceCount: 1,
+    };
     const plan = planIngest(dedupeBatch([norm(GREENHOUSE_JOB), norm(LINKEDIN_ALERT_JOB)]), [
       existingGreenhouse,
       older,
@@ -168,6 +174,13 @@ describe('planIngest', () => {
       'linkedin-alert',
       'hn',
     ]);
+  });
+
+  it('adds no source to a job already at the source limit', () => {
+    const full = { ...existingGreenhouse, sourceCount: 20 };
+    const plan = planIngest(dedupeBatch([norm(LINKEDIN_ALERT_JOB)]), [full]);
+    expect(plan.updates).toEqual([]);
+    expect(plan.counts).toMatchObject({ duplicate: 1, merged: 0 });
   });
 
   it('counts the same posting twice in one run as a duplicate', () => {

@@ -162,6 +162,8 @@ export interface ExistingJobKeys {
   id: string;
   keys: readonly string[];
   firstSeenAt: Date;
+  /** Sources already on the job, so merges stay within `JOB_LIMITS.sources`. */
+  sourceCount: number;
 }
 
 export type IngestOutcome = 'new' | 'merged' | 'duplicate';
@@ -185,8 +187,9 @@ export interface IngestPlan {
  * Decides what each batch group does against the jobs already stored (ADR-030):
  * - no stored job shares a key → create it; its first member is `new`, the rest `merged`;
  * - otherwise it joins the matching job seen first (ties: lowest ID). Matching more than one
- *   stored job is a conflict, counted. Members whose source key the job already has are
- *   `duplicate`; the others are added (`merged`). A job gets no write unless a source is added.
+ *   stored job is a conflict, counted. Members whose source key the job already has (or that
+ *   would pass the source limit) are `duplicate`; the others are added (`merged`). A job gets no
+ *   write unless a source is added.
  */
 export function planIngest(
   groups: readonly BatchGroup[],
@@ -197,6 +200,7 @@ export function planIngest(
     for (const key of job.keys) byKey.set(key, [...(byKey.get(key) ?? []), job]);
   }
   const knownKeys = new Map(existing.map((job) => [job.id, new Set(job.keys)]));
+  const sourceCounts = new Map(existing.map((job) => [job.id, job.sourceCount]));
   const updates = new Map<string, JobUpdate>();
   const plan: IngestPlan = {
     creates: [],
@@ -233,15 +237,18 @@ export function planIngest(
     const known = knownKeys.get(target.id) ?? new Set<string>();
     knownKeys.set(target.id, known);
     for (const job of group.jobs) {
-      if (known.has(job.sourceKey)) {
+      const sources = sourceCounts.get(target.id) ?? 0;
+      // A job already at its source limit keeps what it has (Firestore arrays are capped).
+      if (known.has(job.sourceKey) || sources >= JOB_LIMITS.sources) {
         record(job.sourceId, 'duplicate');
         continue;
       }
       const update = updates.get(target.id) ?? { jobId: target.id, addSources: [], addKeys: [] };
       updates.set(target.id, update);
       update.addSources.push(job);
+      sourceCounts.set(target.id, sources + 1);
       for (const key of job.keys) {
-        if (!known.has(key)) {
+        if (!known.has(key) && known.size < JOB_LIMITS.keys) {
           known.add(key);
           update.addKeys.push(key);
         }

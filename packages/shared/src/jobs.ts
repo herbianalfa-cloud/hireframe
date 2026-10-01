@@ -310,3 +310,27 @@ export const ScanNowResultSchema = z.discriminatedUnion('status', [
   }),
 ]);
 export type ScanNowResult = z.infer<typeof ScanNowResultSchema>;
+
+/** `locks/scan`: the single-flight scan lock (ADR-029). `runId` is set only while a scan runs. */
+export const ScanLockSchema = z.object({
+  runId: z.string().min(1).exactOptional(),
+  startedAt: z.date().exactOptional(),
+  lastFinishedAt: z.date().exactOptional(),
+  schemaVersion: z.literal(1),
+});
+export type ScanLock = z.infer<typeof ScanLockSchema>;
+
+/** One watchlist seed entry (ADR-031): public facts only. `id` is the `companies/{id}` doc ID. */
+export const CompanySeedSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/),
+  name: z.string().trim().min(1).max(JOB_LIMITS.company),
+  domain: z
+    .string()
+    .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/)
+    .max(253),
+  ats: AtsSchema,
+  hq: z.string().min(1).max(100),
+  size: z.string().max(40).exactOptional(),
+  stage: z.string().max(40).exactOptional(),
+});
+export type CompanySeed = z.infer<typeof CompanySeedSchema>;

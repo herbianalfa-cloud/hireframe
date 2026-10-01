@@ -7,12 +7,11 @@ import { defineSecret } from 'firebase-functions/params';
 
 import { bucket, db } from '../admin.js';
 import { requireOwner } from '../auth.js';
+import { ownerOptions, useFakes } from '../callable.js';
 import {
   ANTHROPIC_SECRET_NAME,
-  CALLABLE,
   DEFAULT_FX_USD_TO_GBP,
   DEFAULT_MONTHLY_CAP_PENCE,
-  REGION,
 } from '../config.js';
 import { extractText } from '../cv/extract.js';
 import { safeHandler } from '../errors.js';
@@ -27,17 +26,9 @@ import { bucketFileDeleter, firestoreProfileStore, firestoreResetStore } from '.
 
 const anthropicApiKey = defineSecret(ANTHROPIC_SECRET_NAME);
 
-/**
- * The emulator runs without App Check (local dev has no reCAPTCHA) and with the fake LLM unless
- * LIVE=1. Deployed functions never see FUNCTIONS_EMULATOR, so production always enforces App
- * Check, consumes the token (replay protection for calls that spend money) and calls Anthropic.
- */
-const inEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-const useFakeLlm = inEmulator && process.env.LIVE !== '1';
-
 function llmFor(config: AppConfig) {
   const deps: LlmCallDeps = {
-    transport: useFakeLlm ? fakeTransport() : anthropicTransport(anthropicApiKey.value()),
+    transport: useFakes ? fakeTransport() : anthropicTransport(anthropicApiKey.value()),
     usage: firestoreUsageStore(db()),
     capPence: config.monthlyCapPence ?? DEFAULT_MONTHLY_CAP_PENCE,
     fxUsdToGbp: config.fxUsdToGbp ?? DEFAULT_FX_USD_TO_GBP,
@@ -52,13 +43,6 @@ async function readFile(path: string): Promise<Uint8Array | null> {
   const [contents] = await file.download();
   return new Uint8Array(contents);
 }
-
-const ownerOptions: CallableOptions = {
-  region: REGION, // also set globally; stated here so a callable can never land elsewhere
-  enforceAppCheck: !inEmulator,
-  consumeAppCheckToken: !inEmulator,
-  memory: CALLABLE.memory,
-};
 
 /** Only callables that call the model mount the Anthropic key. */
 const llmOptions: CallableOptions = { ...ownerOptions, secrets: [anthropicApiKey] };

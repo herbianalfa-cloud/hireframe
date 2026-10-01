@@ -1,3 +1,5 @@
+import type { CompanySeed } from '@hireframe/shared';
+
 import type { WatchedCompany } from './types.js';
 
 /**
@@ -7,18 +9,51 @@ import type { WatchedCompany } from './types.js';
  * R5 merge: the Acme "Product Analyst" posting arrives from Greenhouse, Adzuna and HN.
  */
 
-export const FAKE_WATCHLIST: readonly WatchedCompany[] = [
+/** The emulator's watchlist seed (instead of the real one) unless LIVE=1. */
+export const FAKE_SEED: readonly CompanySeed[] = [
   {
     id: 'acme-analytics',
     name: 'Acme Analytics',
+    domain: 'acme-analytics.example.com',
     ats: { type: 'greenhouse', token: 'acmeanalytics' },
+    hq: 'London',
   },
-  { id: 'bramble-software', name: 'Bramble Software', ats: { type: 'lever', token: 'bramble' } },
-  { id: 'cobalt-ledger', name: 'Cobalt Ledger', ats: { type: 'ashby', token: 'cobaltledger' } },
-  { id: 'delta-dock', name: 'Delta Dock', ats: { type: 'workable', token: 'deltadock' } },
-  // A board that no longer exists: shows up as not_found, then broken after 3 runs.
-  { id: 'echo-gone', name: 'Echo Gone', ats: { type: 'greenhouse', token: 'echogone' } },
+  {
+    id: 'bramble-software',
+    name: 'Bramble Software',
+    domain: 'bramble.example.com',
+    ats: { type: 'lever', token: 'bramble' },
+    hq: 'London',
+  },
+  {
+    id: 'cobalt-ledger',
+    name: 'Cobalt Ledger',
+    domain: 'cobalt-ledger.example.com',
+    ats: { type: 'ashby', token: 'cobaltledger' },
+    hq: 'London',
+  },
+  {
+    id: 'delta-dock',
+    name: 'Delta Dock',
+    domain: 'delta-dock.example.com',
+    ats: { type: 'workable', token: 'deltadock' },
+    hq: 'Manchester',
+  },
+  // A board that no longer exists: not_found, and broken after 3 runs.
+  {
+    id: 'echo-gone',
+    name: 'Echo Gone',
+    domain: 'echo-gone.example.com',
+    ats: { type: 'greenhouse', token: 'echogone' },
+    hq: 'London',
+  },
 ];
+
+export const FAKE_WATCHLIST: readonly WatchedCompany[] = FAKE_SEED.map(({ id, name, ats }) => ({
+  id,
+  name,
+  ats,
+}));
 
 export const GREENHOUSE_BOARD = {
   jobs: [

@@ -8,6 +8,7 @@ interface Endpoint {
   region?: string[];
   timeoutSeconds?: number;
   callableTrigger?: object;
+  secretEnvironmentVariables?: { key: string }[];
 }
 
 const endpoints = Object.entries(deployed).map(
@@ -34,4 +35,17 @@ describe('deployed functions (ADR-017)', () => {
       );
     },
   );
+
+  // Each function mounts only the secrets it needs (ADR-017, ADR-025).
+  it.each([
+    ['parseCv', ['ANTHROPIC_API_KEY']],
+    ['addFact', ['ANTHROPIC_API_KEY']],
+    ['resetProfile', []],
+    ['scanNow', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'REED_API_KEY']],
+  ])('%s mounts %j', (name, secrets) => {
+    const endpoint = endpoints.find(([exported]) => exported === name)?.[1];
+    expect(endpoint).toBeDefined();
+    const mounted = (endpoint?.secretEnvironmentVariables ?? []).map((secret) => secret.key);
+    expect(mounted.sort()).toEqual(secrets);
+  });
 });

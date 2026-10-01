@@ -15,6 +15,7 @@ export { redactPii } from './pii.js';
 export * from './profile.js';
 export * from './removal.js';
 export * from './usage.js';
+export { WATCHLIST_SEED } from './watchlist-seed.js';
 
 /**
  * Exhaustiveness guard for discriminated unions. The compiler rejects any call
