@@ -2,7 +2,7 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
-### Added
+## [Unreleased]
 ### Fixed
 - **Evidence on Profile fact cards looked empty.** The quote was stored and rendered, but it sits in a collapsed disclosure whose summary had no marker, so "Evidence" read as a heading with nothing under it. It now has a chevron that turns when open. A component test covers CV and manual facts.
 - **Re-uploading the same CV is stable** (ADR-022). Uploading the .docx and then the .pdf gave "Added 64, unchanged 77, flagged 53", because the model words facts differently on every read.
