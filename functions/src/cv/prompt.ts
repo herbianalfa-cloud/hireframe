@@ -48,10 +48,4 @@ ${FIELD_RULES}
 
 Use only what the note says.`;
 
-/** Wraps untrusted text in `<tag>` so it can't close the tag early and pose as instructions. */
-export function wrapUntrusted(tag: 'cv_text' | 'note', text: string): string {
-  const escaped = text.replace(new RegExp(`</?${tag}\\s*>`, 'gi'), (match) =>
-    match.replace('<', '&lt;'),
-  );
-  return `<${tag}>\n${escaped}\n</${tag}>`;
-}
+export { wrapUntrusted } from '../llm/untrusted.js';

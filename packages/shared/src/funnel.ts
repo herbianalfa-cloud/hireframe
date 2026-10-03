@@ -305,6 +305,8 @@ export const STOP_REASONS = [
   'deadline',
   'no_criteria',
   'no_profile',
+  /** Several model calls in a row failed (network or API errors); jobs stay queued. */
+  'model_errors',
 ] as const;
 export type StopReason = (typeof STOP_REASONS)[number];
 

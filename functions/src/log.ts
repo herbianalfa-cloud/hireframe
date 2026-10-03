@@ -40,7 +40,17 @@ export type LogEvent =
   | 'watchlist.seeded'
   | 'store.invalid_doc'
   | 'ingest.keys_truncated'
-  | 'scan.recovered';
+  | 'scan.recovered'
+  | 'funnel.started'
+  | 'funnel.done'
+  | 'funnel.failed'
+  | 'funnel.review'
+  | 'funnel.score_drift'
+  | 'funnel.unsupported_match'
+  | 'funnel.overrides_invalid'
+  | 'hydrate.failed'
+  | 'rescore.started'
+  | 'rescore.done';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';
