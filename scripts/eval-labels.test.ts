@@ -4,7 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 import { applyLabels, normaliseVerdict, parseCsv, readGolden, toCsv } from './eval-labels.ts';
 
-const cases = readGolden(readFileSync('evals/golden.jsonl', 'utf8'));
+// Start from an unlabelled copy, so the tests don't depend on the committed labels.
+const cases = readGolden(readFileSync('evals/golden.jsonl', 'utf8')).map((c) => ({
+  ...c,
+  label: null,
+  note: '',
+}));
 
 describe('eval-labels', () => {
   it('exports every case without the design intent, and parses back exactly', () => {

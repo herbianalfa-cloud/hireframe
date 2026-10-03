@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "scan:pii": "node scripts/check-pii.ts",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run scan:pii",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run scan:pii && npm run eval",
     "build": "npm run build --workspaces --if-present",
     "check:bundle": "node scripts/check-bundle.ts",
     "eval": "node scripts/eval.ts",

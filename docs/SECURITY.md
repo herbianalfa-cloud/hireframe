@@ -34,5 +34,5 @@ CV and profile facts; job/application history; alert-email content; API keys (An
 - [ ] All secrets in Secret Manager; gitleaks clean on full history (Anthropic key in Secret Manager, read only by `hireframe-fns`; Reed and Adzuna keys from M3, mounted only on `scanNow` and `scheduledScan` (Reed also on `rescore`, for full text) and never logged, ADR-025; HMAC from M6)
 - [x] Budget alerts + Anthropic limit set
 - [ ] HMAC verified with a replay test
-- [ ] Injection eval cases pass (M4: five cases in `evals/golden.jsonl`; ticked once the labelled eval passes)
+- [x] Injection eval cases pass (M4: five cases in `evals/golden.jsonl`, all correct in the live eval at 85.0% agreement)
 

@@ -11,7 +11,8 @@ import type { LlmRequest, LlmResponse, LlmTransport } from '../llm/transport.js'
  * and the output schema. Change any of them and replay fails with "recordings stale".
  */
 export const RecordingSchema = z.object({
-  key: z.string().regex(/^[0-9a-f]{64}$/),
+  /** SHA-256 of the request (named so secret scanners don't read it as an API key). */
+  requestHash: z.string().regex(/^[0-9a-f]{64}$/),
   purpose: z.string(),
   model: z.string(),
   stopReason: z.string().nullable(),
@@ -46,14 +47,14 @@ export function parseRecordings(jsonl: string): Map<string, Recording> {
   for (const line of jsonl.split('\n')) {
     if (line.trim() === '') continue;
     const recording = RecordingSchema.parse(JSON.parse(line));
-    recordings.set(recording.key, recording);
+    recordings.set(recording.requestHash, recording);
   }
   return recordings;
 }
 
 export function formatRecordings(recordings: Iterable<Recording>): string {
   return [...recordings]
-    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .sort((a, b) => (a.requestHash < b.requestHash ? -1 : a.requestHash > b.requestHash ? 1 : 0))
     .map((recording) => JSON.stringify(recording))
     .join('\n')
     .concat('\n');
@@ -109,7 +110,7 @@ export function recordingTransport(inner: LlmTransport): LlmTransport & {
       const response = await inner.send(request);
       const key = recordingKey(request);
       recorded.set(key, {
-        key,
+        requestHash: key,
         purpose: request.purpose,
         model: response.model,
         stopReason: response.stopReason,

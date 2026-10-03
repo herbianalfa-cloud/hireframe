@@ -27,7 +27,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - **Every LLM call goes through `llm.call()`**, which checks the spend cap first and records cost.
 
 ## Commands (keep this list current)
-- `npm run check` — lint + typecheck + unit tests + PII scan
+- `npm run check` — lint + typecheck + unit tests + PII scan + eval replay (`npm run eval`)
 - `npm run format` / `npm run format:check` — Prettier (code and config; Markdown excluded)
 - `npm run scan:pii` — fail on emails/phone numbers in tracked files
 - `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria, the fake CV's facts with work rights, and one LinkedIn-alert job; fake LLM and fake job APIs unless `LIVE=1`)
