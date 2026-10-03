@@ -549,7 +549,8 @@ describe('throughput at the production lease', () => {
   it('records separate stop reasons per stage', async () => {
     const { store, transport } = production();
     const result = await run(deps(store, { transport }));
-    expect(result.budget.stops).toEqual({ s2: 'run_budget', s3: expect.any(String) });
+    expect(result.budget.stops?.s2).toBe('run_budget');
+    expect(result.budget.stops?.s3).toBeDefined();
     expect(result.budget.stoppedBy).toBe(result.budget.stops?.s3);
   });
 

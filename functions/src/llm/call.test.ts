@@ -91,7 +91,11 @@ describe('llmCall', () => {
     const usage = memoryStore();
     const result = await call(deps({ transport: transport([response('{"answer":"ok"}')]), usage }));
     // 1000 input × $1/M + 200 output × $5/M = $0.002 → 0.16p at 0.8
-    expect(result).toEqual({ data: { answer: 'ok' }, model: 'claude-haiku-4-5-20251001', costPence: 0.16 });
+    expect(result).toEqual({
+      data: { answer: 'ok' },
+      model: 'claude-haiku-4-5-20251001',
+      costPence: 0.16,
+    });
     expect(usage.doc()).toMatchObject({
       spendPence: 0.16,
       reservations: {},
@@ -232,9 +236,7 @@ describe('llmCall', () => {
   it('prices a dated snapshot exactly as its alias, without a warning', async () => {
     const dated = await call(
       deps({
-        transport: transport([
-          response('{"answer":"ok"}', { model: 'claude-haiku-4-5-20251001' }),
-        ]),
+        transport: transport([response('{"answer":"ok"}', { model: 'claude-haiku-4-5-20251001' })]),
       }),
     );
     const alias = await call(

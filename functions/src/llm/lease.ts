@@ -108,8 +108,7 @@ export function createRunLease(options: RunLeaseOptions): RunLease {
     usage,
     usedPence: (stage) => round(stage ? used[stage] : usedTotal()),
     inFlight: (stage) =>
-      [...inFlight.values()].filter((entry) => stage === undefined || entry.stage === stage)
-        .length,
+      [...inFlight.values()].filter((entry) => stage === undefined || entry.stage === stage).length,
     maxReserved: (stage) => maxReserved[stage],
     nextSettle,
     async waitForRoom(stage) {
