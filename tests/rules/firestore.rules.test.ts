@@ -153,6 +153,10 @@ describe('with an owner configured', () => {
     await assertFails(updateDoc(doc(db, 'jobs/job-1'), { status: 'applied' }));
     await assertFails(setDoc(doc(db, 'sources/adzuna'), { status: 'ok', ...at }));
     await assertFails(setDoc(doc(db, DOCS.scanLock), { schemaVersion: 1 }));
+    // M4 funnel fields (ADR-034): verdicts, scores and queue state are Admin-only too.
+    await assertFails(updateDoc(doc(db, 'jobs/job-1'), { verdict: 'apply', fitScore: 10 }));
+    await assertFails(updateDoc(doc(db, 'jobs/job-1'), { next: 's3' }));
+    await assertFails(updateDoc(doc(db, 'runs/run-1'), { costPence: 0 }));
   });
 
   it('does not let a stranger overwrite config/app to claim ownership', async () => {

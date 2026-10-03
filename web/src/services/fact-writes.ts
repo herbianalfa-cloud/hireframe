@@ -1,14 +1,16 @@
 import {
   CriteriaContentSchema,
   criteriaVersionId,
+  ProfileSettingsSchema,
   type CriteriaContent,
   type FactChange,
   type UploadRemovalPlan,
+  type WorkRightsSetting,
 } from '@hireframe/shared';
 import { deleteField, type DocumentData, type FieldValue } from 'firebase/firestore';
 
 /**
- * Pure builders for the client writes firestore.rules allow (ADR-018, ADR-019). They work on
+ * Pure builders for the client writes firestore.rules allow (ADR-018, ADR-019, ADR-033). They work on
  * the raw Firestore data (with its original Timestamps), because a version snapshot must equal
  * the fact exactly as the batch leaves it; converting to `Date` would lose precision.
  * tests/rules/ runs these builders against the real rules.
@@ -171,5 +173,24 @@ export function buildCriteriaWrite(
       schemaVersion: 1,
     },
     pointerDoc: { version: nextVersion, updatedAt: serverNow, schemaVersion: 1 },
+  };
+}
+
+/**
+ * The owner's work-rights setting on `profile/main` (ADR-033), written with `setDoc(…, { merge:
+ * true })`: `createdAt` only when the document is new, and `validUntil` removed when cleared.
+ */
+export function buildWorkRightsWrite(
+  setting: WorkRightsSetting,
+  exists: boolean,
+  serverNow: FieldValue,
+): DocumentData {
+  const parsed = ProfileSettingsSchema.pick({ workRights: true, validUntil: true }).parse(setting);
+  return {
+    workRights: parsed.workRights,
+    validUntil: parsed.validUntil ?? deleteField(),
+    ...(exists ? {} : { createdAt: serverNow }),
+    updatedAt: serverNow,
+    schemaVersion: 1,
   };
 }
