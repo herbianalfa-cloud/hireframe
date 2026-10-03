@@ -645,6 +645,16 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         return;
       }
       started += 1;
+      // Room first: a job that can't be sent keeps its slot and spends no Reed details call.
+      if (!(await activeLease.waitForRoom('s3'))) {
+        started -= 1;
+        errors.stop('run_budget');
+        return;
+      }
+      if (errors.isStopped()) {
+        started -= 1;
+        return;
+      }
       let text = texts.get(entry.id) ?? '';
       const extraFlags: JobFlag[] = (job.flags ?? []).filter(
         (flag) => !DEEP_FLAGS.includes(flag) && flag !== 'score_drift',
@@ -679,7 +689,11 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
             cacheSystem: true,
           }),
         );
-        if (!result) return;
+        if (!result) {
+          // Left queued: the slot goes back (the hydration, if any, is already spent).
+          started -= 1;
+          return;
+        }
         errors.ok();
         s3.in += 1;
         const { deep, downgraded, unknownRefs } = resolveDeepRead(result.data, toId);
