@@ -72,20 +72,37 @@ describe('scoreJob', () => {
     expect(score({ deep: deep({ requirements }) }).fit).toBe(7.8); // 3 + 2.25 + 1.5 + 0.5 + 0.5 = 7.75, rounded to one decimal
   });
 
-  it('caps fit at 4 on a missing domain must-have and at 2 on a hard blocker', () => {
+  it('caps fit at 6.9 on any missing must-have, naming it in the shortfall', () => {
+    const requirements = [
+      req(),
+      req({ text: 'Looker', match: 'missing', gap: 'tool', factIds: [] }),
+    ];
+    const rich = deep({ requirements, rubric: { evidence: 2, companyFit: 1 } });
+    const result = score({ deep: rich });
+    expect(result).toMatchObject({ fit: 6.9, verdict: 'near_miss' });
+    expect(result.shortfall).toContain('missing: Looker');
+  });
+
+  it('caps fit at 4 on a missing domain must-have', () => {
     const domain = [req(), req({ type: 'domain', match: 'missing', gap: 'domain', factIds: [] })];
     expect(score({ deep: deep({ requirements: domain }) })).toMatchObject({
       fit: 4,
       verdict: 'skip',
     });
-    const hard = [
-      req(),
-      req({ type: 'credential', match: 'missing', gap: 'hard-blocker', factIds: [] }),
-    ];
-    expect(score({ deep: deep({ requirements: hard }) }).fit).toBe(2);
     // A domain gap on a nice-to-have doesn't cap.
     const nice = [req(), req({ level: 'nice', match: 'missing', gap: 'domain', factIds: [] })];
     expect(score({ deep: deep({ requirements: nice }) }).fit).toBe(8);
+  });
+
+  it('caps fit at 2 only when a hard blocker matches a criteria blocker in code', () => {
+    const blocker = (text: string) => [
+      req(),
+      req({ text, type: 'credential', match: 'missing', gap: 'hard-blocker', factIds: [] }),
+    ];
+    expect(score({ deep: deep({ requirements: blocker('SC clearance required') }) }).fit).toBe(2);
+    // The model calling a portfolio a hard blocker isn't enough: it's just a missing must
+    // (3 lane + 1.5 coverage + 1.5 evidence + 0.5 company = 6.5, under the 6.9 cap).
+    expect(score({ deep: deep({ requirements: blocker('A design portfolio') }) }).fit).toBe(6.5);
   });
 
   describe('luck', () => {
@@ -128,6 +145,23 @@ describe('scoreJob', () => {
   });
 
   describe('verdicts', () => {
+    it.each([
+      ['a big employer', { deep: deep({ employer: 'big_brand' }) }, 'big employer'],
+      [
+        'an experience ask at the cap',
+        { experienceAsk: { years: 2, required: false } },
+        'asks 2+ years',
+      ],
+    ] as const)(
+      'holds a would-be apply at near miss for %s',
+      (_name, overrides: ScorePatch, note) => {
+        const result = score({ ...overrides, postedAt: daysAgo(1) });
+        expect(result.luck).toBeGreaterThanOrEqual(5);
+        expect(result.verdict).toBe('near_miss');
+        expect(result.shortfall).toBe(`Luck held back: ${note}`);
+      },
+    );
+
     it('is a near miss with high fit and low luck, naming the luck shortfall', () => {
       const result = score({
         deep: deep({ employer: 'big_brand' }),

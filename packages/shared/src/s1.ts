@@ -182,6 +182,26 @@ function blockerKind(label: string): 'sc' | 'dv' | 'driving' | 'rtw' | null {
   return null;
 }
 
+/**
+ * True when `text` hits one of the criteria's blockers (the same patterns S1 skips on). S3's
+ * hard-blocker cap applies only on such a match, never on the model's say-so (ADR-034).
+ */
+export function hitsCriteriaBlocker(
+  text: string,
+  criteria: Pick<CriteriaContent, 'blockers'>,
+  workRights: WorkRights | null,
+): boolean {
+  const folded = foldText(text);
+  return criteria.blockers.some((label) => {
+    const kind = blockerKind(label);
+    if (kind === 'sc') return SC.test(text);
+    if (kind === 'dv') return DV.test(text);
+    if (kind === 'driving') return DRIVING.test(text);
+    if (kind === 'rtw') return workRights !== null && rightToWorkBlocks(text, workRights);
+    return hasPhrase(folded, label);
+  });
+}
+
 // ---- Experience ----
 
 const YEARS = /\b(\d{1,2})\s*(?:\+|plus)?\s*(?:(?:-|–|to)\s*\d{1,2}\s*\+?\s*)?(?:years?|yrs)\b/gi;

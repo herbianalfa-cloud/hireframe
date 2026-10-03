@@ -89,6 +89,7 @@ export async function evaluateCase(entry: GoldenCase, deps: LlmCallDeps): Promis
       ...(job.postedAt ? { postedAt: job.postedAt } : {}),
       ...(entry.posting.companySize ? { companySize: entry.posting.companySize } : {}),
       ...(s1.experienceAsk ? { experienceAsk: s1.experienceAsk } : {}),
+      workRights: EVAL_WORK_RIGHTS.workRights,
     });
     return {
       ...base,

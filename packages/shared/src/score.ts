@@ -1,4 +1,6 @@
 import { compareIds } from './candidate.js';
+import type { WorkRights } from './profile.js';
+import { hitsCriteriaBlocker } from './s1.js';
 import { lanePoints, type CriteriaContent } from './criteria.js';
 import {
   FACT_ALIAS_PATTERN,
@@ -27,6 +29,9 @@ export const SMALL_COMPANY_MAX = 100;
 
 /** Model scores this far from code's are logged for eval review (FUNNEL.md). */
 export const DRIFT_THRESHOLD = 2;
+
+/** Fit when any must-have is missing: never enough for apply on its own (ADR-034). */
+export const MISSING_MUST_FIT_CAP = 6.9;
 
 // ---- Fact aliases ----
 
@@ -115,6 +120,8 @@ export interface ScoreInput {
   /** `companies/{id}.size` when the job links to a watchlist company, e.g. "51-200". */
   companySize?: string;
   experienceAsk?: ExperienceAsk;
+  /** The owner's work rights, for matching right-to-work blockers. */
+  workRights?: WorkRights | null;
 }
 
 export interface ScoreResult {
@@ -173,7 +180,15 @@ export function scoreJob(input: ScoreInput): ScoreResult {
     deep.rubric.companyFit +
     coverage(nices, 0) * 1;
   const domainBlocker = musts.some((r) => r.match === 'missing' && r.gap === 'domain');
-  const hardBlocker = deep.requirements.some((r) => r.match !== 'met' && r.gap === 'hard-blocker');
+  // Only a requirement that hits a criteria blocker in code counts, not the model's label.
+  const hardBlocker = deep.requirements.some(
+    (r) =>
+      r.match !== 'met' &&
+      r.gap === 'hard-blocker' &&
+      hitsCriteriaBlocker(r.text, criteria, input.workRights ?? null),
+  );
+  const missingMust = musts.some((r) => r.match === 'missing');
+  if (missingMust) fit = Math.min(fit, MISSING_MUST_FIT_CAP);
   if (domainBlocker) fit = Math.min(fit, 4);
   if (hardBlocker) fit = Math.min(fit, 2);
   fit = round1(clamp(fit, 0, 10));
@@ -200,13 +215,25 @@ export function scoreJob(input: ScoreInput): ScoreResult {
 
   const t = criteria.thresholds;
   let verdict: Verdict;
-  if (fit >= t.apply_fit && luck >= t.apply_luck && !domainBlocker && !hardBlocker) {
+  // A luck drag strong enough to matter on its own (an experience ask at or above the cap, or a
+  // big employer) keeps a job out of Apply even when the arithmetic still clears luck 5.
+  const luckBlocked =
+    deep.employer === 'big_brand' ||
+    (input.experienceAsk !== undefined &&
+      input.experienceAsk.years >= criteria.experience_cap_years);
+  if (
+    fit >= t.apply_fit &&
+    luck >= t.apply_luck &&
+    !domainBlocker &&
+    !hardBlocker &&
+    !luckBlocked
+  ) {
     verdict = 'apply';
   } else if (input.lane === 'wildcard' && fit >= t.wildcard_fit) {
     verdict = 'wildcard';
   } else if (
     (fit >= t.near_miss_fit && fit < t.apply_fit) ||
-    (fit >= t.apply_fit && luck < t.apply_luck)
+    (fit >= t.apply_fit && (luck < t.apply_luck || luckBlocked))
   ) {
     verdict = 'near_miss';
   } else {
@@ -215,7 +242,9 @@ export function scoreJob(input: ScoreInput): ScoreResult {
 
   let shortfall: string | undefined;
   if (verdict === 'near_miss') {
-    if (fit >= t.apply_fit) {
+    if (fit >= t.apply_fit && luck >= t.apply_luck) {
+      shortfall = `Luck held back: ${luckNotes.join(', ')}`;
+    } else if (fit >= t.apply_fit) {
       shortfall = `Luck ${String(luck)} < ${String(t.apply_luck)}${
         luckNotes.length ? `: ${luckNotes.join(', ')}` : ''
       }`;

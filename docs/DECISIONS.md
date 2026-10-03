@@ -355,6 +355,13 @@ Context: FUNNEL says scores are "recomputed in code where possible" and verdicts
 
 Consequences: changing thresholds, lane points or exclusions re-scores without a model call (ADR-037). The model's output still drives fit through requirement matches, so prompt quality matters; the eval measures it.
 
+*Addendum (M4 eval tuning, first live eval at 72.5%):* three scoring rules, all in code, applied on replay at no cost:
+- **A missing must-have caps fit at 6.9**, below `apply_fit`. Any must-have the profile doesn't meet keeps a job out of Apply, and the near miss's `shortfall` names it.
+- **A strong luck drag holds Apply back.** A single luck penalty (at most −2) couldn't stop an apply from fit ≥ 7 and luck ≥ 5. Now a big-brand employer, or an experience ask that survived S1 at or above `experience_cap_years`, makes the verdict `near_miss` ("Luck held back: …").
+- **The hard-blocker cap (fit ≤ 2) applies only when the requirement's text matches one of `criteria.blockers` in code** (`hitsCriteriaBlocker`, the same patterns S1 uses). The model labelling something a hard blocker (a portfolio, say) is no longer enough; such a requirement counts as an ordinary missing must-have.
+
+With those rules, a relabelled g21 (a strong wildcard job is Apply by precedence), and prompt changes (S3: "met" needs a fact showing that tool or skill or a clear equivalent; S2: skip only clear no's, pass uncertain roles with a low score), the live eval reached 85.0%. That is the baseline.
+
 ## ADR-035 S3 runs synchronously; caching, refusals and pacing
 Context: ARCHITECTURE suggested Message Batches for deep reads. Batches are 50% cheaper (Sonnet 5.5 batch $1/$5 per MTok), but they're asynchronous (most finish within an hour, up to 24 h), cache hits inside a batch are best-effort, and they would need a poller function, a reservation that outlives the 15-minute TTL, and a second state machine. The 07:50 digest (M7) would often arrive before verdicts. Decision:
 - **S3 runs inside the scan**, time-boxed (ADR-032); whatever doesn't fit waits for the next run. Batches go to the ROADMAP parking lot, to revisit if M4's run data shows S3 spend is the binding constraint.

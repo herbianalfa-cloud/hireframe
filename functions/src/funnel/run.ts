@@ -278,6 +278,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       ...(job.postedAt ? { postedAt: job.postedAt } : {}),
       ...(company?.size ? { companySize: company.size } : {}),
       ...(job.experienceAsk ? { experienceAsk: job.experienceAsk } : {}),
+      workRights: workRights?.workRights ?? null,
     });
     if (score.drift) {
       log.warn('funnel.score_drift', {

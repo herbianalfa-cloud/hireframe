@@ -27,8 +27,8 @@ import { wrapUntrusted } from '../llm/untrusted.js';
  * lane points, exclusions, experience cap, freshness), so changing those needs no model call.
  */
 export const PROMPT_VERSIONS = {
-  s2: 'triage-2026-10-04',
-  s3: 'deep-2026-10-04',
+  s2: 'triage-2026-10-05',
+  s3: 'deep-2026-10-05',
 } as const;
 
 const INJECTION_RULE =
@@ -60,7 +60,7 @@ Lanes the candidate targets:
 ${laneLines(criteria)}
 
 Rules:
-- pass: true if the role plausibly fits a lane or a wildcard interest and nothing clearly blocks a UK graduate with 0 to 2 years of experience and the work rights above.
+- pass: false only for a clear no: the role fits no lane or wildcard interest, or something stated in the posting clearly blocks a UK graduate with 0 to 2 years of experience and the work rights above. When you are unsure (a near fit, an adjacent lane, an experience ask at the edge), pass it with a low triageScore so the deep read decides.
 - lane: the lane the role fits best; "wildcard" for a wildcard interest; "none" if nothing fits.
 - seniority: the level the posting asks for.
 - blockers: only blockers the posting states outright (security clearance, driving licence, right-to-work limits, years of experience well above 2, location). Short phrases, at most 5.
@@ -126,7 +126,7 @@ Company preferences (a boost only, never a requirement): ${String(prefs.size[0])
 
 Steps:
 1. Extract the posting's requirements (at most 20). For each: level "must" or "nice"; type domain, tool, skill, seniority, credential or logistics.
-2. Match each requirement to the profile facts: "met", "partial" or "missing". In factRefs, cite the aliases (like F3) of the facts that support a met or partial match. Never mark a requirement met or partial without citing a fact.
+2. Match each requirement to the profile facts: "met", "partial" or "missing". In factRefs, cite the aliases (like F3) of the facts that support a met or partial match. Mark "met" only when a cited fact shows that specific tool, skill or experience, or a clear equivalent of it; related but different experience is "partial", and no supporting fact is "missing". Never mark a requirement met or partial without citing a fact.
 3. For each requirement that isn't met, set gap: "tool" (learnable, not a blocker), "sector" (unfamiliar industry, not a blocker), "domain" (commercial experience in a field the candidate lacks; a blocker), "seniority", or "hard-blocker" (security clearance, driving licence, right to work, or a mandatory credential the candidate lacks). Use null for met requirements.
 4. rubric.evidence (0 to 2): how strongly quantified achievements in the facts match the role's core work. rubric.companyFit (0 to 1): how well the company matches the preferences above.
 5. employer: "big_brand" for a well-known or high-volume employer, "small" for a company with fewer than about 100 staff, otherwise "other".
