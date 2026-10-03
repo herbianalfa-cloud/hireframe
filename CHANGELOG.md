@@ -39,6 +39,16 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - **Local dev:** fake job APIs, a fake watchlist and one seeded LinkedIn-alert job, so the first local scan shows the merge. `LIVE=1` uses the real APIs.
 
 ### Changed
+- **M3 review fixes (PR #8):**
+  - CI audits production dependencies at high and the full tree at critical; braces (via firebase-tools, dev only) has no patched version (ADR-013 addendum).
+  - A scan killed at the timeout is marked failed by the next scan, and the System screen shows it as "Timed out" at once.
+  - Reed and Adzuna calls count against the quota even if the run fails later.
+  - A failed write batch is retried write by write, so one bad write never loses the others; failed company updates are counted instead of failing the run.
+  - Workable is called on `apply.workable.com` directly, so its robots.txt and 5 s spacing apply (ADR-027 amendment).
+  - Stored jobs read during dedupe are zod-checked; job keys are capped without dropping a posting's own source key.
+  - Production functions bundles no longer contain the emulator's fixtures (ADR-017 addendum).
+  - Scan tuning numbers moved into `functions/src/config.ts`.
+  - SECURITY: the "Delete all my data" wipe of jobs, runs, sources and companies (and Adzuna data removal) is deferred to M8.
 - CLAUDE.md hard rule: robots.txt applies to web pages and unkeyed public endpoints; keyed official APIs follow their developer terms (ADR-025). SECURITY is updated to match.
 - ROADMAP:
   - M3 adds Workable and the Sources panel;

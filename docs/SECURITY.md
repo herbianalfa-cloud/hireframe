@@ -25,7 +25,7 @@ CV and profile facts; job/application history; alert-email content; API keys (An
 ## Data retention
 - `skip` job descriptions purged after 60 days (metadata kept for metrics).
 - Generated CVs kept until user deletes.
-- "Delete all my data" admin action wipes collections + Storage. For the profile this is **Reset profile** (M2.1, ADR-023): an owner-only callable, confirmed by typing RESET, that hard-deletes every fact, version, upload document and uploaded CV file. Jobs, generated CVs and events join the wipe when they exist.
+- "Delete all my data" admin action wipes collections + Storage. For the profile this is **Reset profile** (M2.1, ADR-023): an owner-only callable, confirmed by typing RESET, that hard-deletes every fact, version, upload document and uploaded CV file. Jobs, generated CVs and events join the wipe when they exist. **Deferred to M8 (decided in the M3 review):** M3 stores `jobs` (with descriptions), `runs`, `sources` and `companies`, and nothing deletes them yet. They are public postings and scan records, not CV or profile data, and Reset profile still clears all profile data. M8's retention job adds the wipe for them, which also meets Adzuna's terms (remove data acquired from Adzuna when the API account ends, ADR-025).
 - "Remove upload" only archives (reversible); the uploaded file is kept until Reset profile.
 
 ## Security checklist before first deploy

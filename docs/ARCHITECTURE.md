@@ -39,7 +39,7 @@
 | Greenhouse | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Public job board API |
 | Lever | `api.lever.co/v0/postings/{company}?mode=json` | Public |
 | Ashby | `api.ashbyhq.com/posting-api/job-board/{name}?includeCompensation=true` | Public |
-| Workable | `www.workable.com/api/accounts/{subdomain}?details=true` (documented public widget endpoint) | Verified in M3 (ADR-027) |
+| Workable | `apply.workable.com/api/v1/widget/accounts/{subdomain}?details=true`, where the documented `www.workable.com/api/accounts/{subdomain}` redirects; called directly so its robots.txt and 5 s spacing apply | Verified in M3 (ADR-027) |
 | Reed | Reed Jobseeker API `/api/1.0/search` (free key, Basic auth) | UK; keyed API under its developer terms, budget ≤ 30 calls/run and ≤ 300/day (ADR-025). Snippets only; full text for S2 survivors in M4 |
 | Adzuna | Adzuna API (free app_id/app_key), country `gb` | UK aggregator; keyed API under its terms: 3 s between calls, ≤ 20/run, persisted day/week/month quotas under 250/1,000/2,500 (ADR-025). Snippets only; "Jobs by Adzuna" attribution on listings (M5) |
 | Hacker News "Who's Hiring" | HN Algolia API, latest monthly thread | Keeps UK, London and remote-UK/Europe/anywhere postings |
