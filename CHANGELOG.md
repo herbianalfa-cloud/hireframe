@@ -10,6 +10,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - Dated model IDs such as `claude-haiku-4-5-20251001` were priced at the top rate, so every Haiku call settled at about 0.30p instead of 0.15p. `priceFor` now strips a trailing `-YYYYMMDD`; a truly unknown model still gets the top rate and logs an error once per process.
   - S2 and S3 no longer stop on the first refused reservation. They wait for in-flight calls to settle and stop only when the next call can't fit with nothing in flight, or at the deadline. Expect about 55–60 S2 calls and 8–10 S3 calls per 24p run when the queues are that long.
   - A cached prompt reserves its input at the cache-write rate, so the worst-case bound can't be exceeded.
+  - A deep read that back-pressure leaves queued no longer uses an `s3MaxJobs` slot, and a job that can't be sent no longer spends a Reed details call first.
 - The System scan-once test no longer flakes on a loaded runner.
 
 ### Added
