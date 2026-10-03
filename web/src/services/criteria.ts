@@ -1,4 +1,5 @@
 import {
+  clientTimeoutMs,
   COLLECTIONS,
   CriteriaPointerSchema,
   CriteriaVersionSchema,
@@ -6,8 +7,10 @@ import {
   CRITERIA_SEED_V1,
   DOCS,
   PATHS,
+  RescoreResultSchema,
   type CriteriaContent,
   type CriteriaVersion,
+  type RescoreResult,
 } from '@hireframe/shared';
 import {
   collection,
@@ -17,9 +20,10 @@ import {
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 
 import { buildCriteriaWrite } from './fact-writes';
-import { getFirebase } from './firebase';
+import { getFirebase, getFunctionsClient } from './firebase';
 import { errorCode, logError } from './log';
 import { listen, type Unsubscribe } from './profile';
 import { withTimeout } from './resilience';
@@ -174,4 +178,30 @@ export function criteriaErrorMessage(error: unknown): string {
   if (error instanceof Error && error.name === 'ZodError')
     return 'Some values are invalid. Check the highlighted fields.';
   return "Couldn't save. Check your connection and try again.";
+}
+
+/**
+ * Re-score the last 14 days under the current criteria (PRD R3, ADR-037). It may spend up to one
+ * run budget, so it's never retried automatically.
+ */
+export async function rescore(): Promise<RescoreResult> {
+  const functions = await getFunctionsClient();
+  const call = httpsCallable(functions, 'rescore', {
+    timeout: clientTimeoutMs('rescore'),
+    limitedUseAppCheckTokens: true,
+  });
+  const result = await call({});
+  return RescoreResultSchema.parse(result.data);
+}
+
+/** A user-facing message for a failed re-score (HttpsError messages are written for users). */
+export function rescoreErrorMessage(error: unknown): string {
+  const code = errorCode(error);
+  if (code === 'functions/deadline-exceeded') {
+    return 'The re-score is taking longer than usual. System → Recent runs shows how it ends.';
+  }
+  if (code?.startsWith('functions/') && code !== 'functions/internal' && error instanceof Error) {
+    return error.message;
+  }
+  return "The re-score couldn't start. Try again.";
 }

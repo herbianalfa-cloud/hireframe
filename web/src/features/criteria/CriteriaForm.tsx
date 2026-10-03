@@ -9,6 +9,7 @@ import { ListEditor } from '@/components/ui/list-editor';
 import { criteriaErrorMessage, saveCriteria } from '@/services/criteria';
 
 import { HistoryList } from './HistoryList';
+import { RescoreCard } from './RescoreCard';
 import {
   errorAt,
   newRowKey,
@@ -552,6 +553,10 @@ export function CriteriaForm({ criteria }: { criteria: CriteriaVersion }) {
           </Button>
         </div>
       </form>
+
+      <div className="mt-6">
+        <RescoreCard />
+      </div>
 
       <div className="mt-6">
         <HistoryList currentVersion={criteria.version} />
