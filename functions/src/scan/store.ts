@@ -115,7 +115,12 @@ export function firestoreScanStore(db: Firestore): ScanStore {
           continue;
         }
         companies.push({
-          company: { id: doc.id, name: parsed.data.name, ats: parsed.data.ats },
+          company: {
+            id: doc.id,
+            name: parsed.data.name,
+            ats: parsed.data.ats,
+            ...(parsed.data.lastScannedAt ? { lastScannedAt: parsed.data.lastScannedAt } : {}),
+          },
           ...(parsed.data.lastScan ? { lastScan: parsed.data.lastScan } : {}),
         });
       }

@@ -133,6 +133,12 @@ export const SCAN = {
   keyLookupChunk: 30,
   /** ATS boards fetched at once per source; each host is still spaced by its interval. */
   boardConcurrency: 4,
+  /**
+   * Share of the fetch budget one ATS host's boards may fill. A host with more boards than fit
+   * (count × its interval) rotates: the least recently scanned go first, the rest wait a run.
+   * Workable at 5 s gets 43 boards a run; Greenhouse at 1 s gets 216 (ADR-029).
+   */
+  boardTimeShare: 0.6,
 } as const;
 
 export interface HostPolicyConfig {

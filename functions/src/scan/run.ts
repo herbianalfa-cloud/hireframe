@@ -337,6 +337,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
         merged: counts.merged,
         duplicate: counts.duplicate,
         errors: counts.errors,
+        deferred: outcome.report.deferred ?? 0,
       });
     }
     await store.writeSourceHealth(health);

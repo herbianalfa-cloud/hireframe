@@ -3,13 +3,15 @@ import { describe, expect, it } from 'vitest';
 
 import { createAdzunaSource } from './adzuna.js';
 import { createAshbySource } from './ashby.js';
+import { boardsThisRun } from './ats.js';
 import { createGreenhouseSource } from './greenhouse.js';
 import { createHnSource, isUkRelevant, linksIn, parseHnHeader } from './hn.js';
 import { createSources } from './index.js';
 import { createLeverSource } from './lever.js';
 import { createReedSource, parseReedDate } from './reed.js';
 import { testContext, testHttpClient } from './testing.js';
-import { createWorkableSource } from './workable.js';
+import type { WatchedCompany } from './types.js';
+import { createWorkableSource, workableBoardUrl } from './workable.js';
 
 function expectValid(jobs: RawJob[]) {
   for (const job of jobs) expect(RawJobSchema.parse(job)).toEqual(job);
@@ -223,5 +225,71 @@ describe('createSources', () => {
       'hn',
     ]);
     expect(createSources().greenhouse).not.toBe(sources.greenhouse);
+  });
+});
+
+describe('board rotation when a host is full (ADR-029)', () => {
+  const workable = (id: string, lastScannedAt?: string): WatchedCompany => ({
+    id,
+    name: id,
+    ats: { type: 'workable', token: id },
+    ...(lastScannedAt ? { lastScannedAt: new Date(lastScannedAt) } : {}),
+  });
+  const url = (company: WatchedCompany) => workableBoardUrl(company.ats.token ?? '');
+
+  it('fits Workable boards into the budget at 5 s each: 43 a run', () => {
+    const many = Array.from({ length: 50 }, (_, i) => workable(`co-${String(i).padStart(2, '0')}`));
+    const { selected, deferred } = boardsThisRun(many, url);
+    expect(selected).toHaveLength(43);
+    expect(deferred).toBe(7);
+    // 43 boards × 5 s stays inside the 360 s fetch deadline with room for retries.
+    expect(selected.length * 5_000).toBeLessThanOrEqual(360_000 * 0.6);
+  });
+
+  it('takes never-scanned boards first, then the oldest, ties by ID', () => {
+    const companies = [
+      workable('c', '2026-10-02T08:00:00Z'),
+      workable('b'),
+      workable('a', '2026-10-01T08:00:00Z'),
+      workable('d'),
+    ];
+    const { selected, deferred } = boardsThisRun(companies, url, 10_000); // room for 2
+    expect(selected.map((company) => company.id)).toEqual(['b', 'd']);
+    expect(deferred).toBe(2);
+    expect(boardsThisRun(companies, url, 20_000).selected.map((c) => c.id)).toEqual([
+      'b',
+      'd',
+      'a',
+      'c',
+    ]);
+  });
+
+  it('caps each host on its own interval, so a full host never holds back another', () => {
+    const greenhouse: WatchedCompany = {
+      id: 'g',
+      name: 'g',
+      ats: { type: 'greenhouse', token: 'g' },
+    };
+    const boardUrl = (company: WatchedCompany) =>
+      company.ats.type === 'greenhouse'
+        ? 'https://boards-api.greenhouse.io/v1/boards/g/jobs'
+        : url(company);
+    const { selected } = boardsThisRun([workable('a'), workable('b'), greenhouse], boardUrl, 5_000);
+    expect(selected.map((company) => company.id)).toEqual(['a', 'g']);
+  });
+
+  it('reports deferred boards and fetches only the selected ones', async () => {
+    const requested: string[] = [];
+    const http = testHttpClient({
+      fetch: ((input: URL) => {
+        requested.push(input.toString());
+        return Promise.resolve(new Response('', { status: 404 }));
+      }) as typeof fetch,
+    });
+    const many = Array.from({ length: 45 }, (_, i) => workable(`co-${String(i).padStart(2, '0')}`));
+    const source = createWorkableSource();
+    await source.fetch(testContext({ http, companies: many }));
+    expect(requested.filter((u) => u.includes('/api/accounts/'))).toHaveLength(43);
+    expect(source.health().deferred).toBe(2);
   });
 });

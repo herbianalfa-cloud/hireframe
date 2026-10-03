@@ -114,6 +114,11 @@ describe('runScan on the Firestore emulator', () => {
       broken: false,
     });
     expect((await db.collection(COLLECTIONS.companies).get()).size).toBe(FAKE_SEED.length);
+
+    // Board rotation reads when each board was last fetched (ADR-029).
+    const watched = await firestoreScanStore(db).watchedCompanies();
+    const acme = watched.find((entry) => entry.company.id === 'acme-analytics');
+    expect(acme?.company.lastScannedAt).toEqual(T0);
   });
 
   it('writes no job on a second run over the same postings', async () => {

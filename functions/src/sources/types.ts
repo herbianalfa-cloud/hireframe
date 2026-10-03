@@ -14,6 +14,8 @@ export interface WatchedCompany {
   id: string;
   name: string;
   ats: Ats;
+  /** When its board was last fetched; boards rotate oldest first when a host is full. */
+  lastScannedAt?: Date;
 }
 
 export interface BoardResult {
@@ -54,6 +56,8 @@ export interface SourceReport {
   errors: number;
   errorCode?: string;
   boards: BoardResult[];
+  /** Watched boards left for a later run because their host was full (ADR-029). */
+  deferred?: number;
   /** Quota-limited sources: calls made and where rotation continues next run. */
   callsUsed?: number;
   nextQueryCursor?: number;

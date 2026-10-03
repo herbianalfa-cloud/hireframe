@@ -260,6 +260,7 @@ Context: M3 adds the sources, but the funnel (S1–S3) and the schedule are M4. 
   - **Retries:** at most 3 attempts with exponential backoff and jitter on 429, 5xx, network errors and timeouts. `Retry-After` is honoured up to 30 s; past that the request fails.
   - **Responses** are zod-parsed. A 404 or schema error is not retried.
 - **Sources** implement `Source { id; fetch(ctx); health() }` (ARCHITECTURE), one fresh instance per run.
+  - **Board rotation:** each ATS host gets as many boards per run as fit in 60% of the fetch budget at its request interval (Workable at 5 s: 43; Greenhouse at 1 s: 216). A host with more rotates: the least recently scanned boards go first and the rest wait a run, reported as `deferred`.
   - Each item is validated on its own, and an invalid posting is counted, not fatal.
   - A failing ATS board is recorded on its company (`lastScan`, `broken` after 3 consecutive `not_found`), and the source reports `degraded`.
   - Sources run under `Promise.allSettled`, so one source throwing never fails the run (R4).

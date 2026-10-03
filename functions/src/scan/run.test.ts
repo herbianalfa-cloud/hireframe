@@ -101,10 +101,13 @@ function memoryStore(options: { lock?: LockResult } = {}) {
       }
       return Promise.resolve({ failedWrites: 0 });
     },
-    updateCompanies: (updates) => {
+    updateCompanies: (updates, now) => {
       for (const { companyId, lastScan } of updates) {
         const entry = companies.get(companyId);
-        if (entry) entry.lastScan = lastScan;
+        if (entry) {
+          entry.lastScan = lastScan;
+          entry.company.lastScannedAt = now;
+        }
       }
       return Promise.resolve();
     },
@@ -281,6 +284,48 @@ describe('runScan', () => {
     expect(text).not.toContain('reporting tools');
     expect(text).not.toContain('https://');
     expect(logs.map((log) => log.event)).toContain('scan.done');
+  });
+});
+
+describe('Workable rotation across scans', () => {
+  it('fetches the boards the last scan deferred first', async () => {
+    const seed: CompanySeed[] = Array.from({ length: 50 }, (_, i) => {
+      const id = `wk-${String(i).padStart(2, '0')}`;
+      return {
+        id,
+        name: id,
+        domain: `${id}.example.com`,
+        ats: { type: 'workable', token: id },
+        hq: 'London',
+      };
+    });
+    const memory = memoryStore();
+    const fetched: string[][] = [];
+    let run: string[] = [];
+    const recording = () =>
+      testHttpClient({
+        fetch: ((input: URL) => {
+          const token = /\/api\/accounts\/([^?]+)/.exec(input.toString())?.[1];
+          if (token) run.push(token);
+          return Promise.resolve(new Response('', { status: 404 }));
+        }) as typeof fetch,
+      });
+    let clock = NOW.getTime();
+    for (let i = 0; i < 2; i++) {
+      run = [];
+      clock += 60 * 60_000;
+      const at = new Date(clock);
+      await runScan(deps(memory.store, { seed, httpFor: recording, now: () => at }));
+      fetched.push(run);
+    }
+    const [first = [], second = []] = fetched;
+    expect(first).toHaveLength(43);
+    expect(second).toHaveLength(43);
+    const skippedFirst = seed.map((c) => c.id).filter((id) => !first.includes(id));
+    expect(skippedFirst).toHaveLength(7);
+    // The 7 boards the first scan left out lead the second scan.
+    expect(second.slice(0, 7).sort()).toEqual(skippedFirst);
+    expect(new Set([...first, ...second]).size).toBe(50);
   });
 });
 

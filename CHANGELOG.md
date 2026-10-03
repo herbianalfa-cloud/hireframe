@@ -23,7 +23,8 @@ All notable changes. Format: Keep a Changelog, SemVer.
     - fetches every source in parallel, writes new jobs at stage `s0` and adds new sources to known jobs. An unchanged job costs no write;
     - records run, source and company health. A failing source never fails the run (PRD R4);
     - a lock in `locks/scan` and a 5-minute cooldown, so a double tap never scans twice;
-    - `config/app.disabledSources` turns a source off without a deploy.
+    - `config/app.disabledSources` turns a source off without a deploy;
+    - a host with more ATS boards than fit in the fetch budget rotates them across scans, least recently scanned first (Workable, spaced 5 s apart, takes 43 a scan).
 
     No schedule until M4.
   - **System screen** (pulled forward from M5): Scan now, a card per source (status, counts, why it isn't OK, Adzuna calls today with "Jobs by Adzuna"), broken job boards, the job count and the last five runs.
