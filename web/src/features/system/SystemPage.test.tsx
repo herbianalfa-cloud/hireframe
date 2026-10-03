@@ -1,5 +1,5 @@
 import type { Run, SourceHealth, SourceRunCounts } from '@hireframe/shared';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -224,7 +224,9 @@ describe('System screen', () => {
         'Scan finished: 2 new jobs, 1 merged into known jobs, 2 already known.',
       ),
     ).toBeDefined();
-    expect(countJobs).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(countJobs).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('shows why a scan could not run', async () => {
