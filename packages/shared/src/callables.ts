@@ -10,6 +10,7 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   addFact: 120,
   resetProfile: 120,
   scanNow: 540,
+  rescore: 540,
 } as const;
 
 export type CallableName = keyof typeof CALLABLE_TIMEOUT_SECONDS;

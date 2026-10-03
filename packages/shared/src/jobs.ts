@@ -1,6 +1,17 @@
 import { z } from 'zod';
 
 import { CALLABLE_TIMEOUT_SECONDS } from './callables.js';
+import {
+  FunnelSummarySchema,
+  HydrateCountsSchema,
+  JobFunnelFieldsSchema,
+  RescoreCountsSchema,
+  RUN_FLAGS,
+  RunBudgetSchema,
+  S1CountsSchema,
+  S2CountsSchema,
+  S3CountsSchema,
+} from './funnel.js';
 
 /**
  * Jobs, sources, runs and companies (docs/ARCHITECTURE.md "Data model", ADR-029, ADR-030).
@@ -110,10 +121,11 @@ export const JobSourceRefSchema = z.object({
 export type JobSourceRef = z.infer<typeof JobSourceRefSchema>;
 
 /**
- * `jobs/{jobId}` (M3 fields). M4 adds the verdict fields and `criteriaVersion` when it judges
- * the job; until then a job waits at stage `s0`.
+ * `jobs/{jobId}`: M3's ingest fields plus the funnel's verdict fields (funnel.ts, M4). A job
+ * waits at stage `s0` until S1 judges it; `stage` is the last stage that ran, `next` the stage it
+ * waits for.
  */
-export const JobSchema = z.object({
+export const JobSchema = JobFunnelFieldsSchema.extend({
   dedupeKey: z.string().min(1),
   keys: z.array(z.string().min(1)).min(1).max(JOB_LIMITS.keys),
   title: z.string().min(1).max(JOB_LIMITS.title),
@@ -225,14 +237,26 @@ export const S0CountsSchema = z.object({
 });
 export type S0Counts = z.infer<typeof S0CountsSchema>;
 
+export const RUN_TRIGGERS = ['manual', 'schedule', 'rescore'] as const;
+export type RunTrigger = (typeof RUN_TRIGGERS)[number];
+
 export const RunSchema = z.object({
-  trigger: z.enum(['manual', 'schedule']),
+  trigger: z.enum(RUN_TRIGGERS),
   status: z.enum(RUN_STATUSES),
   startedAt: z.date(),
   finishedAt: z.date().exactOptional(),
   perSource: z.partialRecord(z.enum(SCAN_SOURCE_IDS), SourceRunCountsSchema),
-  perStage: z.object({ s0: S0CountsSchema.exactOptional() }),
+  perStage: z.object({
+    s0: S0CountsSchema.exactOptional(),
+    s1: S1CountsSchema.exactOptional(),
+    s2: S2CountsSchema.exactOptional(),
+    hydrate: HydrateCountsSchema.exactOptional(),
+    s3: S3CountsSchema.exactOptional(),
+    rescore: RescoreCountsSchema.exactOptional(),
+  }),
   costPence: z.number().min(0),
+  budget: RunBudgetSchema.exactOptional(),
+  flags: z.array(z.enum(RUN_FLAGS)).max(RUN_FLAGS.length).exactOptional(),
   /** Codes only, never messages (docs/SECURITY.md "Sensitive data in logs"). */
   errors: z
     .array(z.object({ sourceId: z.enum(SCAN_SOURCE_IDS).exactOptional(), code: ErrorCode }))
@@ -325,6 +349,8 @@ export const ScanNowResultSchema = z.discriminatedUnion('status', [
     runStatus: z.enum(['succeeded', 'partial', 'failed']),
     perSource: z.partialRecord(z.enum(SCAN_SOURCE_IDS), SourceRunSummarySchema),
     s0: S0CountsSchema,
+    /** Absent when the funnel didn't run (it failed; the run says why). */
+    funnel: FunnelSummarySchema.exactOptional(),
   }),
   z.object({
     status: z.literal('skipped_recent'),
@@ -334,6 +360,21 @@ export const ScanNowResultSchema = z.discriminatedUnion('status', [
   }),
 ]);
 export type ScanNowResult = z.infer<typeof ScanNowResultSchema>;
+
+// ---- rescore callable (PRD R3, ADR-037) ----
+
+export const RescoreInputSchema = z.strictObject({});
+
+export const RescoreResultSchema = z.object({
+  status: z.literal('completed'),
+  runId: z.string().min(1),
+  counts: RescoreCountsSchema,
+  funnel: FunnelSummarySchema,
+});
+export type RescoreResult = z.infer<typeof RescoreResultSchema>;
+
+/** Re-score covers jobs first seen this many days ago or less (PRD R3). */
+export const RESCORE_DAYS = 14;
 
 /** `locks/scan`: the single-flight scan lock (ADR-029). `runId` is set only while a scan runs. */
 export const ScanLockSchema = z.object({
