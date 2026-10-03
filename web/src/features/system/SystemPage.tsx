@@ -1,7 +1,8 @@
-import type { SourceStatus } from '@hireframe/shared';
+import { isRunStalled, type SourceStatus } from '@hireframe/shared';
 import {
   Ban,
   CircleAlert,
+  Clock,
   CircleCheck,
   CircleMinus,
   Loader2,
@@ -206,8 +207,17 @@ function Sources() {
   );
 }
 
-function BrokenBoards({ boards }: { boards: BoardView[] }) {
-  if (boards.length === 0) return null;
+function BrokenBoards() {
+  const state = useBrokenBoards();
+  if (state.status === 'error') {
+    return (
+      <p role="alert" className="mt-8 text-sm text-danger">
+        {state.message}
+      </p>
+    );
+  }
+  if (state.status !== 'ready' || state.data.length === 0) return null;
+  const boards: BoardView[] = state.data;
   return (
     <section aria-labelledby="broken-title" className="mt-8">
       <h2 id="broken-title" className="text-sm font-medium">
@@ -231,47 +241,75 @@ function BrokenBoards({ boards }: { boards: BoardView[] }) {
   );
 }
 
-function runSummary(view: RunView): string {
+function runSummary(view: RunView, stalled: boolean): string {
   const s0 = view.run.perStage.s0;
+  if (stalled) return 'Stopped before it finished';
   if (!s0) return view.run.status === 'running' ? 'In progress' : 'No jobs processed';
   return `${String(s0.new)} new · ${String(s0.merged)} merged · ${String(s0.duplicate)} known`;
 }
 
+function RunBadge({ view, stalled }: { view: RunView; stalled: boolean }) {
+  // A run killed before it could record its end (callable timeout) shows as timed out at once;
+  // the next scan marks it failed in Firestore (ADR-029).
+  if (stalled) {
+    return (
+      <Badge variant="danger">
+        <Clock aria-hidden="true" />
+        Timed out
+      </Badge>
+    );
+  }
+  const { status } = view.run;
+  return (
+    <Badge
+      variant={
+        status === 'succeeded'
+          ? 'success'
+          : status === 'running'
+            ? 'accent'
+            : status === 'partial'
+              ? 'warning'
+              : 'danger'
+      }
+    >
+      {status === 'running' ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
+      {RUN_STATUS_LABELS[status]}
+    </Badge>
+  );
+}
+
 function RecentRuns() {
   const state = useRecentRuns();
-  if (state.status !== 'ready' || state.data.length === 0) {
-    return state.status === 'error' ? (
+  if (state.status === 'loading') {
+    return (
+      <div role="status" aria-label="Loading runs" className="mt-3">
+        <Skeleton className="h-16" />
+      </div>
+    );
+  }
+  if (state.status === 'error') {
+    return (
       <p role="alert" className="mt-3 text-sm text-danger">
         {state.message}
       </p>
-    ) : null;
+    );
   }
+  if (state.data.length === 0) return null;
+  const now = new Date();
   return (
     <ul className="mt-3 divide-y rounded-lg border bg-surface">
-      {state.data.map((view) => (
-        <li key={view.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-          <span className="text-sm">
-            {TIME_FORMAT.format(view.run.startedAt)}{' '}
-            <span className="text-muted-foreground">· {runSummary(view)}</span>
-          </span>
-          <Badge
-            variant={
-              view.run.status === 'succeeded'
-                ? 'success'
-                : view.run.status === 'running'
-                  ? 'accent'
-                  : view.run.status === 'partial'
-                    ? 'warning'
-                    : 'danger'
-            }
-          >
-            {view.run.status === 'running' ? (
-              <Loader2 aria-hidden="true" className="animate-spin" />
-            ) : null}
-            {RUN_STATUS_LABELS[view.run.status]}
-          </Badge>
-        </li>
-      ))}
+      {state.data.map((view) => {
+        const stalled = isRunStalled(view.run, now);
+        return (
+          <li key={view.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+            <span className="text-sm">
+              {TIME_FORMAT.format(view.run.startedAt)}{' '}
+              <span className="text-muted-foreground">· {runSummary(view, stalled)}</span>
+            </span>
+            <RunBadge view={view} stalled={stalled} />
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -283,7 +321,6 @@ function RecentRuns() {
 export function SystemPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const jobCount = useJobCount(refreshKey);
-  const boards = useBrokenBoards();
   return (
     <section aria-labelledby="page-title" className="mx-auto max-w-5xl">
       <h1 id="page-title" className="text-xl font-semibold tracking-tight">
@@ -303,7 +340,7 @@ export function SystemPage() {
         </h2>
         <Sources />
       </section>
-      {boards.status === 'ready' ? <BrokenBoards boards={boards.data} /> : null}
+      <BrokenBoards />
       <section aria-labelledby="runs-title" className="mt-8">
         <h2 id="runs-title" className="text-sm font-medium">
           Recent runs

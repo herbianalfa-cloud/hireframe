@@ -213,6 +213,57 @@ describe('System screen', () => {
   });
 });
 
+describe('System screen states', () => {
+  it('shows a loading state for recent runs', () => {
+    vi.mocked(watchRecentRuns).mockImplementation((callback) => {
+      callback({ status: 'loading' });
+      return () => undefined;
+    });
+    render(<SystemPage />);
+    expect(screen.getByRole('status', { name: 'Loading runs' })).toBeDefined();
+  });
+
+  it('shows errors for recent runs and broken boards', () => {
+    vi.mocked(watchRecentRuns).mockImplementation((callback) => {
+      callback({ status: 'error', message: "Couldn't load recent runs. Reload to try again." });
+      return () => undefined;
+    });
+    vi.mocked(watchBrokenBoards).mockImplementation((callback) => {
+      callback({ status: 'error', message: "Couldn't load board status." });
+      return () => undefined;
+    });
+    render(<SystemPage />);
+    const alerts = screen.getAllByRole('alert').map((alert) => alert.textContent);
+    expect(alerts).toEqual(
+      expect.arrayContaining([
+        "Couldn't load recent runs. Reload to try again.",
+        "Couldn't load board status.",
+      ]),
+    );
+  });
+
+  it('shows a run stuck at running past the callable timeout as timed out', () => {
+    const stuck: Run = {
+      ...RUN,
+      status: 'running',
+      startedAt: new Date(Date.now() - 11 * 60_000),
+      perStage: {},
+    };
+    const live: Run = { ...RUN, status: 'running', startedAt: new Date(), perStage: {} };
+    givenRuns([
+      { id: 'stuck', run: stuck },
+      { id: 'live', run: live },
+    ]);
+    render(<SystemPage />);
+    const runs = screen.getByRole('region', { name: 'Recent runs' });
+    const items = within(runs).getAllByRole('listitem');
+    expect(items[0]?.textContent).toContain('Timed out');
+    expect(items[0]?.textContent).toContain('Stopped before it finished');
+    expect(items[1]?.textContent).toContain('Running');
+    expect(items[1]?.textContent).toContain('In progress');
+  });
+});
+
 describe('scanResultText', () => {
   it('explains a skipped scan', () => {
     expect(
