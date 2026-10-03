@@ -1,10 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Usage } from '@hireframe/shared';
+import { costPence, type Usage } from '@hireframe/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { MODELS, PRICES_USD_PER_MTOK, TOP_PRICE } from '../config.js';
 import { setLogSink, type LogFields } from '../log.js';
-import { llmCall, type LlmCallDeps } from './call.js';
+import { llmCall, priceFor, type LlmCallDeps } from './call.js';
 import { LlmOutputError, SpendCapExceededError } from './errors.js';
 import type { LlmRequest, LlmResponse, LlmTransport } from './transport.js';
 import { applyReserve, applySettle, emptyUsage, type UsageStore } from './usage-store.js';
@@ -15,7 +16,8 @@ const SECRET = 'Alex Example led onboarding for twelve clients';
 
 function response(text: string | null, overrides: Partial<LlmResponse> = {}): LlmResponse {
   return {
-    model: 'claude-haiku-4-5',
+    // The API reports the dated snapshot, not the alias that was requested.
+    model: 'claude-haiku-4-5-20251001',
     stopReason: 'end_turn',
     text,
     tokens: { input: 1_000, output: 200, cacheRead: 0, cacheWrite: 0 },
@@ -89,11 +91,11 @@ describe('llmCall', () => {
     const usage = memoryStore();
     const result = await call(deps({ transport: transport([response('{"answer":"ok"}')]), usage }));
     // 1000 input × $1/M + 200 output × $5/M = $0.002 → 0.16p at 0.8
-    expect(result).toEqual({ data: { answer: 'ok' }, model: 'claude-haiku-4-5', costPence: 0.16 });
+    expect(result).toEqual({ data: { answer: 'ok' }, model: 'claude-haiku-4-5-20251001', costPence: 0.16 });
     expect(usage.doc()).toMatchObject({
       spendPence: 0.16,
       reservations: {},
-      calls: { 'claude-haiku-4-5': 1 },
+      calls: { 'claude-haiku-4-5-20251001': 1 },
       byPurpose: { addFact: 0.16 },
     });
   });
@@ -214,6 +216,80 @@ describe('llmCall', () => {
     // Top rate is Sonnet 5.5: 1000 × $2/M + 200 × $10/M = $0.004 → 0.32p
     expect(result.costPence).toBeCloseTo(0.32, 6);
     expect(logs.some((line) => line.event === 'llm.unknown_model_price')).toBe(true);
+  });
+
+  it('reports a truly unknown model as an error, once per model', () => {
+    priceFor('claude-future-10');
+    priceFor('claude-future-10');
+    priceFor('claude-future-11-20270101');
+    const reports = logs.filter((line) => line.event === 'llm.unknown_model_price');
+    expect(reports.map((line) => line.model)).toEqual([
+      'claude-future-10',
+      'claude-future-11-20270101',
+    ]);
+  });
+
+  it('prices a dated snapshot exactly as its alias, without a warning', async () => {
+    const dated = await call(
+      deps({
+        transport: transport([
+          response('{"answer":"ok"}', { model: 'claude-haiku-4-5-20251001' }),
+        ]),
+      }),
+    );
+    const alias = await call(
+      deps({
+        transport: transport([response('{"answer":"ok"}', { model: 'claude-haiku-4-5' })]),
+      }),
+    );
+    // 1000 × $1/M + 200 × $5/M at 0.8, not the top rate (0.32p)
+    expect(dated.costPence).toBe(0.16);
+    expect(dated.costPence).toBe(alias.costPence);
+    expect(logs.some((line) => line.event === 'llm.unknown_model_price')).toBe(false);
+  });
+
+  it('gives an unknown ID the top price, dated or not', () => {
+    expect(priceFor('claude-mystery-1')).toBe(TOP_PRICE);
+    expect(priceFor('claude-mystery-1-20260101')).toBe(TOP_PRICE);
+  });
+
+  it.each(Object.entries(MODELS))(
+    'resolves the configured %s model, bare and dated, to a price-table entry',
+    (_purpose, model) => {
+      const entry = PRICES_USD_PER_MTOK[model.id];
+      expect(entry).toBeDefined();
+      expect(priceFor(model.id)).toBe(entry);
+      expect(priceFor(`${model.id}-20251001`)).toBe(entry);
+      expect(priceFor(`fake:${model.id}-20251001`)).toBe(entry);
+    },
+  );
+
+  it('reserves a cached prompt at the cache-write rate and settles below it', async () => {
+    const usage = memoryStore();
+    const reserved: number[] = [];
+    const spy: UsageStore = {
+      reserve(input) {
+        reserved.push(input.pence);
+        return usage.reserve(input);
+      },
+      settle: (input) => usage.settle(input),
+    };
+    await llmCall(deps({ transport: transport([response('{"answer":"ok"}')]), usage: spy }), {
+      purpose: 'deepRead',
+      system: 'Return JSON.',
+      user: 'x',
+      schema: Schema,
+      cacheSystem: true,
+    });
+    // 1,000 counted → 1,600 bound; Sonnet 5.5 writes at $2.50, so input costs more than $2
+    const price = PRICES_USD_PER_MTOK['claude-sonnet-5-5'];
+    if (!price) throw new Error('no price');
+    const bound = costPence(
+      { input: 1_600, output: MODELS.deepRead.maxTokens, cacheRead: 0, cacheWrite: 0 },
+      { ...price, inputUsdPerMTok: price.cacheWriteUsdPerMTok },
+      0.8,
+    );
+    expect(reserved).toEqual([bound]);
   });
 
   it('prices a fake-transport model at the real model rate, without a warning', async () => {
