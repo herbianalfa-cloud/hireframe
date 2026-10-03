@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildNewJob,
+  cappedKeys,
   dedupeBatch,
   dedupeKey,
   fnv1a64,
@@ -214,5 +215,35 @@ describe('buildNewJob', () => {
     const [group] = dedupeBatch([norm(rawJob({ sourceId: 'hn', externalId: '1', company: '!!' }))]);
     if (!group) throw new Error('no group');
     expect(buildNewJob(group, 'x', NOW).job.dedupeKey).toBe('hn:1');
+  });
+});
+
+describe('cappedKeys (JOB_LIMITS.keys)', () => {
+  it("keeps every member's source key and the dedupe key when truncating", () => {
+    const [group] = dedupeBatch([norm(GREENHOUSE_JOB), norm(LINKEDIN_ALERT_JOB)]);
+    if (!group) throw new Error('no group');
+    // 70 URL-derived keys that sort before the real ones would push them out of a plain slice.
+    const noise = Array.from({ length: 70 }, (_, i) => `aaa:${String(i).padStart(2, '0')}`);
+    const crowded = { ...group, keys: [...noise, ...group.keys].sort() };
+    const { keys, dropped } = cappedKeys(crowded);
+    expect(keys).toHaveLength(60);
+    expect(dropped).toBe(crowded.keys.length - 60);
+    expect(keys.slice(0, 2)).toEqual(['greenhouse:5551234', 'linkedin:4012345678']);
+    expect(keys.filter((key) => key.startsWith('d:'))).toHaveLength(1);
+    expect(buildNewJob(crowded, 'x', NOW).droppedKeys).toBe(dropped);
+  });
+
+  it("adds a merged posting's own source key first when the stored job is near the cap", () => {
+    const nearlyFull = {
+      id: 'job-full',
+      keys: [
+        norm(GREENHOUSE_JOB).dedupeKey ?? '',
+        ...Array.from({ length: 58 }, (_, i) => `x:${String(i)}`),
+      ],
+      firstSeenAt: new Date(0),
+      sourceCount: 1,
+    };
+    const plan = planIngest(dedupeBatch([norm(LINKEDIN_ALERT_JOB)]), [nearlyFull]);
+    expect(plan.updates[0]?.addKeys).toEqual(['linkedin:4012345678']);
   });
 });

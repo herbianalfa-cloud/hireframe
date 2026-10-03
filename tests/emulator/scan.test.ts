@@ -7,6 +7,7 @@
  */
 import {
   buildNewJob,
+  type BatchGroup,
   COLLECTIONS,
   CompanySchema,
   CRITERIA_SEED_V1,
@@ -190,5 +191,107 @@ describe('runScan on the Firestore emulator', () => {
     expect(acme?.watch).toBe(false);
     // Unwatched: its board isn't fetched.
     expect(result.perSource.greenhouse).toMatchObject({ fetched: 0 });
+  });
+
+  it('marks a killed run failed when its stale lock is taken over (R1)', async () => {
+    await db.doc(PATHS.run('dead-run')).set({
+      trigger: 'manual',
+      status: 'running',
+      startedAt: T0,
+      perSource: {},
+      perStage: {},
+      costPence: 0,
+      errors: [],
+      schemaVersion: 1,
+    });
+    await db.doc(DOCS.scanLock).set({ runId: 'dead-run', startedAt: T0, schemaVersion: 1 });
+    expect((await runScan(deps(minutes(13)))).status).toBe('completed');
+    const dead = RunSchema.parse(
+      timestampsToDates((await db.doc(PATHS.run('dead-run')).get()).data()),
+    );
+    expect(dead).toMatchObject({
+      status: 'failed',
+      finishedAt: minutes(13),
+      errors: [{ code: 'timeout' }],
+    });
+  });
+
+  it("never lets a late release by a taken-over run clear the newer run's lock", async () => {
+    const store = firestoreScanStore(db);
+    await db.doc(DOCS.scanLock).set({ runId: 'old-run', startedAt: T0, schemaVersion: 1 });
+    expect(await store.acquireLock('new-run', minutes(13), 0)).toEqual({ ok: true });
+    await store.releaseLock('old-run', minutes(14));
+    expect((await db.doc(DOCS.scanLock).get()).get('runId')).toBe('new-run');
+    await store.releaseLock('new-run', minutes(15));
+    const lock = (await db.doc(DOCS.scanLock).get()).data();
+    expect(lock).not.toHaveProperty('runId');
+  });
+
+  it('splits writes into batches of at most 400 ops and counts a failed batch', async () => {
+    const store = firestoreScanStore(db);
+    const groups: BatchGroup[] = Array.from({ length: 250 }, (_, i) => {
+      const job = normaliseRawJob({
+        ...LINKEDIN_ALERT_JOB,
+        externalId: String(5_000_000 + i),
+        title: `Analyst ${String(i)}`,
+        url: `https://www.linkedin.com/jobs/view/${String(5_000_000 + i)}`,
+      });
+      if (!job) throw new Error('fixture');
+      return { jobs: [job], keys: job.keys };
+    });
+    // 250 creates = 500 ops, so two batches; then one update to a job that doesn't exist.
+    const missing = groups[0]?.jobs[0];
+    if (!missing) throw new Error('fixture');
+    const result = await store.writePlan(
+      {
+        creates: groups,
+        updates: [{ jobId: 'no-such-job', addSources: [missing], addKeys: [] }],
+        outcomes: [],
+        counts: { in: 0, new: 0, merged: 0, duplicate: 0, conflicts: 0 },
+      },
+      T0,
+    );
+    // The failing update shares the second batch, which is retried write by write: only the
+    // update is lost, all 250 jobs land.
+    expect((await db.collection(COLLECTIONS.jobs).get()).size).toBe(250);
+    expect(result.failedWrites).toBe(1);
+  });
+
+  it('counts company updates that fail instead of failing the run (R6)', async () => {
+    const store = firestoreScanStore(db);
+    const result = await store.updateCompanies(
+      [
+        {
+          companyId: 'deleted-mid-run',
+          lastScan: { status: 'ok', jobs: 1, consecutiveFailures: 0, broken: false },
+        },
+      ],
+      T0,
+    );
+    expect(result).toEqual({ failedWrites: 1 });
+    expect((await db.doc(PATHS.company('deleted-mid-run')).get()).exists).toBe(false);
+  });
+
+  it('reads quota counters saved before a run finished (R2)', async () => {
+    const store = firestoreScanStore(db);
+    const quota = {
+      day: '2026-10-01',
+      dayCount: 7,
+      week: '2026-W40',
+      weekCount: 7,
+      month: '2026-10',
+      monthCount: 7,
+    };
+    await store.saveQuota('adzuna', quota);
+    expect(await store.quotas()).toEqual({ adzuna: quota });
+  });
+
+  it('skips stored jobs that fail the projection schema (V1)', async () => {
+    await db
+      .doc(PATHS.job('broken-job'))
+      .set({ keys: 'not-an-array', firstSeenAt: T0, sources: [] });
+    await db.doc(PATHS.job('good-job')).set({ keys: ['d:abc'], firstSeenAt: T0, sources: [{}] });
+    const found = await firestoreScanStore(db).findJobsByKeys(['d:abc']);
+    expect(found).toEqual([{ id: 'good-job', keys: ['d:abc'], firstSeenAt: T0, sourceCount: 1 }]);
   });
 });

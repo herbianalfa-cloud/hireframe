@@ -30,6 +30,10 @@ Disallow: /jobs/*?*sortBy=
 const ADZUNA = `User-agent: *
 Disallow: /
 `;
+const APPLY_WORKABLE = `User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Disallow:
+`;
 const WORKABLE = `User-Agent: *
 Content-Signal: search=yes, ai-input=yes, ai-train=no
 Disallow: /user_password_resets
@@ -65,10 +69,13 @@ describe('parseRobots on the real source files', () => {
     expect(parseRobots(ADZUNA, TOKEN).allows('/v1/api/jobs/gb/search/1')).toBe(false);
   });
 
-  it('Workable allows the public jobs endpoint', () => {
+  it('Workable allows the public jobs endpoint on both hosts', () => {
     const robots = parseRobots(WORKABLE, TOKEN);
     expect(robots.allows('/api/accounts/acme?details=true')).toBe(true);
     expect(robots.allows('/j/ABC123')).toBe(false);
+    // apply.workable.com, which the scan calls directly (ADR-027), allows everything.
+    const apply = parseRobots(APPLY_WORKABLE, TOKEN);
+    expect(apply.allows('/api/v1/widget/accounts/acme?details=true')).toBe(true);
   });
 });
 

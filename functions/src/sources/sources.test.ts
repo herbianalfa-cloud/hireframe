@@ -289,7 +289,7 @@ describe('board rotation when a host is full (ADR-029)', () => {
     const many = Array.from({ length: 45 }, (_, i) => workable(`co-${String(i).padStart(2, '0')}`));
     const source = createWorkableSource();
     await source.fetch(testContext({ http, companies: many }));
-    expect(requested.filter((u) => u.includes('/api/accounts/'))).toHaveLength(43);
+    expect(requested.filter((u) => u.includes('/widget/accounts/'))).toHaveLength(43);
     expect(source.health().deferred).toBe(2);
   });
 });

@@ -41,7 +41,8 @@ import type {
  */
 
 export type LockResult =
-  | { ok: true }
+  /** `recovered`: the ID of a killed run whose stale lock this scan took over (now failed). */
+  | { ok: true; recovered?: string }
   | { ok: false; reason: 'running' }
   | { ok: false; reason: 'recent'; lastFinishedAt: Date };
 
@@ -60,13 +61,18 @@ export interface ScanStore {
   ensureSeedCompanies(seed: readonly CompanySeed[], now: Date): Promise<number>;
   watchedCompanies(): Promise<StoredCompany[]>;
   sourceStates(): Promise<Partial<Record<ScanSourceId, SourceHealth>>>;
+  /** API call counters, read on their own so a run that died after saving them still counts. */
+  quotas(): Promise<Partial<Record<ScanSourceId, Quota>>>;
+  /** Saves a keyed source's counters as soon as it finishes, before anything else can fail. */
+  saveQuota(sourceId: ScanSourceId, quota: Quota): Promise<void>;
   findJobsByKeys(keys: readonly string[]): Promise<ExistingJobKeys[]>;
   /** Returns the writes that failed (their batches are logged and skipped). */
   writePlan(plan: IngestPlan, now: Date): Promise<{ failedWrites: number }>;
+  /** Returns the updates that failed (their batches are logged and skipped). */
   updateCompanies(
     updates: { companyId: string; lastScan: NonNullable<Company['lastScan']> }[],
     now: Date,
-  ): Promise<void>;
+  ): Promise<{ failedWrites: number }>;
   writeSourceHealth(states: Partial<Record<ScanSourceId, SourceHealth>>): Promise<void>;
 }
 
@@ -192,12 +198,14 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
   try {
     await store.createRun(runId, run);
     log.info('scan.started', { runId, trigger: deps.trigger });
+    if (lock.recovered) log.warn('scan.recovered', { runId: lock.recovered, code: 'timeout' });
 
     const seeded = await store.ensureSeedCompanies(deps.seed, startedAt);
     if (seeded > 0) log.info('watchlist.seeded', { created: seeded });
-    const [stored, states, criteria] = await Promise.all([
+    const [stored, states, quotas, criteria] = await Promise.all([
       store.watchedCompanies(),
       store.sourceStates(),
+      store.quotas(),
       deps.readCriteria().catch((error: unknown) => {
         log.error('scan.failed', { step: 'criteria', ...errorFields(error) });
         run.errors.push({ code: 'criteria_invalid' });
@@ -231,7 +239,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
           ];
         }
         const quotaKey = QUOTA_SOURCES[id];
-        const quota = quotaKey ? currentQuota(states[id]?.quota, startedAt) : undefined;
+        const quota = quotaKey ? currentQuota(quotas[id], startedAt) : undefined;
         const callBudget = quotaKey && quota ? remainingCalls(quota, QUOTAS[quotaKey]) : Infinity;
         const http = deps.httpFor(deadline);
         const source = sources[id];
@@ -259,6 +267,12 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
           report.errors += 1;
         }
         const requests = http.requests();
+        // Count the calls now: if anything later in the run fails, the quota still holds them.
+        if (quota) {
+          await store.saveQuota(id, addCalls(quota, requests)).catch((error: unknown) => {
+            log.error('scan.failed', { step: 'quota', source: id, ...errorFields(error) });
+          });
+        }
         return [
           id,
           {
@@ -302,7 +316,8 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
         companyId: board.companyId,
         lastScan: companyScanUpdate(previousScan.get(board.companyId), board),
       }));
-    await store.updateCompanies(companyUpdates, startedAt);
+    const companyWrites = await store.updateCompanies(companyUpdates, startedAt);
+    if (companyWrites.failedWrites > 0) run.errors.push({ code: 'company_write_failed' });
 
     const perSource: Partial<Record<ScanSourceId, SourceRunCounts>> = {};
     const health: Partial<Record<ScanSourceId, SourceHealth>> = {};
@@ -342,7 +357,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     }
     await store.writeSourceHealth(health);
 
-    const status = runStatus(perSource, failedWrites);
+    const status = runStatus(perSource, failedWrites + companyWrites.failedWrites);
     const s0: S0Counts = plan.counts;
     const finished: Run = {
       ...run,

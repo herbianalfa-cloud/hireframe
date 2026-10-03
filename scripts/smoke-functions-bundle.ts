@@ -17,4 +17,12 @@ const wrong = names.filter((name) => {
 if (wrong.length > 0) {
   throw new Error(`smoke-functions-bundle: not in ${REGION} only: ${wrong.join(', ')}`);
 }
-console.log(`smoke-functions-bundle: ${names.join(', ')} in ${REGION}`);
+// Production bundles never carry the emulator's fixtures (callable.ts `loadDevFakes`).
+const { readFileSync } = await import('node:fs');
+const source = readFileSync(new URL('../functions/deploy/index.js', import.meta.url), 'utf8');
+const fixtureMarkers = ['Acme Analytics', 'Alex Example'];
+const leaked = fixtureMarkers.filter((marker) => source.includes(marker));
+if (leaked.length > 0 && process.env.HIREFRAME_DEV_BUNDLE !== '1') {
+  throw new Error(`smoke-functions-bundle: fixture data in the bundle: ${leaked.join(', ')}`);
+}
+console.log(`smoke-functions-bundle: ${names.join(', ')} in ${REGION}, no fixtures`);

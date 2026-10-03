@@ -37,7 +37,9 @@ export type LogEvent =
   | 'ingest.write_failed'
   | 'dedupe.conflict'
   | 'watchlist.seeded'
-  | 'store.invalid_doc';
+  | 'store.invalid_doc'
+  | 'ingest.keys_truncated'
+  | 'scan.recovered';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

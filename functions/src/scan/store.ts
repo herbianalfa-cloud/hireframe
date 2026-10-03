@@ -3,7 +3,9 @@ import {
   CompanySchema,
   COLLECTIONS,
   DOCS,
+  JobKeysProjectionSchema,
   PATHS,
+  QuotaSchema,
   ScanLockSchema,
   SCAN_SOURCE_IDS,
   SourceHealthSchema,
@@ -11,6 +13,7 @@ import {
   type Company,
   type CompanySeed,
   type ExistingJobKeys,
+  type Quota,
   type ScanSourceId,
   type SourceHealth,
 } from '@hireframe/shared';
@@ -60,12 +63,26 @@ export function firestoreScanStore(db: Firestore): ScanStore {
         if (lock?.lastFinishedAt && now.getTime() - lock.lastFinishedAt.getTime() < cooldownMs) {
           return { ok: false, reason: 'recent', lastFinishedAt: lock.lastFinishedAt };
         }
+        // A stale lock belongs to a scan that was killed before its `finally` ran (callable
+        // timeout or memory), so its run is still `running`: mark it failed while taking over.
+        const deadRunRef = lock?.runId ? db.doc(PATHS.run(lock.runId)) : null;
+        const deadRun = deadRunRef ? await tx.get(deadRunRef) : null;
+        const recovered =
+          deadRunRef && deadRun?.exists && deadRun.get('status') === 'running' ? deadRunRef : null;
         tx.set(lockRef, {
           runId,
           startedAt: now,
           ...(lock?.lastFinishedAt ? { lastFinishedAt: lock.lastFinishedAt } : {}),
           schemaVersion: 1,
         });
+        if (recovered) {
+          tx.update(recovered, {
+            status: 'failed',
+            finishedAt: now,
+            errors: FieldValue.arrayUnion({ code: 'timeout' }),
+          });
+          return { ok: true, recovered: recovered.id };
+        }
         return { ok: true };
       });
     },
@@ -73,8 +90,9 @@ export function firestoreScanStore(db: Firestore): ScanStore {
     async releaseLock(runId, now) {
       await db.runTransaction(async (tx) => {
         const snapshot = await tx.get(lockRef);
+        const lock = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
         // Only the run holding the lock releases it (a stale one may have been taken over).
-        if (snapshot.get('runId') !== runId) return;
+        if (!lock.success || lock.data.runId !== runId) return;
         tx.set(lockRef, { lastFinishedAt: now, schemaVersion: 1 });
       });
     },
@@ -89,7 +107,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
 
     async ensureSeedCompanies(seed, now) {
       let created = 0;
-      for (const part of chunks(seed, 200)) {
+      for (const part of chunks(seed, SCAN.seedReadChunk)) {
         const refs = part.map((company) => db.doc(PATHS.company(company.id)));
         const snapshots = refs.length ? await db.getAll(...refs) : [];
         const missing = part.filter((_, index) => !snapshots[index]?.exists);
@@ -144,22 +162,32 @@ export function firestoreScanStore(db: Firestore): ScanStore {
 
     async findJobsByKeys(keys) {
       const found = new Map<string, ExistingJobKeys>();
-      await eachLimited(chunks(keys, SCAN.keyLookupChunk), 8, async (chunk) => {
+      const invalid = new Set<string>();
+      const lookups = chunks(keys, SCAN.keyLookupChunk);
+      await eachLimited(lookups, SCAN.keyLookupConcurrency, async (chunk) => {
         const snapshot = await db
           .collection(COLLECTIONS.jobs)
           .where('keys', 'array-contains-any', chunk)
           .select('keys', 'firstSeenAt', 'sources')
           .get();
         for (const doc of snapshot.docs) {
-          const data = timestampsToDates(doc.data()) as Record<string, unknown>;
-          const jobKeys = Array.isArray(data.keys)
-            ? data.keys.filter((k): k is string => typeof k === 'string')
-            : [];
-          const firstSeenAt = data.firstSeenAt instanceof Date ? data.firstSeenAt : new Date(0);
-          const sourceCount = Array.isArray(data.sources) ? data.sources.length : 0;
-          found.set(doc.id, { id: doc.id, keys: jobKeys, firstSeenAt, sourceCount });
+          const parsed = JobKeysProjectionSchema.safeParse(timestampsToDates(doc.data()));
+          if (!parsed.success) {
+            invalid.add(doc.id);
+            continue;
+          }
+          const { keys: jobKeys, firstSeenAt, sources } = parsed.data;
+          found.set(doc.id, {
+            id: doc.id,
+            keys: jobKeys,
+            firstSeenAt,
+            sourceCount: sources.length,
+          });
         }
       });
+      // An unreadable job can't be matched; skipping it may add a duplicate, never lose a job.
+      if (invalid.size > 0)
+        log.warn('store.invalid_doc', { collection: 'jobs', count: invalid.size });
       return [...found.values()];
     },
 
@@ -168,7 +196,12 @@ export function firestoreScanStore(db: Firestore): ScanStore {
       const writes: { ops: number; apply: Write }[] = [];
       for (const group of plan.creates) {
         const jobRef = db.collection(COLLECTIONS.jobs).doc();
-        const { job, description } = buildNewJob(group, PATHS.jobDescription(jobRef.id), now);
+        const { job, description, droppedKeys } = buildNewJob(
+          group,
+          PATHS.jobDescription(jobRef.id),
+          now,
+        );
+        if (droppedKeys > 0) log.warn('ingest.keys_truncated', { dropped: droppedKeys });
         writes.push({
           ops: 2,
           apply: (batch) => {
@@ -194,35 +227,50 @@ export function firestoreScanStore(db: Firestore): ScanStore {
       }
 
       let failedWrites = 0;
-      let batch = db.batch();
+      let pending: typeof writes = [];
       let ops = 0;
-      let pending = 0;
+      // A failed batch is retried one write at a time, so one bad write (e.g. an update to a job
+      // deleted since the lookup) never takes the good ones down with it. A create's job and
+      // description stay in one batch either way.
       const commit = async () => {
-        if (ops === 0) return;
-        const size = pending;
+        if (pending.length === 0) return;
+        const batch = db.batch();
+        for (const write of pending) write.apply(batch);
         try {
           await batch.commit();
-        } catch (error) {
-          failedWrites += size;
-          log.error('ingest.write_failed', { writes: size, ...errorFields(error) });
+        } catch {
+          for (const write of pending) {
+            const single = db.batch();
+            write.apply(single);
+            try {
+              await single.commit();
+            } catch (error) {
+              failedWrites += 1;
+              log.error('ingest.write_failed', {
+                collection: 'jobs',
+                writes: 1,
+                ...errorFields(error),
+              });
+            }
+          }
         }
-        batch = db.batch();
+        pending = [];
         ops = 0;
-        pending = 0;
       };
       for (const write of writes) {
         if (ops + write.ops > SCAN.writeBatchOps) await commit();
-        write.apply(batch);
+        pending.push(write);
         ops += write.ops;
-        pending += 1;
       }
       await commit();
       return { failedWrites };
     },
 
     async updateCompanies(updates, now) {
+      let failedWrites = 0;
       for (const part of chunks(updates, SCAN.writeBatchOps)) {
         const batch = db.batch();
+        // `update`, not `set`: a company deleted mid-run must not come back as a partial doc.
         for (const { companyId, lastScan } of part) {
           batch.update(db.doc(PATHS.company(companyId)), {
             lastScan: withDates(lastScan),
@@ -230,8 +278,34 @@ export function firestoreScanStore(db: Firestore): ScanStore {
             updatedAt: now,
           });
         }
-        await batch.commit();
+        try {
+          await batch.commit();
+        } catch (error) {
+          failedWrites += part.length;
+          log.error('ingest.write_failed', {
+            collection: 'companies',
+            writes: part.length,
+            ...errorFields(error),
+          });
+        }
       }
+      return { failedWrites };
+    },
+
+    async quotas() {
+      const snapshots = await db.getAll(...SCAN_SOURCE_IDS.map((id) => db.doc(PATHS.source(id))));
+      const quotas: Partial<Record<ScanSourceId, Quota>> = {};
+      snapshots.forEach((snapshot, index) => {
+        const id = SCAN_SOURCE_IDS[index];
+        if (!id || !snapshot.exists) return;
+        const parsed = QuotaSchema.safeParse(timestampsToDates(snapshot.get('quota')));
+        if (parsed.success) quotas[id] = parsed.data;
+      });
+      return quotas;
+    },
+
+    async saveQuota(sourceId, quota) {
+      await db.doc(PATHS.source(sourceId)).set({ quota: withDates(quota) }, { merge: true });
     },
 
     async writeSourceHealth(states) {

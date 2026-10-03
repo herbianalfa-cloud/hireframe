@@ -71,7 +71,7 @@ async function detectAll(candidates: readonly Candidate[], http: ReturnType<type
   // A few companies at a time: each host is still spaced to its interval.
   const queue = [...candidates];
   await Promise.all(
-    Array.from({ length: 4 }, async () => {
+    Array.from({ length: SCAN.detectWorkers }, async () => {
       for (let next = queue.shift(); next; next = queue.shift()) {
         const detection = await detectCandidate(http, next);
         detections.push(detection);

@@ -32,8 +32,7 @@ describe('runtime service account', () => {
 });
 
 describe('source host policies (ADR-025, ADR-027)', () => {
-  it('spaces Workable to one request every 5 s on both of its hosts', () => {
-    expect(hostPolicy('www.workable.com').intervalMs).toBeGreaterThanOrEqual(5_000);
+  it('spaces Workable to one request every 5 s on the host it is called on', () => {
     expect(hostPolicy('apply.workable.com').intervalMs).toBeGreaterThanOrEqual(5_000);
   });
 

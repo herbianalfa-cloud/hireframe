@@ -54,7 +54,7 @@ export function adzunaSearchUrl(
     sort_by: 'date',
     'content-type': 'application/json',
   });
-  return `https://api.adzuna.com/v1/api/jobs/gb/search/1?${params.toString()}`;
+  return `https://api.adzuna.com/v1/api/jobs/${SOURCE_QUERIES.adzuna.country}/search/1?${params.toString()}`;
 }
 
 export function adzunaToRawJob(result: AdzunaResult): RawJob | null {

@@ -403,7 +403,7 @@ async function probe(
       }
       case 'workable': {
         const account = await http.getJson(
-          `https://www.workable.com/api/accounts/${encodeURIComponent(token)}`,
+          `https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(token)}`,
           WorkableAccountSchema,
           { label: 'detect.workable' },
         );

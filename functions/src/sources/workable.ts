@@ -5,9 +5,10 @@ import { createAtsSource, keyedEnvelope, optionalText } from './ats.js';
 import { parseDate, type Source, type WatchedCompany } from './types.js';
 
 /**
- * Workable's documented public jobs endpoint (ADR-027):
- * `www.workable.com/api/accounts/{subdomain}?details=true`. It redirects to
- * `apply.workable.com/api/v1/widget/accounts/{subdomain}`; both hosts' robots.txt allow it.
+ * Workable's public jobs widget (ADR-027). The documented URL,
+ * `www.workable.com/api/accounts/{subdomain}?details=true`, redirects to
+ * `apply.workable.com/api/v1/widget/accounts/{subdomain}`, which is called directly so the
+ * client applies that host's robots.txt (allows all) and its 5 s spacing.
  */
 export const WorkableJobSchema = z.object({
   title: z.string().min(1),
@@ -27,7 +28,7 @@ export const WorkableJobSchema = z.object({
 export type WorkableJob = z.infer<typeof WorkableJobSchema>;
 
 export function workableBoardUrl(subdomain: string): string {
-  return `https://www.workable.com/api/accounts/${encodeURIComponent(subdomain)}?details=true`;
+  return `https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(subdomain)}?details=true`;
 }
 
 export function workableToRawJob(job: WorkableJob, company: WatchedCompany): RawJob {

@@ -131,6 +131,12 @@ export const SCAN = {
   writeBatchOps: 400,
   /** `array-contains-any` takes at most 30 values. */
   keyLookupChunk: 30,
+  /** Key-lookup queries in flight at once. */
+  keyLookupConcurrency: 8,
+  /** Seed company refs read per `getAll`. */
+  seedReadChunk: 200,
+  /** Candidates detect-ats checks at once; each host is still spaced by its interval. */
+  detectWorkers: 4,
   /** ATS boards fetched at once per source; each host is still spaced by its interval. */
   boardConcurrency: 4,
   /**
@@ -161,9 +167,9 @@ const HOST_POLICIES: Readonly<Record<string, Partial<HostPolicyConfig>>> = {
   'www.reed.co.uk': { robots: 'api-terms', intervalMs: 1_000 },
   // 20 requests a minute, under Adzuna's 25.
   'api.adzuna.com': { robots: 'api-terms', intervalMs: 3_000 },
-  // Workable rate-limits (Cloudflare 1015) at 1 request/s; its documented endpoint redirects to
-  // apply.workable.com, so both hosts are spaced (ADR-027).
-  'www.workable.com': { intervalMs: 5_000 },
+  // Workable rate-limits (Cloudflare 1015) at 1 request/s. Called directly on
+  // apply.workable.com, where its documented endpoint redirects, so no redirect skips the
+  // host's robots check or spacing (ADR-027).
   'apply.workable.com': { intervalMs: 5_000 },
   // A whole "Who is hiring?" thread is a few MB.
   'hn.algolia.com': { timeoutMs: 45_000 },
@@ -195,6 +201,6 @@ export const QUOTAS = {
 
 export const SOURCE_QUERIES = {
   reed: { resultsToTake: 100, distanceMiles: 20 },
-  adzuna: { resultsPerPage: 50 },
+  adzuna: { resultsPerPage: 50, country: 'gb' },
   hn: { maxComments: 1_500 },
 } as const;

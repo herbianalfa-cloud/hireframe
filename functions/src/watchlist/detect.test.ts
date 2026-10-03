@@ -259,7 +259,7 @@ const notFound = () => Promise.resolve(new Response('', { status: 404 }));
 describe('detectCandidate when a probe fails', () => {
   it('is unchecked, not not-found, when a rate-limited probe could have been the board', async () => {
     const http = probeClient((url) =>
-      url.host === 'www.workable.com' && url.pathname !== '/robots.txt'
+      url.host === 'apply.workable.com' && url.pathname !== '/robots.txt'
         ? rateLimited()
         : notFound(),
     );
@@ -277,7 +277,7 @@ describe('detectCandidate when a probe fails', () => {
 
   it('downgrades a confirmation to review when another probe failed', async () => {
     const http = probeClient((url) => {
-      if (url.host === 'www.workable.com' && url.pathname !== '/robots.txt') return rateLimited();
+      if (url.host === 'apply.workable.com' && url.pathname !== '/robots.txt') return rateLimited();
       if (url.href === 'https://boards-api.greenhouse.io/v1/boards/acmeanalytics/jobs') {
         return Promise.resolve(
           Response.json({
@@ -360,8 +360,8 @@ describe('detectCandidate', () => {
       'api.ashbyhq.com',
       'api.eu.lever.co',
       'api.lever.co',
+      'apply.workable.com',
       'boards-api.greenhouse.io',
-      'www.workable.com',
     ]);
     expect(requested.some((url) => url.includes('acme-analytics'))).toBe(false);
   });

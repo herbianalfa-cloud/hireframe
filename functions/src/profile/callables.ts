@@ -7,7 +7,7 @@ import { defineSecret } from 'firebase-functions/params';
 
 import { bucket, db } from '../admin.js';
 import { requireOwner } from '../auth.js';
-import { ownerOptions, useFakes } from '../callable.js';
+import { loadDevFakes, ownerOptions, useFakes } from '../callable.js';
 import {
   ANTHROPIC_SECRET_NAME,
   DEFAULT_FX_USD_TO_GBP,
@@ -16,7 +16,6 @@ import {
 import { extractText } from '../cv/extract.js';
 import { safeHandler } from '../errors.js';
 import { llmCall, type LlmCallDeps, type LlmCallInput } from '../llm/call.js';
-import { fakeTransport } from '../llm/fake-transport.js';
 import { anthropicTransport } from '../llm/transport.js';
 import { firestoreUsageStore } from '../llm/usage-store.js';
 import { addFactHandler } from './addFact.js';
@@ -26,9 +25,11 @@ import { bucketFileDeleter, firestoreProfileStore, firestoreResetStore } from '.
 
 const anthropicApiKey = defineSecret(ANTHROPIC_SECRET_NAME);
 
-function llmFor(config: AppConfig) {
+async function llmFor(config: AppConfig) {
   const deps: LlmCallDeps = {
-    transport: useFakes ? fakeTransport() : anthropicTransport(anthropicApiKey.value()),
+    transport: useFakes
+      ? (await loadDevFakes()).fakeTransport()
+      : anthropicTransport(anthropicApiKey.value()),
     usage: firestoreUsageStore(db()),
     capPence: config.monthlyCapPence ?? DEFAULT_MONTHLY_CAP_PENCE,
     fxUsdToGbp: config.fxUsdToGbp ?? DEFAULT_FX_USD_TO_GBP,
@@ -55,7 +56,7 @@ export const parseCv = onCall(
       store: firestoreProfileStore(db()),
       readFile,
       extract: extractText,
-      llm: llmFor(config),
+      llm: await llmFor(config),
       now: () => new Date(),
     });
   }),
@@ -67,7 +68,7 @@ export const addFact = onCall(
     const config = await requireOwner(request);
     return addFactHandler(request.data, {
       store: firestoreProfileStore(db()),
-      llm: llmFor(config),
+      llm: await llmFor(config),
       now: () => new Date(),
     });
   }),

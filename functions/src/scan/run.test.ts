@@ -6,6 +6,7 @@ import {
   type ExistingJobKeys,
   type IngestPlan,
   type Job,
+  type Quota,
   type Run,
   type ScanSourceId,
   type SourceHealth,
@@ -36,6 +37,7 @@ function memoryStore(options: { lock?: LockResult } = {}) {
   const runs = new Map<string, Run>();
   const companies = new Map<string, StoredCompany>();
   const sources: Partial<Record<ScanSourceId, SourceHealth>> = {};
+  const quotas: Partial<Record<ScanSourceId, Quota>> = {};
   let nextId = 0;
   let locked = false;
   const calls = { writes: 0, releases: 0 };
@@ -67,6 +69,11 @@ function memoryStore(options: { lock?: LockResult } = {}) {
     },
     watchedCompanies: () => Promise.resolve([...companies.values()]),
     sourceStates: () => Promise.resolve({ ...sources }),
+    quotas: () => Promise.resolve({ ...quotas }),
+    saveQuota: (id, quota) => {
+      quotas[id] = quota;
+      return Promise.resolve();
+    },
     findJobsByKeys: (keys) => {
       const wanted = new Set(keys);
       const found: ExistingJobKeys[] = [...jobs.entries()]
@@ -109,14 +116,17 @@ function memoryStore(options: { lock?: LockResult } = {}) {
           entry.company.lastScannedAt = now;
         }
       }
-      return Promise.resolve();
+      return Promise.resolve({ failedWrites: 0 });
     },
     writeSourceHealth: (states) => {
       Object.assign(sources, states);
+      for (const [id, health] of Object.entries(states)) {
+        if (health.quota) quotas[id as ScanSourceId] = health.quota;
+      }
       return Promise.resolve();
     },
   };
-  return { store, jobs, runs, companies, sources, calls };
+  return { store, jobs, runs, companies, sources, quotas, calls };
 }
 
 function deps(store: ScanStore, overrides: Partial<ScanDeps> = {}): ScanDeps {
@@ -260,6 +270,50 @@ describe('runScan', () => {
     expect(memory.sources.reed?.quota?.dayCount).toBeLessThanOrEqual(30);
   });
 
+  it('never stores or logs the API keys', async () => {
+    captureLogs();
+    const memory = memoryStore();
+    const secrets = {
+      reedApiKey: 'REED-SECRET-1',
+      adzunaAppId: 'ADZ-ID-2',
+      adzunaAppKey: 'ADZ-KEY-3',
+    };
+    await runScan(deps(memory.store, { secrets }));
+    const stored = JSON.stringify([
+      [...memory.jobs.values()],
+      [...memory.runs.values()],
+      memory.sources,
+      memory.quotas,
+    ]);
+    const logged = JSON.stringify(logs);
+    for (const secret of Object.values(secrets)) {
+      expect(stored).not.toContain(secret);
+      expect(logged).not.toContain(secret);
+    }
+  });
+
+  it('keeps the API calls in the quota even when the run fails afterwards (R2)', async () => {
+    const memory = memoryStore();
+    const writePlan = memory.store.writePlan.bind(memory.store);
+    memory.store.writePlan = () => Promise.reject(new Error('firestore down'));
+    await expect(runScan(deps(memory.store))).rejects.toThrow('firestore down');
+    expect(memory.quotas.adzuna).toMatchObject({ day: '2026-10-01', dayCount: 20 });
+    expect(memory.quotas.reed?.dayCount).toBeGreaterThan(0);
+    // The next run starts from those counts.
+    memory.store.writePlan = writePlan;
+    await runScan(deps(memory.store));
+    expect(memory.quotas.adzuna?.dayCount).toBe(40);
+  });
+
+  it('counts failed company updates and reports the run as partial', async () => {
+    const memory = memoryStore();
+    memory.store.updateCompanies = (updates) => Promise.resolve({ failedWrites: updates.length });
+    const result = await runScan(deps(memory.store));
+    if (result.status !== 'completed') throw new Error(result.status);
+    expect(result.runStatus).toBe('partial');
+    expect(memory.runs.get(result.runId)?.errors).toContainEqual({ code: 'company_write_failed' });
+  });
+
   it('marks the run failed and still unlocks when the store breaks', async () => {
     const memory = memoryStore();
     memory.store.findJobsByKeys = () => Promise.reject(new Error('down'));
@@ -305,7 +359,7 @@ describe('Workable rotation across scans', () => {
     const recording = () =>
       testHttpClient({
         fetch: ((input: URL) => {
-          const token = /\/api\/accounts\/([^?]+)/.exec(input.toString())?.[1];
+          const token = /\/widget\/accounts\/([^?]+)/.exec(input.toString())?.[1];
           if (token) run.push(token);
           return Promise.resolve(new Response('', { status: 404 }));
         }) as typeof fetch,

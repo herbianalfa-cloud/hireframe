@@ -247,7 +247,8 @@ export function planIngest(
       updates.set(target.id, update);
       update.addSources.push(job);
       sourceCounts.set(target.id, sources + 1);
-      for (const key of job.keys) {
+      // The posting's own source key first, so the cap never drops the key that recognises it.
+      for (const key of [job.sourceKey, ...job.keys]) {
         if (!known.has(key) && known.size < JOB_LIMITS.keys) {
           known.add(key);
           update.addKeys.push(key);
@@ -265,13 +266,29 @@ export function sourceRef(job: NormalisedJob, seenAt: Date): JobSourceRef {
 }
 
 /** The `jobs/{jobId}` document and its description for a new batch group. */
+/**
+ * A job's keys within `JOB_LIMITS.keys`, most important first: every member's own source key,
+ * then dedupe keys, then keys from linked URLs. Truncation never drops a source key a later
+ * scan needs to recognise the posting (unless there are more source keys than the cap).
+ */
+export function cappedKeys(group: BatchGroup): { keys: string[]; dropped: number } {
+  const sourceKeys = group.jobs.map((job) => job.sourceKey);
+  const dedupeKeys = group.keys.filter((key) => key.startsWith('d:'));
+  const ordered = [...new Set([...sourceKeys, ...dedupeKeys, ...group.keys])];
+  return {
+    keys: ordered.slice(0, JOB_LIMITS.keys),
+    dropped: Math.max(0, ordered.length - JOB_LIMITS.keys),
+  };
+}
+
 export function buildNewJob(
   group: BatchGroup,
   descriptionRef: string,
   now: Date,
-): { job: Job; description: JobDescription } {
+): { job: Job; description: JobDescription; droppedKeys: number } {
   const [primary] = group.jobs;
   if (!primary) throw new Error('empty batch group');
+  const { keys, dropped } = cappedKeys(group);
   const sources = [...new Map(group.jobs.map((job) => [job.sourceKey, job])).values()]
     .slice(0, JOB_LIMITS.sources)
     .map((job) => sourceRef(job, now));
@@ -285,7 +302,7 @@ export function buildNewJob(
   return {
     job: {
       dedupeKey: primary.dedupeKey ?? primary.sourceKey,
-      keys: group.keys.slice(0, JOB_LIMITS.keys),
+      keys,
       title: primary.title.slice(0, JOB_LIMITS.title),
       company: primary.company.slice(0, JOB_LIMITS.company),
       ...(companyId ? { companyId } : {}),
@@ -313,5 +330,6 @@ export function buildNewJob(
       fetchedAt: now,
       schemaVersion: 1,
     },
+    droppedKeys: dropped,
   };
 }

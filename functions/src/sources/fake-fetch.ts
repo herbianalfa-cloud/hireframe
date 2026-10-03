@@ -17,7 +17,7 @@ const ROUTES: readonly [RegExp, unknown][] = [
   [/^https:\/\/boards-api\.greenhouse\.io\/v1\/boards\/acmeanalytics\/jobs/, GREENHOUSE_BOARD],
   [/^https:\/\/api(\.eu)?\.lever\.co\/v0\/postings\/bramble/, LEVER_BOARD],
   [/^https:\/\/api\.ashbyhq\.com\/posting-api\/job-board\/cobaltledger/, ASHBY_BOARD],
-  [/^https:\/\/www\.workable\.com\/api\/accounts\/deltadock/, WORKABLE_ACCOUNT],
+  [/^https:\/\/apply\.workable\.com\/api\/v1\/widget\/accounts\/deltadock/, WORKABLE_ACCOUNT],
   [/^https:\/\/www\.reed\.co\.uk\/api\/1\.0\/search/, REED_SEARCH],
   [/^https:\/\/api\.adzuna\.com\/v1\/api\/jobs\/gb\/search\//, ADZUNA_SEARCH],
   [/^https:\/\/hn\.algolia\.com\/api\/v1\/search_by_date/, HN_SEARCH],

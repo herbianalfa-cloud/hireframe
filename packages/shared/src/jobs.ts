@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { CALLABLE_TIMEOUT_SECONDS } from './callables.js';
+
 /**
  * Jobs, sources, runs and companies (docs/ARCHITECTURE.md "Data model", ADR-029, ADR-030).
  * - `RawJob`: what a source module returns, before normalisation. Source modules build it from
@@ -233,6 +235,23 @@ export const RunSchema = z.object({
   schemaVersion: z.literal(1),
 });
 export type Run = z.infer<typeof RunSchema>;
+
+/**
+ * A run still `running` this long after it started was killed (callable timeout or memory) before
+ * it could record its end. The UI shows it as timed out; the next scan marks it failed.
+ */
+export const STALE_RUN_MS = (CALLABLE_TIMEOUT_SECONDS.scanNow + 60) * 1000;
+
+export function isRunStalled(run: Pick<Run, 'status' | 'startedAt'>, now: Date): boolean {
+  return run.status === 'running' && now.getTime() - run.startedAt.getTime() >= STALE_RUN_MS;
+}
+
+/** What a scan reads from stored jobs to dedupe against them (a `select` projection). */
+export const JobKeysProjectionSchema = z.object({
+  keys: z.array(z.string().min(1)).min(1),
+  firstSeenAt: z.date(),
+  sources: z.array(z.unknown()),
+});
 
 // ---- Companies (watchlist) ----
 
