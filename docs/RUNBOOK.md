@@ -227,9 +227,10 @@ Before the `v0.3.0` deploy. Design: ADR-025 (robots.txt and keyed APIs), ADR-029
 41. Open `tmp/watchlist-candidates.csv` in a spreadsheet app. It's a draft of well-known London/UK B2B SaaS companies and startups, all unverified. Delete rows you don't want, add companies you know (name, domain, hq), and paste a careers or job-board link in `careersUrl` where you have one. Save as CSV.
 42. In the terminal run `node scripts/detect-ats.ts tmp/watchlist-candidates.csv`. It asks only the official job-board APIs (Greenhouse, Lever, Ashby, Workable), 1 request per second per site, so it takes several minutes. It never opens careers pages.
 43. Open `tmp/watchlist-review.csv`. Each row has a `status`:
-    - `confirmed`: the board's own name matches. `decision` is already `keep`.
+    - `confirmed`: exactly one board with open jobs, and its own name matches the company exactly. `decision` is already `keep`.
     - `review`: a board was found, but its name can't be confirmed, or there's more than one. Click `board_url`, check it's the right company and that it hires in the UK, then type `keep` (use this board), `keep-none` (keep the company, no board) or `drop`.
     - `not-found`: no board. Type `keep-none` to keep the company for matching aggregator jobs, or leave it blank to leave it out.
+    - `unchecked`: a probe failed (usually Workable rate-limiting, see `failed_probes`), so "no board" isn't known. Run step 42 again later, or decide the row yourself.
 44. Run `node scripts/detect-ats.ts --write tmp/watchlist-review.csv`. It writes `packages/shared/src/watchlist-seed.ts`, or lists the rows that still need a decision. Commit the seed.
 
 **D. Try it locally**

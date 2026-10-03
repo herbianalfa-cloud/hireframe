@@ -50,10 +50,20 @@ describe('token guesses and URL parsing', () => {
     expect(atsFromUrl(url)).toEqual(expected);
   });
 
-  it('matches board names loosely but not unrelated ones', () => {
-    expect(namesMatch('Acme Analytics', 'Acme Analytics Ltd')).toBe(true);
-    expect(namesMatch('ACME', 'Acme Analytics')).toBe(true);
-    expect(namesMatch('Bloom Credit', 'Bloom & Wild')).toBe(false);
+  it.each([
+    ['Acme Analytics', 'Acme Analytics Ltd', true],
+    ['Careers at Tide', 'Tide', true],
+    ['Cleo (US)', 'Cleo', true],
+    ['Form3 - External', 'Form3', true],
+    ['Thought Machine Group Limited', 'Thought Machine', true],
+    // A prefix is not a match: these were wrong-company confirmations in the first live run.
+    ['Wise Worksite Field Sales', 'Wise', false],
+    ['Peak Physical Therapy - Upstream', 'Peak', false],
+    ['Starling', 'Starling Bank', false],
+    ['ACME', 'Acme Analytics', false],
+    ['Bloom Credit', 'Bloom & Wild', false],
+  ])('namesMatch(%s, %s) → %s', (board, company, expected) => {
+    expect(namesMatch(board, company)).toBe(expected);
   });
 
   it('builds human board URLs', () => {
@@ -130,6 +140,14 @@ describe('classify', () => {
   it('picks the board with the most jobs when no name matches', () => {
     const ashby: BoardHit = { type: 'ashby', token: 'acme', jobs: 7, ukJobs: 1 };
     expect(classify(ACME, [lever, ashby], false)).toMatchObject({ status: 'review', hit: ashby });
+  });
+
+  it('never confirms an empty board, even when its name matches', () => {
+    expect(classify(ACME, [emptyWorkable], false)).toMatchObject({
+      status: 'review',
+      hit: emptyWorkable,
+    });
+    expect(classify(ACME, [{ ...lever, jobs: 0 }], true).status).toBe('review');
   });
 
   it('confirms a board from a URL the owner pasted', () => {
@@ -214,6 +232,75 @@ describe('CSV round trip and seed generation', () => {
 
   it('slugifies names into document IDs', () => {
     expect(slugify('Smith & Jones Ltd')).toBe('smith-and-jones');
+  });
+});
+
+function probeClient(fetchFake: (url: URL) => Promise<Response>) {
+  return createHttpClient({
+    fetch: fetchFake as typeof fetch,
+    now: () => 0,
+    sleep: () => Promise.resolve(),
+    random: () => 0,
+    userAgent: 'test',
+    productToken: 'HireframeBot',
+    hostPolicy: () => ({ robots: 'enforce', intervalMs: 0, timeoutMs: 1000 }),
+    maxAttempts: 1,
+    backoffBaseMs: 0,
+    retryAfterCapMs: 0,
+    maxBodyBytes: 1_000_000,
+    log: () => undefined,
+  });
+}
+
+const rateLimited = () => Promise.resolve(new Response('error code: 1015', { status: 429 }));
+const notFound = () => Promise.resolve(new Response('', { status: 404 }));
+
+describe('detectCandidate when a probe fails', () => {
+  it('is unchecked, not not-found, when a rate-limited probe could have been the board', async () => {
+    const http = probeClient((url) =>
+      url.host === 'www.workable.com' && url.pathname !== '/robots.txt'
+        ? rateLimited()
+        : notFound(),
+    );
+    const detection = await detectCandidate(http, ACME);
+    expect(detection.status).toBe('unchecked');
+    expect(detection.failed).toEqual([
+      'workable:acmeanalytics',
+      'workable:acme-analytics',
+      'workable:acme',
+    ]);
+    const [row] = parseCsv(toCsv(REVIEW_HEADER, [reviewRow(detection)]));
+    expect(row).toMatchObject({ status: 'unchecked', decision: '' });
+    expect(seedFromReview(row ? [row] : []).undecided).toEqual(['Acme Analytics Ltd']);
+  });
+
+  it('downgrades a confirmation to review when another probe failed', async () => {
+    const http = probeClient((url) => {
+      if (url.host === 'www.workable.com' && url.pathname !== '/robots.txt') return rateLimited();
+      if (url.href === 'https://boards-api.greenhouse.io/v1/boards/acmeanalytics/jobs') {
+        return Promise.resolve(
+          Response.json({
+            jobs: [
+              {
+                id: 1,
+                title: 'Analyst',
+                absolute_url: 'https://job-boards.greenhouse.io/a/jobs/1',
+              },
+            ],
+          }),
+        );
+      }
+      if (url.href === 'https://boards-api.greenhouse.io/v1/boards/acmeanalytics') {
+        return Promise.resolve(Response.json({ name: 'Acme Analytics' }));
+      }
+      return notFound();
+    });
+    const detection = await detectCandidate(http, ACME);
+    expect(detection).toMatchObject({
+      status: 'review',
+      hit: { type: 'greenhouse' },
+      failed: ['workable:acmeanalytics'],
+    });
   });
 });
 

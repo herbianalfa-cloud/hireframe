@@ -87,7 +87,8 @@ async function detect(path: string): Promise<void> {
   const count = (status: string) => detections.filter((d) => d.status === status).length;
   console.log(
     `detect-ats: ${String(count('confirmed'))} confirmed, ${String(count('review'))} to review, ` +
-      `${String(count('not-found'))} not found → ${REVIEW_PATH}. ${String(http.requests())} requests.`,
+      `${String(count('not-found'))} not found, ${String(count('unchecked'))} unchecked (a probe failed; ` +
+      `run again later) → ${REVIEW_PATH}. ${String(http.requests())} requests.`,
   );
 }
 

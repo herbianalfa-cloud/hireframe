@@ -33,7 +33,8 @@ export interface BoardHit {
   ukJobs: number;
 }
 
-export type ReviewStatus = 'confirmed' | 'review' | 'not-found';
+/** `unchecked`: a probe failed (rate limit, timeout), so "nothing found" can't be trusted. */
+export type ReviewStatus = 'confirmed' | 'review' | 'not-found' | 'unchecked';
 
 export interface Detection {
   candidate: Candidate;
@@ -41,6 +42,8 @@ export interface Detection {
   hit?: BoardHit;
   /** Every board found, when there was more than one. */
   others: BoardHit[];
+  /** Probes that failed for a reason other than "no such board", e.g. `workable:acme`. */
+  failed?: string[];
 }
 
 // ---- Pure helpers ----
@@ -91,10 +94,24 @@ export function atsFromUrl(url: string): Pick<BoardHit, 'type' | 'token' | 'host
   return null;
 }
 
+/**
+ * Exact match after normalisation (case, punctuation, legal suffixes, a trailing "Group",
+ * a "Careers at" prefix, bracketed or " - " suffixes). A prefix is not enough: "Wise" is not
+ * "Wise Worksite Field Sales", and "Peak" is not "Peak Physical Therapy" (review instead).
+ */
 export function namesMatch(boardName: string, companyName: string): boolean {
-  const a = normaliseCompany(boardName).replace(/ /g, '');
-  const b = normaliseCompany(companyName).replace(/ /g, '');
-  return a !== '' && b !== '' && (a === b || a.startsWith(b) || b.startsWith(a));
+  const clean = (name: string) =>
+    normaliseCompany(
+      name
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\s[-–|]\s.*$/, '')
+        .replace(/^\s*(careers|jobs)\s+at\s+/i, ''),
+    )
+      .replace(/ group$/, '')
+      .replace(/ /g, '');
+  const a = clean(boardName);
+  const b = clean(companyName);
+  return a !== '' && a === b;
 }
 
 /** The human-facing board page, for the owner's review. */
@@ -138,7 +155,8 @@ export function classify(
   );
   const best = named ?? first;
   const tie = pool.length > 1;
-  const confirmed = !tie && (fromUrl || named !== undefined);
+  // An empty board is never confirmed: it's usually a dormant account, not where they hire.
+  const confirmed = !tie && best.jobs > 0 && (fromUrl || named !== undefined);
   return {
     candidate,
     status: confirmed ? 'confirmed' : 'review',
@@ -211,6 +229,7 @@ export const REVIEW_HEADER = [
   'uk_jobs',
   'board_url',
   'also_found',
+  'failed_probes',
   'decision',
 ] as const;
 
@@ -229,6 +248,7 @@ export function reviewRow(detection: Detection): string[] {
     String(hit?.ukJobs ?? ''),
     hit ? boardPageUrl(hit) : '',
     detection.others.map((other) => `${other.type}:${other.token}`).join(' '),
+    (detection.failed ?? []).join(' '),
     // Confirmed rows are kept unless the owner says otherwise; the rest need a decision.
     detection.status === 'confirmed' ? 'keep' : '',
   ];
@@ -251,7 +271,8 @@ export function seedFromReview(rows: readonly Record<string, string>[]): {
     if (decision === 'drop') continue;
     const type = row.ats as AtsType | undefined;
     const hasBoard = type !== undefined && type !== 'none' && Boolean(row.token);
-    if (hasBoard && decision !== 'keep' && decision !== 'keep-none') {
+    const unchecked = row.status === 'unchecked';
+    if ((hasBoard || unchecked) && decision !== 'keep' && decision !== 'keep-none') {
       undecided.push(name);
       continue;
     }
@@ -303,7 +324,7 @@ async function probe(
   type: DetectedAts,
   token: string,
   host?: 'eu',
-): Promise<BoardHit | null> {
+): Promise<BoardHit | { failed: string } | null> {
   try {
     switch (type) {
       case 'greenhouse': {
@@ -367,7 +388,11 @@ async function probe(
       }
     }
   } catch (error) {
-    if (error instanceof HttpError && error.code !== 'deadline') return null;
+    // Only "no such board" means not found; anything else (rate limit, timeout) is a failed probe.
+    if (error instanceof HttpError && error.code === 'not_found') return null;
+    if (error instanceof HttpError && error.code !== 'deadline') {
+      return { failed: `${type}${host ? '-eu' : ''}:${token}` };
+    }
     throw error;
   }
 }
@@ -378,10 +403,29 @@ async function probe(
  * that finds anything.
  */
 export async function detectCandidate(http: HttpClient, candidate: Candidate): Promise<Detection> {
+  const failed: string[] = [];
+  const keep = (result: BoardHit | { failed: string } | null): BoardHit | null => {
+    if (result && 'failed' in result) {
+      failed.push(result.failed);
+      return null;
+    }
+    return result;
+  };
+  const withFailures = (detection: Detection): Detection => {
+    if (failed.length === 0) return detection;
+    // A failed probe might have been the real board, so nothing found can't be trusted.
+    const status: ReviewStatus =
+      detection.status === 'not-found'
+        ? 'unchecked'
+        : detection.status === 'confirmed'
+          ? 'review'
+          : detection.status;
+    return { ...detection, status, failed: [...failed] };
+  };
   const fromUrl = candidate.careersUrl ? atsFromUrl(candidate.careersUrl) : null;
   if (fromUrl) {
-    const hit = await probe(http, fromUrl.type, fromUrl.token, fromUrl.host);
-    if (hit) return classify(candidate, [hit], true);
+    const hit = keep(await probe(http, fromUrl.type, fromUrl.token, fromUrl.host));
+    if (hit) return withFailures(classify(candidate, [hit], true));
   }
   for (const token of tokenCandidates(candidate.name, candidate.domain)) {
     const results = await Promise.all([
@@ -391,8 +435,8 @@ export async function detectCandidate(http: HttpClient, candidate: Candidate): P
       probe(http, 'lever', token, 'eu'),
       probe(http, 'workable', token),
     ]);
-    const hits = results.filter((hit): hit is BoardHit => hit !== null);
-    if (hits.length > 0) return classify(candidate, hits, false);
+    const hits = results.map(keep).filter((hit): hit is BoardHit => hit !== null);
+    if (hits.length > 0) return withFailures(classify(candidate, hits, false));
   }
-  return { candidate, status: 'not-found', others: [] };
+  return withFailures({ candidate, status: 'not-found', others: [] });
 }

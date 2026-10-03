@@ -155,6 +155,10 @@ const HOST_POLICIES: Readonly<Record<string, Partial<HostPolicyConfig>>> = {
   'www.reed.co.uk': { robots: 'api-terms', intervalMs: 1_000 },
   // 20 requests a minute, under Adzuna's 25.
   'api.adzuna.com': { robots: 'api-terms', intervalMs: 3_000 },
+  // Workable rate-limits (Cloudflare 1015) at 1 request/s; its documented endpoint redirects to
+  // apply.workable.com, so both hosts are spaced (ADR-027).
+  'www.workable.com': { intervalMs: 5_000 },
+  'apply.workable.com': { intervalMs: 5_000 },
   // A whole "Who is hiring?" thread is a few MB.
   'hn.algolia.com': { timeoutMs: 45_000 },
 };
