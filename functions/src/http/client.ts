@@ -24,7 +24,9 @@ export type HttpErrorCode =
   | 'schema'
   | 'too_large'
   | 'robots_disallowed'
-  | 'deadline';
+  | 'deadline'
+  /** The host asked us to stay away (a Retry-After beyond the cap); no request was made. */
+  | 'host_paused';
 
 export class HttpError extends Error {
   override name = 'HttpError';
@@ -46,7 +48,14 @@ export interface HostPolicy {
   timeoutMs: number;
 }
 
-export type HttpLogEvent = 'http.retry' | 'http.failed' | 'http.robots_blocked';
+export type HttpLogEvent =
+  'http.retry' | 'http.failed' | 'http.robots_blocked' | 'http.host_paused';
+
+/** A host that told us to come back later (epoch ms). */
+export interface HostPause {
+  host: string;
+  until: number;
+}
 export type HttpLog = (
   level: 'info' | 'warn' | 'error',
   event: HttpLogEvent,
@@ -69,6 +78,8 @@ export interface HttpClientDeps {
   maxBodyBytes: number;
   /** Epoch ms after which no request starts. */
   deadline?: number;
+  /** Pauses carried over from earlier runs: no request goes to these hosts until then. */
+  paused?: readonly HostPause[];
   log: HttpLog;
 }
 
@@ -82,6 +93,8 @@ export interface HttpClient {
   getJson<T>(url: string, schema: z.ZodType<T>, options: RequestOptions): Promise<T>;
   /** Requests started through this client (each attempt counts; robots.txt fetches don't). */
   requests(): number;
+  /** Hosts still paused, to carry into the next run. */
+  pauses(): HostPause[];
 }
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -98,7 +111,31 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   const lastStart = new Map<string, number>();
   const queues = new Map<string, Promise<void>>();
   const robots = new Map<string, Promise<RobotsPolicy>>();
+  const pausedUntil = new Map((deps.paused ?? []).map((pause) => [pause.host, pause.until]));
+  const pauseLogged = new Set<string>();
   let requestCount = 0;
+
+  /**
+   * A host that answered with a Retry-After beyond the cap gets no more requests until then:
+   * not from this run's other boards or queries, and not from later runs (pauses are carried
+   * over). Logged once per host per client, i.e. per source per run.
+   */
+  function pauseHost(host: string, until: number, label: string): void {
+    pausedUntil.set(host, Math.max(pausedUntil.get(host) ?? 0, until));
+    logPause(host, label);
+  }
+
+  function logPause(host: string, label: string): void {
+    if (pauseLogged.has(host)) return;
+    pauseLogged.add(host);
+    const until = pausedUntil.get(host) ?? 0;
+    deps.log('warn', 'http.host_paused', {
+      host,
+      label,
+      until: new Date(until).toISOString(),
+      seconds: Math.max(0, Math.round((until - deps.now()) / 1000)),
+    });
+  }
 
   function remaining(): number {
     return deps.deadline === undefined ? Infinity : deps.deadline - deps.now();
@@ -125,9 +162,16 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     intervalMs: number,
     headers: Record<string, string>,
     counted: boolean,
+    label: string,
   ): Promise<Response> {
     if (remaining() <= 0) throw new HttpError('deadline');
     await slot(url.host, intervalMs);
+    // Checked again after the wait: requests queued behind the one that got the long
+    // Retry-After must not go out either.
+    if ((pausedUntil.get(url.host) ?? 0) > deps.now()) {
+      logPause(url.host, label);
+      throw new HttpError('host_paused');
+    }
     const timeoutMs = Math.min(policy.timeoutMs, remaining());
     if (timeoutMs <= 0) throw new HttpError('deadline');
     if (counted) requestCount += 1;
@@ -163,13 +207,19 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
           policy.intervalMs,
           { Accept: 'text/plain' },
           false,
+          'robots',
         );
         return robotsFromResponse(
           { status: response.status, body: response.ok ? await readBody(response) : '' },
           deps.productToken,
         );
       } catch (error) {
-        if (error instanceof HttpError && error.code === 'deadline') throw error;
+        if (
+          error instanceof HttpError &&
+          (error.code === 'deadline' || error.code === 'host_paused')
+        ) {
+          throw error;
+        }
         return robotsFromResponse(null, deps.productToken);
       }
     })();
@@ -181,6 +231,10 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     const url = new URL(rawUrl);
     const policy = deps.hostPolicy(url.host);
     const fields = { host: url.host, label: options.label };
+    if ((pausedUntil.get(url.host) ?? 0) > deps.now()) {
+      logPause(url.host, options.label);
+      throw new HttpError('host_paused');
+    }
     const rules = await robotsFor(url, policy);
     if (!rules.allows(`${url.pathname}${url.search}`)) {
       deps.log('warn', 'http.robots_blocked', fields);
@@ -192,7 +246,14 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       let failure: HttpError;
       let waitMs = deps.backoffBaseMs * 2 ** (attempt - 1) * (1 + deps.random() * 0.25);
       try {
-        const response = await send(url, policy, intervalMs, options.headers ?? {}, true);
+        const response = await send(
+          url,
+          policy,
+          intervalMs,
+          options.headers ?? {},
+          true,
+          options.label,
+        );
         if (response.ok) {
           const body = await readBody(response);
           let json: unknown;
@@ -217,6 +278,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
         }
         const after = retryAfterMs(response.headers.get('retry-after'), deps.now());
         if (after !== null && after > deps.retryAfterCapMs) {
+          pauseHost(url.host, deps.now() + after, options.label);
           throw new HttpError('rate_limited', response.status);
         }
         if (after !== null) waitMs = Math.max(waitMs, after);
@@ -226,6 +288,8 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
         );
       } catch (error) {
         if (!(error instanceof HttpError)) throw error;
+        // Already logged once per host (http.host_paused); not a request failure.
+        if (error.code === 'host_paused') throw error;
         const retryable = error.code === 'timeout' || error.code === 'network';
         if (!retryable) {
           deps.log('warn', 'http.failed', { ...fields, attempt, ...codeFields(error) });
@@ -247,7 +311,14 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     }
   }
 
-  return { getJson, requests: () => requestCount };
+  return {
+    getJson,
+    requests: () => requestCount,
+    pauses: () =>
+      [...pausedUntil.entries()]
+        .filter(([, until]) => until > deps.now())
+        .map(([host, until]) => ({ host, until })),
+  };
 }
 
 function codeFields(error: HttpError): Record<string, string | number> {

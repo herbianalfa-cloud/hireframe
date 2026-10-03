@@ -124,7 +124,7 @@ export function createReedSource(): Source {
           if (!(error instanceof HttpError)) throw error;
           report.errors += 1;
           report.errorCode = error.code;
-          if (error.code === 'deadline') break;
+          if (error.code === 'deadline' || error.code === 'host_paused') break;
         }
       }
       report.status = statusFrom(queries.length, report.errors);

@@ -44,6 +44,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - A scan killed at the timeout is marked failed by the next scan, and the System screen shows it as "Timed out" at once.
   - Reed and Adzuna calls count against the quota even if the run fails later.
   - A failed write batch is retried write by write, so one bad write never loses the others; failed company updates are counted instead of failing the run.
+  - **Paused hosts:** a site that answers with a long Retry-After (Workable's was about 23 hours) gets no more requests until then, in this scan or later ones. It's logged once per host, and the System card shows "Paused until <time>".
   - Workable is called on `apply.workable.com` directly, so its robots.txt and 5 s spacing apply (ADR-027 amendment).
   - Stored jobs read during dedupe are zod-checked; job keys are capped without dropping a posting's own source key.
   - Production functions bundles no longer contain the emulator's fixtures (ADR-017 addendum).

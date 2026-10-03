@@ -164,6 +164,52 @@ describe('http client', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('pauses a host after a Retry-After beyond the cap, logging it once', async () => {
+    const { client, calls, logs } = harness({
+      '/robots.txt': NO_ROBOTS,
+      '/a': [json({}, 429, { 'retry-after': '3600' })],
+      '*': [json({ ok: true })],
+    });
+    await expect(client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject({
+      code: 'rate_limited',
+    });
+    for (const path of ['/b', '/c']) {
+      await expect(
+        client.getJson(`https://api.example.com${path}`, Schema, opts),
+      ).rejects.toMatchObject({ code: 'host_paused' });
+    }
+    // No request reached the paused host after the 429; another host is unaffected.
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual(['/robots.txt', '/a']);
+    await expect(client.getJson('https://other.example.com/x', Schema, opts)).resolves.toEqual({
+      ok: true,
+    });
+    const paused = logs.filter((log) => log.event === 'http.host_paused');
+    expect(paused).toHaveLength(1);
+    expect(paused[0]?.fields).toMatchObject({ host: 'api.example.com', seconds: 3600 });
+    expect(client.pauses()).toEqual([
+      { host: 'api.example.com', until: expect.any(Number) as number },
+    ]);
+  });
+
+  it('honours pauses carried over from an earlier run until they end', async () => {
+    const h = harness(
+      { '/robots.txt': NO_ROBOTS, '*': [json({ ok: true })] },
+      { paused: [{ host: 'api.example.com', until: 1_005_000 }] },
+    );
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      {
+        code: 'host_paused',
+      },
+    );
+    expect(h.calls).toHaveLength(0);
+    expect(h.logs.filter((log) => log.event === 'http.host_paused')).toHaveLength(1);
+    h.advance(6_000);
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).resolves.toEqual({
+      ok: true,
+    });
+    expect(h.client.pauses()).toEqual([]);
+  });
+
   it('retries timeouts and network errors', async () => {
     const timeout = Object.assign(new Error('t'), { name: 'TimeoutError' });
     const { client } = harness({

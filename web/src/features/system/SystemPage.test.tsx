@@ -135,6 +135,36 @@ describe('System screen', () => {
     expect(cards[2]?.textContent).toContain('Why: API key missing');
   });
 
+  it('shows a paused host as "Paused until <time>" on its card', () => {
+    const until = new Date(Date.now() + 23 * 3600_000);
+    givenSources([
+      {
+        id: 'workable',
+        health: health({
+          status: 'skipped',
+          lastErrorCode: 'host_paused',
+          pausedHosts: [{ host: 'apply.workable.com', until }],
+        }),
+      },
+      {
+        id: 'lever',
+        health: health({ pausedHosts: [{ host: 'api.lever.co', until: new Date(0) }] }),
+      },
+    ]);
+    render(<SystemPage />);
+    const cards = within(screen.getByRole('region', { name: 'Sources' })).getAllByRole('listitem');
+    const label = new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(until);
+    expect(card(cards, 0).textContent).toContain(`Paused until ${label}`);
+    expect(card(cards, 0).textContent).toContain('Why: the site asked us to pause');
+    // A pause that has ended isn't shown.
+    expect(card(cards, 1).textContent).not.toContain('Paused until');
+  });
+
   it('shows the job count and recent runs', async () => {
     render(<SystemPage />);
     expect(await screen.findByText('Jobs stored: 57')).toBeDefined();

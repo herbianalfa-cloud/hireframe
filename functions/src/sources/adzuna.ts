@@ -130,7 +130,13 @@ export function createAdzunaSource(): Source {
           report.errors += 1;
           report.errorCode = error.code;
           // Stop at once when Adzuna says we're over its limit, or the run is out of time.
-          if (error.code === 'deadline' || error.code === 'rate_limited') break;
+          if (
+            error.code === 'deadline' ||
+            error.code === 'rate_limited' ||
+            error.code === 'host_paused'
+          ) {
+            break;
+          }
         }
       }
       report.status = statusFrom(queries.length, report.errors);

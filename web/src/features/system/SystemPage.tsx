@@ -137,10 +137,19 @@ function Count({ label, value }: { label: string; value: number }) {
   );
 }
 
+/** The latest time a host of this source asked us to stay away until, if still ahead. */
+function pausedUntil(view: SourceView, now: Date): Date | null {
+  const ahead = (view.health.pausedHosts ?? [])
+    .map((pause) => pause.until)
+    .filter((until) => until.getTime() > now.getTime());
+  return ahead.length ? new Date(Math.max(...ahead.map((until) => until.getTime()))) : null;
+}
+
 function SourceCard({ view }: { view: SourceView }) {
   const { health } = view;
   const counts = health.lastCounts;
   const reason = errorText(health.lastErrorCode);
+  const paused = pausedUntil(view, new Date());
   return (
     <li className="rounded-lg border bg-surface p-4">
       <div className="flex items-center justify-between gap-2">
@@ -159,6 +168,13 @@ function SourceCard({ view }: { view: SourceView }) {
         {health.lastOkAt ? ` · last OK ${TIME_FORMAT.format(health.lastOkAt)}` : ' · never OK'}
         {health.quota ? ` · ${String(health.quota.dayCount)} API calls today` : ''}
       </p>
+      {paused ? (
+        <p className="mt-1 flex items-center gap-1 text-xs text-verdict-near-miss">
+          <Clock aria-hidden="true" className="size-3" />
+          Paused until {TIME_FORMAT.format(paused)}: the site asked us to slow down, so scans skip
+          it until then.
+        </p>
+      ) : null}
       {health.status !== 'ok' && reason ? (
         <p className="mt-1 text-xs text-muted-foreground">Why: {reason}</p>
       ) : null}

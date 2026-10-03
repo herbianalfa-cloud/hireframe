@@ -106,7 +106,12 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
         }
       });
       report.boards = boards;
-      if (companies.length > 0) report.status = statusFrom(companies.length, report.errors);
+      // Boards skipped because their host is paused weren't tried: they count as neither
+      // attempts nor failures. A source whose every board was skipped is `skipped`.
+      const paused = boards.filter((board) => board.errorCode === 'host_paused').length;
+      if (companies.length > 0) {
+        report.status = statusFrom(companies.length - paused, report.errors - paused);
+      }
       return jobs;
     },
   };

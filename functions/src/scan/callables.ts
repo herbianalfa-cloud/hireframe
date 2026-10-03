@@ -45,7 +45,7 @@ export const scanNow = onCall(
         store: firestoreScanStore(firestore),
         readCriteria: () => getCurrentCriteria(firestore),
         createSources,
-        httpFor: (deadline) =>
+        httpFor: (deadline, paused) =>
           createHttpClient({
             fetch: fakes ? (fakes.fakeFetch as typeof fetch) : fetch,
             now: Date.now,
@@ -62,6 +62,7 @@ export const scanNow = onCall(
             retryAfterCapMs: SCAN.retryAfterCapMs,
             maxBodyBytes: SCAN.maxBodyBytes,
             deadline,
+            paused,
             log: (level, event, fields) => {
               log[level](event, fields);
             },

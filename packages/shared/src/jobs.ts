@@ -203,6 +203,11 @@ export const SourceHealthSchema = z.object({
   quota: QuotaSchema.exactOptional(),
   /** Where Reed/Adzuna query rotation continues next run. */
   queryCursor: Count.exactOptional(),
+  /** Hosts that asked us to stay away (a long Retry-After); no request goes there until then. */
+  pausedHosts: z
+    .array(z.object({ host: z.string().min(1).max(253), until: z.date() }))
+    .max(10)
+    .exactOptional(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),
 });

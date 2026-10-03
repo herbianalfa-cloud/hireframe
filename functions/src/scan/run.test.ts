@@ -14,6 +14,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { setLogSink, type LogEvent, type LogFields } from '../log.js';
+import { fakeFetch } from '../sources/fake-fetch.js';
 import { FAKE_SEED, GREENHOUSE_BOARD } from '../sources/fixtures.js';
 import { createSources } from '../sources/index.js';
 import { testHttpClient } from '../sources/testing.js';
@@ -338,6 +339,47 @@ describe('runScan', () => {
     expect(text).not.toContain('reporting tools');
     expect(text).not.toContain('https://');
     expect(logs.map((log) => log.event)).toContain('scan.done');
+  });
+});
+
+describe('paused hosts across scans', () => {
+  it('carries a pause to the next scan, which then sends Workable nothing', async () => {
+    const memory = memoryStore();
+    let workableRequests = 0;
+    const httpFor: ScanDeps['httpFor'] = (_deadline, paused) =>
+      testHttpClient({
+        paused,
+        fetch: ((input: URL) => {
+          if (input.host === 'apply.workable.com' && input.pathname !== '/robots.txt') {
+            workableRequests += 1;
+            return Promise.resolve(
+              new Response('error code: 1015', {
+                status: 429,
+                headers: { 'retry-after': '83997' },
+              }),
+            );
+          }
+          return fakeFetch(input);
+        }) as typeof fetch,
+      });
+
+    const first = await runScan(deps(memory.store, { httpFor }));
+    if (first.status !== 'completed') throw new Error(first.status);
+    expect(first.perSource.workable?.status).toBe('failing');
+    expect(workableRequests).toBe(1);
+    const pause = memory.sources.workable?.pausedHosts?.[0];
+    expect(pause?.host).toBe('apply.workable.com');
+    expect(pause?.until.getTime()).toBeGreaterThan(NOW.getTime() + 23 * 3600_000);
+    const lastScanAfterFirst = memory.companies.get('delta-dock')?.lastScan;
+
+    const second = await runScan(deps(memory.store, { httpFor }));
+    if (second.status !== 'completed') throw new Error(second.status);
+    expect(workableRequests).toBe(1);
+    expect(second.perSource.workable?.status).toBe('skipped');
+    expect(memory.sources.workable?.pausedHosts).toEqual(memory.sources.workable?.pausedHosts);
+    expect(memory.sources.workable?.pausedHosts?.[0]?.until).toEqual(pause?.until);
+    // A skipped board is neither a failure nor "scanned".
+    expect(memory.companies.get('delta-dock')?.lastScan).toEqual(lastScanAfterFirst);
   });
 });
 

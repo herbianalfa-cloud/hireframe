@@ -37,6 +37,7 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
   too_large: 'the response was too large',
   robots_disallowed: 'robots.txt does not allow it',
   deadline: 'the scan ran out of time',
+  host_paused: 'the site asked us to pause',
   no_key: 'API key missing',
   no_criteria: 'no criteria yet',
   quota_used: 'API quota used up for now',

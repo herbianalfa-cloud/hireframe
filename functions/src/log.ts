@@ -27,6 +27,7 @@ export type LogEvent =
   | 'http.retry'
   | 'http.failed'
   | 'http.robots_blocked'
+  | 'http.host_paused'
   | 'scan.started'
   | 'scan.done'
   | 'scan.refused'

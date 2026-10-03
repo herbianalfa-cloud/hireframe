@@ -294,4 +294,34 @@ describe('runScan on the Firestore emulator', () => {
     const found = await firestoreScanStore(db).findJobsByKeys(['d:abc']);
     expect(found).toEqual([{ id: 'good-job', keys: ['d:abc'], firstSeenAt: T0, sourceCount: 1 }]);
   });
+
+  it('stores and reads back paused hosts on a source', async () => {
+    const store = firestoreScanStore(db);
+    const until = minutes(23 * 60);
+    const counts = {
+      status: 'skipped',
+      fetched: 0,
+      invalid: 0,
+      new: 0,
+      duplicate: 0,
+      merged: 0,
+      errors: 0,
+      requests: 0,
+      durationMs: 0,
+    } as const;
+    await store.writeSourceHealth({
+      workable: {
+        status: 'skipped',
+        lastRunAt: T0,
+        consecutiveFailures: 0,
+        lastErrorCode: 'host_paused',
+        lastCounts: counts,
+        pausedHosts: [{ host: 'apply.workable.com', until }],
+        updatedAt: T0,
+        schemaVersion: 1,
+      },
+    });
+    const states = await store.sourceStates();
+    expect(states.workable?.pausedHosts).toEqual([{ host: 'apply.workable.com', until }]);
+  });
 });

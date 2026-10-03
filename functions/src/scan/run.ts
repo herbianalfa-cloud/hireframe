@@ -22,7 +22,7 @@ import {
 } from '@hireframe/shared';
 
 import { QUOTAS, SCAN } from '../config.js';
-import type { HttpClient } from '../http/client.js';
+import type { HostPause, HttpClient } from '../http/client.js';
 import { errorFields, log } from '../log.js';
 import { addCalls, currentQuota, remainingCalls } from '../sources/queries.js';
 import type {
@@ -80,8 +80,8 @@ export interface ScanDeps {
   store: ScanStore;
   readCriteria: () => Promise<CriteriaContent | null>;
   createSources: () => Record<ScanSourceId, Source>;
-  /** A fresh client for one source, stopping at `deadline` (epoch ms). */
-  httpFor: (deadline: number) => HttpClient;
+  /** A fresh client for one source, stopping at `deadline` (epoch ms), with carried-over pauses. */
+  httpFor: (deadline: number, paused: readonly HostPause[]) => HttpClient;
   secrets: SourceSecrets;
   seed: readonly CompanySeed[];
   disabledSources: readonly string[];
@@ -105,6 +105,7 @@ interface SourceOutcome {
   requests: number;
   durationMs: number;
   quota?: Quota;
+  pausedHosts: HostPause[];
 }
 
 /** What one board's result does to its company's `lastScan` (pure). */
@@ -127,7 +128,7 @@ export function nextSourceHealth(
   previous: SourceHealth | undefined,
   counts: SourceRunCounts,
   now: Date,
-  extras: { quota?: Quota; queryCursor?: number },
+  extras: { quota?: Quota; queryCursor?: number; pausedHosts?: readonly HostPause[] },
 ): SourceHealth {
   const failed = counts.status === 'failing';
   const lastOkAt =
@@ -140,6 +141,14 @@ export function nextSourceHealth(
     ...(counts.errorCode ? { lastErrorCode: counts.errorCode } : {}),
     lastCounts: counts,
     ...(extras.quota ? { quota: extras.quota } : {}),
+    ...(extras.pausedHosts?.length
+      ? {
+          pausedHosts: extras.pausedHosts.map(({ host, until }) => ({
+            host,
+            until: new Date(until),
+          })),
+        }
+      : {}),
     ...(extras.queryCursor === undefined
       ? previous?.queryCursor === undefined
         ? {}
@@ -161,6 +170,11 @@ export function runStatus(
   if (active.length > 0 && active.every((c) => c.status === 'failing')) return 'failed';
   if (failedWrites > 0 || active.some((c) => c.status !== 'ok')) return 'partial';
   return 'succeeded';
+}
+
+/** Pauses saved on a source's health that haven't ended yet. */
+function carriedPauses(health: SourceHealth | undefined): HostPause[] {
+  return (health?.pausedHosts ?? []).map(({ host, until }) => ({ host, until: until.getTime() }));
 }
 
 function sourceCode(error: unknown): string {
@@ -235,13 +249,14 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
               jobs: [],
               requests: 0,
               durationMs: 0,
+              pausedHosts: carriedPauses(states[id]),
             },
           ];
         }
         const quotaKey = QUOTA_SOURCES[id];
         const quota = quotaKey ? currentQuota(quotas[id], startedAt) : undefined;
         const callBudget = quotaKey && quota ? remainingCalls(quota, QUOTAS[quotaKey]) : Infinity;
-        const http = deps.httpFor(deadline);
+        const http = deps.httpFor(deadline, carriedPauses(states[id]));
         const source = sources[id];
         const began = Date.now();
         let jobs: unknown[] = [];
@@ -281,6 +296,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
             requests,
             durationMs: Date.now() - began,
             ...(quota ? { quota: addCalls(quota, requests) } : {}),
+            pausedHosts: http.pauses(),
           },
         ];
       }),
@@ -312,6 +328,8 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     const companyUpdates = outcomes
       .filter(([id]) => ATS_SOURCES.has(id))
       .flatMap(([, outcome]) => outcome.report.boards)
+      // A board skipped for a paused host wasn't scanned: no failure, and rotation keeps it first.
+      .filter((board) => board.errorCode !== 'host_paused')
       .map((board) => ({
         companyId: board.companyId,
         lastScan: companyScanUpdate(previousScan.get(board.companyId), board),
@@ -340,6 +358,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
         run.errors.push({ sourceId: id, code: counts.errorCode ?? 'internal' });
       health[id] = nextSourceHealth(states[id], counts, finishedAt, {
         ...(outcome.quota ? { quota: outcome.quota } : {}),
+        pausedHosts: outcome.pausedHosts,
         ...(outcome.report.nextQueryCursor === undefined
           ? {}
           : { queryCursor: outcome.report.nextQueryCursor }),

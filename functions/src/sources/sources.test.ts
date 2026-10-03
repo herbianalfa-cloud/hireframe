@@ -293,3 +293,50 @@ describe('board rotation when a host is full (ADR-029)', () => {
     expect(source.health().deferred).toBe(2);
   });
 });
+
+describe('paused hosts (Retry-After beyond the cap)', () => {
+  const companies: WatchedCompany[] = ['a', 'b', 'c'].map((id) => ({
+    id,
+    name: id,
+    ats: { type: 'workable', token: id },
+  }));
+
+  it('stops asking a host after it says come back later', async () => {
+    const requested: string[] = [];
+    const http = testHttpClient({
+      fetch: ((input: URL) => {
+        requested.push(input.toString());
+        return Promise.resolve(
+          new Response('error code: 1015', { status: 429, headers: { 'retry-after': '83997' } }),
+        );
+      }) as typeof fetch,
+    });
+    const source = createWorkableSource();
+    await source.fetch(testContext({ http, companies }));
+    expect(requested.filter((u) => u.includes('/widget/accounts/'))).toHaveLength(1);
+    const report = source.health();
+    expect(report.boards.map((board) => board.errorCode).sort()).toEqual([
+      'host_paused',
+      'host_paused',
+      'rate_limited',
+    ]);
+    // One board was really tried and failed; the two skipped ones don't count.
+    expect(report.status).toBe('failing');
+    expect(http.pauses()).toHaveLength(1);
+  });
+
+  it('is skipped, without a request, while a carried-over pause lasts', async () => {
+    const requested: string[] = [];
+    const http = testHttpClient({
+      fetch: ((input: URL) => {
+        requested.push(input.toString());
+        return Promise.resolve(new Response('', { status: 404 }));
+      }) as typeof fetch,
+      paused: [{ host: 'apply.workable.com', until: Date.parse('2026-10-02T08:00:00Z') }],
+    });
+    const source = createWorkableSource();
+    await source.fetch(testContext({ http, companies }));
+    expect(requested).toEqual([]);
+    expect(source.health()).toMatchObject({ status: 'skipped', errorCode: 'host_paused' });
+  });
+});
