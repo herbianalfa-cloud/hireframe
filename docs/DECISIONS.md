@@ -93,6 +93,8 @@ Consequences: contributors need Java 21 installed. firebase-tools brings a large
 
 The emulator suite (`npm run test:rules`) exercises firebase-tools with both overrides. Drop them when firebase-tools ships the fixed versions. `@opentelemetry/core` < 2.8.0 (moderate, via `@google-cloud/pubsub`) stays open: the fix is a major version, and moderate findings don't fail CI.
 
+*Addendum (M3):* `braces` GHSA-vfj7-8cjw-p6xm (high, stack exhaustion on deeply nested patterns) reaches us only through `firebase-tools` → `chokidar@3` → `braces`. npm lists every version as affected, so no override can fix it, and forcing `chokidar@4` (no braces) under firebase-tools risks breaking the emulators' file watching. The CI `audit` job therefore splits: production dependencies (everything that ships in the web or functions bundles) fail on **high**, and the full tree including dev tools fails on **critical**. Dev tools only run on developer machines and in CI with trusted inputs. Revisit when braces or chokidar ship a fix, and restore a single `--audit-level=high`.
+
 ## ADR-014 Deploy: keyless, tag-only, London
 Context: CLAUDE.md says deploys are CI-only on tagged releases, and there must be no long-lived keys. Decision:
 - **Trigger:** `.github/workflows/deploy.yml` runs on `v*` tags in the GitHub `production` environment (owner approval required; only `v*` tags may deploy). It re-runs `check` and `test:rules`, builds, then deploys hosting, Firestore rules/indexes and Storage rules.
