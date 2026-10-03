@@ -173,6 +173,86 @@ describe('System screen', () => {
     expect(runs.textContent).toContain('Partial');
   });
 
+  it("shows each run's funnel counts, cost, warnings and why it stopped (M4)", () => {
+    givenRuns([
+      {
+        id: 'run-2',
+        run: {
+          ...RUN,
+          trigger: 'schedule',
+          status: 'succeeded',
+          perStage: {
+            ...RUN.perStage,
+            s1: { in: 12, passed: 8, skipped: 4, byRule: { 'title:senior': 4 } },
+            s2: {
+              in: 8,
+              passed: 3,
+              skipped: 4,
+              expired: 1,
+              review: 0,
+              queued: 2,
+              costPence: 1.2,
+              durationMs: 9,
+            },
+            s3: {
+              in: 3,
+              apply: 1,
+              near_miss: 1,
+              wildcard: 0,
+              skip: 1,
+              expired: 0,
+              review: 1,
+              queued: 1,
+              drift: 0,
+              recomputed: 0,
+              costPence: 4.5,
+              durationMs: 30,
+            },
+          },
+          costPence: 5.7,
+          budget: { leasePence: 24, usedPence: 5.7, stoppedBy: 'run_budget' },
+          flags: ['spend_80'],
+        },
+      },
+    ]);
+    render(<SystemPage />);
+    const runs = screen.getByRole('region', { name: 'Recent runs' });
+    expect(runs.textContent).toContain('Scheduled');
+    expect(runs.textContent).toContain(
+      'S1 8 passed, 4 skipped · S2 3 passed, 5 skipped · S3 1 apply, 1 near miss, 0 wildcard, 1 skip · 3 queued · 1 for review · 5.7p',
+    );
+    expect(runs.textContent).toContain('80% of the monthly AI cap used');
+    expect(runs.textContent).toContain('Stopped early: run budget used');
+  });
+
+  it('shows what a re-score changed', () => {
+    givenRuns([
+      {
+        id: 'run-3',
+        run: {
+          ...RUN,
+          trigger: 'rescore',
+          status: 'succeeded',
+          perStage: {
+            rescore: {
+              jobs: 40,
+              s1Changed: 5,
+              recomputed: 10,
+              queuedS2: 2,
+              queuedS3: 1,
+              unchanged: 22,
+            },
+          },
+        },
+      },
+    ]);
+    render(<SystemPage />);
+    const runs = screen.getByRole('region', { name: 'Recent runs' });
+    expect(runs.textContent).toContain(
+      'Re-score · 40 jobs · 5 changed by rules · 10 re-scored without AI · 3 sent back to the AI · 22 unchanged',
+    );
+  });
+
   it('lists broken boards', () => {
     givenBrokenBoards([
       {
@@ -323,5 +403,30 @@ describe('scanResultText', () => {
       'Some sources had problems',
     );
     expect(scanResultText({ ...base, runStatus: 'failed' }, AT)).toContain('Every source failed');
+  });
+
+  it('reports the funnel after a scan', () => {
+    const text = scanResultText(
+      {
+        status: 'completed',
+        runId: 'r',
+        runStatus: 'succeeded',
+        perSource: {},
+        s0: { in: 3, new: 3, merged: 0, duplicate: 0, conflicts: 0 },
+        funnel: {
+          s1: { passed: 2, skipped: 1 },
+          s2: { passed: 2, skipped: 0 },
+          s3: { apply: 1, near_miss: 1, wildcard: 0, skip: 0 },
+          review: 0,
+          queued: { s2: 4, s3: 0 },
+          costPence: 3.24,
+          stoppedBy: 'deadline',
+        },
+      },
+      AT,
+    );
+    expect(text).toBe(
+      'Scan finished: 3 new jobs, 0 merged into known jobs, 0 already known. Funnel: 1 to apply, 1 near misses, 0 wildcards, 3.2p. 4 jobs wait for the next run. Stopped early: out of time; the rest waits for the next run.',
+    );
   });
 });

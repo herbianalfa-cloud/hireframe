@@ -18,3 +18,18 @@ export class LlmOutputError extends Error {
     this.costPence = costPence;
   }
 }
+
+/**
+ * Thrown before any API call when a funnel call's worst case doesn't fit what is left of the
+ * run's lease (or its stage's share), or when S3 is paused near the monthly cap (ADR-032). The
+ * funnel catches it and leaves the rest of the queue for the next run.
+ */
+export class RunBudgetExceededError extends Error {
+  override name = 'RunBudgetExceededError';
+  readonly reason: 'run_budget' | 'deep_pause';
+
+  constructor(reason: 'run_budget' | 'deep_pause') {
+    super(`Run budget: ${reason}`);
+    this.reason = reason;
+  }
+}

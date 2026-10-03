@@ -2,6 +2,7 @@ import {
   AddFactResultSchema,
   clientTimeoutMs,
   CV_MIME_TYPES,
+  DOCS,
   FactSchema,
   FactVersionSchema,
   MAX_CV_BYTES,
@@ -10,6 +11,7 @@ import {
   planUploadRemoval,
   ResetProfileResultSchema,
   ProfileDocumentSchema,
+  ProfileSettingsSchema,
   STORAGE_PATHS,
   type AddFactResult,
   type CvKind,
@@ -19,6 +21,7 @@ import {
   type ProfileDocument,
   type ResetProfileResult,
   type UploadRemovalPlan,
+  type WorkRightsSetting,
 } from '@hireframe/shared';
 import {
   collection,
@@ -28,6 +31,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   writeBatch,
   type DocumentData,
 } from 'firebase/firestore';
@@ -39,6 +43,7 @@ import {
   buildFactWrite,
   buildKeepReview,
   buildUploadRemoval,
+  buildWorkRightsWrite,
   type FactPatch,
   type FactWrite,
 } from './fact-writes';
@@ -370,4 +375,67 @@ export function writeErrorMessage(error: unknown): string {
     return 'This fact changed since you opened it. Reload and try again.';
   }
   return "Couldn't save. Check your connection and try again.";
+}
+
+/** The owner's work-rights setting (ADR-033): null until it's set. */
+export type WorkRightsView = WorkRightsSetting | null;
+
+export function watchWorkRights(callback: (state: LiveState<WorkRightsView>) => void): Unsubscribe {
+  callback({ status: 'loading' });
+  return listen(
+    async () => {
+      const { db } = await getFirebase();
+      return onSnapshot(
+        doc(db, DOCS.profileMain),
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            callback({ status: 'ready', data: null, invalid: 0 });
+            return;
+          }
+          const parsed = ProfileSettingsSchema.safeParse(timestampsToDates(snapshot.data()));
+          callback(
+            parsed.success
+              ? {
+                  status: 'ready',
+                  data: {
+                    workRights: parsed.data.workRights,
+                    ...(parsed.data.validUntil ? { validUntil: parsed.data.validUntil } : {}),
+                  },
+                  invalid: 0,
+                }
+              : { status: 'ready', data: null, invalid: 1 },
+          );
+        },
+        (error) => {
+          logError('profile.work_rights_failed', { code: error.code });
+          callback({
+            status: 'error',
+            message: "Couldn't load your work rights. Reload to try again.",
+          });
+        },
+      );
+    },
+    (message) => {
+      callback({ status: 'error', message });
+    },
+  );
+}
+
+/** Saves the work-rights setting; `exists` is whether `profile/main` was there when loaded. */
+export async function saveWorkRights(setting: WorkRightsSetting, exists: boolean): Promise<void> {
+  const { db } = await getFirebase();
+  const data = buildWorkRightsWrite(setting, exists, serverTimestamp());
+  await withRetry(
+    () =>
+      withTimeout(
+        setDoc(doc(db, DOCS.profileMain), data, { merge: true }),
+        WRITE_TIMEOUT_MS,
+        'work rights',
+      ),
+    {
+      label: 'profile.work_rights_write',
+      // The same write twice is harmless, but keep to clear rejections like other writes.
+      isRetryable: (error) => errorCode(error) === 'unavailable',
+    },
+  );
 }

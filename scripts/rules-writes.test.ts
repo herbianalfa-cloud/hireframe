@@ -1,5 +1,5 @@
 /**
- * Static guard over firestore.rules and storage.rules (ADR-011, ADR-018, ADR-019): every client
+ * Static guard over firestore.rules and storage.rules (ADR-011, ADR-018, ADR-019, ADR-033): every client
  * write the rules allow is listed here. A new `allow create|update|delete|write` anywhere else,
  * even a shape-validated one that the emulator tests' junk payloads would never satisfy, fails
  * this test. Runs in `npm run check`, no emulator needed.
@@ -42,10 +42,12 @@ function allowedWrites(rules: string): Record<string, string[]> {
 }
 
 describe('client-writable paths', () => {
-  it('firestore.rules opens only the M2 and M2.1 writes', () => {
+  it('firestore.rules opens only the M2, M2.1 and M4 writes', () => {
     expect(allowedWrites(readFileSync('firestore.rules', 'utf8'))).toEqual({
       '/criteria/current': ['create', 'update'],
       '/criteria/{versionId}': ['create'],
+      // M4: the owner's work-rights setting on profile/main (ADR-033).
+      '/profile/{profileId}': ['create', 'update'],
       '/profile/{profileId}/documents/{docId}': ['update'],
       '/profile/{profileId}/facts/{factId}': ['update'],
       '/profile/{profileId}/facts/{factId}/versions/{versionId}': ['create'],

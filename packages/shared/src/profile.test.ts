@@ -13,6 +13,7 @@ import {
   STALE_PARSE_MS,
   type FactDraft,
   type ProfileDocument,
+  ProfileSettingsSchema,
 } from './profile.js';
 
 const AT = new Date('2026-10-01T09:00:00Z');
@@ -142,5 +143,30 @@ describe('evidence links are owner-set only', () => {
   it('a model draft cannot carry one', () => {
     const parsed = FactDraftSchema.safeParse({ ...draft, evidenceUrl: 'https://example.com' });
     expect(parsed.success && 'evidenceUrl' in parsed.data).toBe(false);
+  });
+});
+
+describe('ProfileSettingsSchema', () => {
+  const base = {
+    workRights: 'time_limited',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    schemaVersion: 1,
+  };
+
+  it('accepts work rights with or without a valid-until date', () => {
+    expect(ProfileSettingsSchema.safeParse(base).success).toBe(true);
+    expect(ProfileSettingsSchema.safeParse({ ...base, validUntil: '2028-06-30' }).success).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['an unknown work-rights value', { workRights: 'citizen' }],
+    ['a month-only date', { validUntil: '2028-06' }],
+    ['a month 13', { validUntil: '2028-13-01' }],
+    ['a timestamp string', { validUntil: '2028-06-30T00:00:00Z' }],
+  ])('rejects %s', (_name, patch) => {
+    expect(ProfileSettingsSchema.safeParse({ ...base, ...patch }).success).toBe(false);
   });
 });

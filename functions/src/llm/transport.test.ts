@@ -87,6 +87,38 @@ describe('anthropicTransport', () => {
   });
 });
 
+describe('prompt caching (ADR-035)', () => {
+  function capturing(bodies: unknown[]) {
+    const reply = streamingFetch([MESSAGE_START, ...MESSAGE_REST], false);
+    return (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      bodies.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'));
+      const href = url instanceof Request ? url.url : url.toString();
+      if (href.includes('count_tokens')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ input_tokens: 42 }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }
+      return reply(url, init);
+    };
+  }
+
+  it('marks the system prompt cacheable only when asked, for counting and sending', async () => {
+    const bodies: unknown[] = [];
+    const t = anthropicTransport('test-key', { fetch: capturing(bodies) });
+    await t.countTokens({ ...request(5_000), cacheSystem: true });
+    await t.send({ ...request(5_000), cacheSystem: true });
+    await t.send(request(5_000));
+    const cached = [{ type: 'text', text: 'Return JSON.', cache_control: { type: 'ephemeral' } }];
+    expect(bodies.map((body) => (body as { system: unknown }).system)).toEqual([
+      cached,
+      cached,
+      'Return JSON.',
+    ]);
+  });
+});
+
 describe('SDK logging', () => {
   const spies: MockInstance<(...data: unknown[]) => void>[] = [];
 

@@ -1,3 +1,4 @@
+import { FAKE_CV_EXTRACTION } from '../functions/src/fixtures/fake-cv-response.ts';
 import { CRITERIA_SEED_V1 } from '../packages/shared/src/criteria-seed.ts';
 
 /**
@@ -141,5 +142,43 @@ export function linkedInJobDocuments(now: Date) {
         schemaVersion: 1,
       }),
     },
+  };
+}
+
+/**
+ * The fake CV's facts (Alex Example) and a work-rights setting, so the funnel has a profile to
+ * judge against in `npm run dev` (M4). Uploading the fake CV afterwards finds them unchanged.
+ * Each fact gets its v1 snapshot, as parseCv writes it.
+ */
+export const DEV_WORK_RIGHTS = 'time_limited';
+
+export function profileSeedDocuments(now: Date) {
+  const facts = FAKE_CV_EXTRACTION.facts.map((draft, index) => {
+    const fact = {
+      ...draft,
+      source: 'cv',
+      status: 'active',
+      version: 1,
+      evidenceVerified: true,
+      createdAt: now,
+      updatedAt: now,
+      schemaVersion: 1,
+    };
+    return {
+      id: `dev-fact-${String(index + 1).padStart(3, '0')}`,
+      fact: { fields: toRestFields(fact) },
+      version: { fields: toRestFields({ snapshot: fact, change: 'created', at: now }) },
+    };
+  });
+  return {
+    settings: {
+      fields: toRestFields({
+        workRights: DEV_WORK_RIGHTS,
+        createdAt: now,
+        updatedAt: now,
+        schemaVersion: 1,
+      }),
+    },
+    facts,
   };
 }

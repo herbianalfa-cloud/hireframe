@@ -13,6 +13,7 @@ import {
 } from '@hireframe/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { FunnelOutcome } from '../funnel/run.js';
 import { setLogSink, type LogEvent, type LogFields } from '../log.js';
 import { fakeFetch } from '../sources/fake-fetch.js';
 import { FAKE_SEED, GREENHOUSE_BOARD } from '../sources/fixtures.js';
@@ -415,12 +416,12 @@ describe('Workable rotation across scans', () => {
       fetched.push(run);
     }
     const [first = [], second = []] = fetched;
-    expect(first).toHaveLength(43);
-    expect(second).toHaveLength(43);
+    expect(first).toHaveLength(36);
+    expect(second).toHaveLength(36);
     const skippedFirst = seed.map((c) => c.id).filter((id) => !first.includes(id));
-    expect(skippedFirst).toHaveLength(7);
-    // The 7 boards the first scan left out lead the second scan.
-    expect(second.slice(0, 7).sort()).toEqual(skippedFirst);
+    expect(skippedFirst).toHaveLength(14);
+    // The 14 boards the first scan left out lead the second scan.
+    expect(second.slice(0, 14).sort()).toEqual(skippedFirst);
     expect(new Set([...first, ...second]).size).toBe(50);
   });
 });
@@ -488,5 +489,89 @@ describe('nextSourceHealth and runStatus', () => {
         0,
       ),
     ).toBe('failed');
+  });
+});
+
+describe('the funnel after ingest (M4)', () => {
+  const outcome = (patch: Partial<FunnelOutcome> = {}): FunnelOutcome => ({
+    perStage: {
+      s1: { in: 3, passed: 2, skipped: 1, byRule: { 'title:senior': 1 } },
+      s2: {
+        in: 2,
+        passed: 1,
+        skipped: 1,
+        expired: 0,
+        review: 0,
+        queued: 0,
+        costPence: 0.3,
+        durationMs: 5,
+      },
+      hydrate: { attempted: 0, ok: 0, failed: 0 },
+      s3: {
+        in: 1,
+        apply: 1,
+        near_miss: 0,
+        wildcard: 0,
+        skip: 0,
+        expired: 0,
+        review: 0,
+        queued: 0,
+        drift: 0,
+        recomputed: 0,
+        costPence: 1.5,
+        durationMs: 9,
+      },
+    },
+    budget: { leasePence: 24, usedPence: 1.8 },
+    flags: ['spend_80'],
+    costPence: 1.8,
+    summary: {
+      s1: { passed: 2, skipped: 1 },
+      s2: { passed: 1, skipped: 1 },
+      s3: { apply: 1, near_miss: 0, wildcard: 0, skip: 0 },
+      review: 0,
+      queued: { s2: 0, s3: 0 },
+      costPence: 1.8,
+    },
+    failedWrites: 0,
+    ...patch,
+  });
+
+  it('runs the funnel inside the lock and records stages, cost and flags on the run', async () => {
+    const memory = memoryStore();
+    let lockedDuringFunnel = false;
+    const result = await runScan(
+      deps(memory.store, {
+        funnel: async ({ runId }) => {
+          // A second scan can't start while the funnel runs.
+          lockedDuringFunnel = !(await memory.store.acquireLock('other', NOW, 0)).ok;
+          expect(runId).toBe('run-1');
+          return outcome();
+        },
+      }),
+    );
+    if (result.status !== 'completed') throw new Error(result.status);
+    expect(lockedDuringFunnel).toBe(true);
+    expect(result.funnel?.s3.apply).toBe(1);
+    const run = memory.runs.get('run-1');
+    expect(run?.perStage.s0).toBeDefined();
+    expect(run?.perStage).toMatchObject({ s1: { in: 3 }, s3: { apply: 1 } });
+    expect(run).toMatchObject({ costPence: 1.8, budget: { leasePence: 24 }, flags: ['spend_80'] });
+  });
+
+  it('makes the run partial, never failed, when the funnel throws', async () => {
+    const memory = memoryStore();
+    captureLogs();
+    const result = await runScan(
+      deps(memory.store, {
+        disabledSources: ['greenhouse', 'lever', 'ashby', 'workable', 'adzuna', 'hn'],
+        funnel: () => Promise.reject(new Error('criteria unreadable')),
+      }),
+    );
+    if (result.status !== 'completed') throw new Error(result.status);
+    expect(result.runStatus).toBe('partial');
+    expect(result.funnel).toBeUndefined();
+    expect(memory.runs.get('run-1')?.errors).toContainEqual({ code: 'funnel_failed' });
+    expect(logs.some((l) => l.event === 'scan.failed' && l.fields.step === 'funnel')).toBe(true);
   });
 });

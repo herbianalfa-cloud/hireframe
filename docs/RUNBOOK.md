@@ -10,7 +10,7 @@
 7. Secrets go into Secret Manager via `firebase functions:secrets:set`. Never paste them into chat or code.
 
 ## Firebase setup
-Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2); Part D adds the job sources (M3). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
+Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2); Part D adds the job sources (M3); Part E adds the funnel and the schedule (M4). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
 
 ### Part A: before the first deploy
 1. **Create Firestore.**
@@ -165,7 +165,7 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
 28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
     ```bash
-    for FN in parseCv addFact resetProfile scanNow; do
+    for FN in parseCv addFact resetProfile scanNow rescore; do
       gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers --project=hireframe-f6b03
     done
     ```
@@ -247,6 +247,50 @@ Before the `v0.3.0` deploy. Design: ADR-025 (robots.txt and keyed APIs), ADR-029
 51. In Firestore, check `jobs` has documents with `stage: s0`, `runs` has one `succeeded` or `partial` run, and `sources/adzuna.quota.dayCount` is 20 or less.
 52. If a source breaks later, add `disabledSources` (an array of strings, e.g. `adzuna`) to `config/app` in the console. It's off from the next scan, with no deploy.
 
+### Part E: Funnel (M4)
+Before the `v0.4.0` deploy. Design: ADR-032 (run budget), ADR-033 (S1 and work rights), ADR-034 (scores), ADR-035 (S3 and caching), ADR-036 (evals), ADR-037 (`scheduledScan` and `rescore`). Cloud Shell is the **>_** icon in the Google Cloud console; every block prints nothing secret.
+
+**A. Before the deploy**
+53. **Check your Anthropic rate limits.** console.anthropic.com → **Settings → Limits**. Note the requests per minute for Claude Haiku 4.5 and Claude Sonnet 5.5. The funnel starts at most 45 a minute on Haiku and 20 on Sonnet. If yours are lower, add `triageRpm` and `deepReadRpm` (numbers) to a `funnel` map in `config/app` (step 72), or tell Claude the numbers (never a key).
+54. **Turn on Cloud Scheduler and let the deploy account create the schedule.** The deploy account can't enable APIs or change IAM, so paste this in Cloud Shell:
+    ```bash
+    PROJECT_ID=hireframe-f6b03
+    gcloud config set project $PROJECT_ID
+    gcloud services enable cloudscheduler.googleapis.com
+    SA=github-deployer@$PROJECT_ID.iam.gserviceaccount.com
+    gcloud projects add-iam-policy-binding $PROJECT_ID --condition=None \
+      --member="serviceAccount:$SA" --role=roles/cloudscheduler.admin
+    ```
+55. **Check the Anthropic spend limit** is still set (One-time setup step 3). No new secrets are needed: the runtime account can already read all four keys.
+
+**B. Label the golden set** (about 40 minutes, on your laptop)
+56. In the repo folder, run `node scripts/eval-labels.ts export`. It writes `tmp/golden-labels.csv`.
+57. Open `evals/README.md` and read the fake candidate's summary (Alex Example).
+58. Open the CSV in a spreadsheet. For each row, type one of `apply`, `near_miss`, `wildcard`, `skip` in the `verdict` column, judged for that candidate. Add a short `note` if you like. Save as CSV.
+59. Run `node scripts/eval-labels.ts import tmp/golden-labels.csv`. It lists the rows where your label differs from the case's design. Re-read those; keep yours if you still agree.
+60. Make sure `functions/.secret.local` has `ANTHROPIC_API_KEY=…` (Local setup step 8). Never paste the key into chat.
+61. Run `LIVE=1 npm run eval`. It costs about £0.40 and prints agreement, the confusion matrix and cost. If agreement is under 80%, the prompts or rubric need tuning, never your labels. Once it passes, run `npm run eval -- --update-baseline`, then commit `evals/golden.jsonl`, `evals/recordings.jsonl` and `evals/baseline.json` (or ask Claude to).
+
+**C. Try it locally**
+62. Run `npm run dev` and sign in as **Dev Owner**. The fake CV's facts and a work-rights setting are already seeded; **Profile → Work rights** shows the setting.
+63. **System → Scan now.** The run row shows S1/S2/S3 counts and cost. In the emulator UI (http://127.0.0.1:4000 → Firestore → `jobs`), jobs have a `verdict`, a `reason` or a `skip.ruleId`.
+64. **Criteria** → change one threshold → **Save** → **Re-score last 14 days**. It reports the jobs re-scored without AI; a `rescore` run appears on System, and re-judged jobs carry the new `criteriaVersion`.
+
+**D. Deploy `v0.4.0`**
+65. Merge the PR, push tag `v0.4.0`, then **Actions → Deploy → Review deployments → Approve**.
+66. **Wait for the new indexes.** Firebase console → **Firestore → Indexes**: all three new indexes on `jobs` must say **Enabled** (a few minutes) before the first scan.
+67. **Let the browser call `rescore`** (new callable):
+    `gcloud functions add-invoker-policy-binding rescore --region=europe-west2 --member=allUsers --project=hireframe-f6b03`
+68. **Let the scheduler start `scheduledScan`.**
+    1. In the Google Cloud console, go to **Cloud Scheduler** (region europe-west2) and open the job whose name contains `scheduledScan`.
+    2. Under **Auth**, copy the service account email.
+    3. In Cloud Shell, run `gcloud functions add-invoker-policy-binding scheduledScan --region=europe-west2 --member=serviceAccount:<that email> --project=hireframe-f6b03`.
+    4. Back in Cloud Scheduler, click **Force run**. Within 10 minutes the app's **System** screen shows a run marked "Scheduled". If the job's last result says `PERMISSION_DENIED`, the binding is missing (see Recovery).
+69. In the app: **Profile → Work rights**. Pick yours (and the end date, if time-limited) and save. Until you do, right-to-work wording is flagged, never skipped.
+70. On your phone: **System → Scan now**. It takes 3–8 minutes; check the stage counts and cost. In Firestore, `usage/{yyyy-mm}.reservations` is empty afterwards.
+71. Next weekday after 07:30, check that a "Scheduled" run is there.
+72. *(Optional)* To tune limits without a deploy, add a map `funnel` to `config/app` with any of `runBudgetPence`, `s1MaxJobs`, `s2MaxJobs`, `s3MaxJobs`, `triageRpm`, `deepReadRpm`, `reedHydratePerRun` (numbers). Raising `monthlyCapPence` raises the per-run budget automatically. An invalid map is ignored (and logged), never fatal.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -264,6 +308,11 @@ Before the `v0.3.0` deploy. Design: ADR-025 (robots.txt and keyed APIs), ADR-029
 - **A source card says "Paused until <time>":** that site sent a long Retry-After (a rate limit), so scans skip it until then and it resumes on its own. If it keeps happening, switch the source off with `disabledSources` for a while.
 - **Scan now says "A scan is already running"** long after the last one: a scan that died leaves `locks/scan` for 12 minutes, then the next scan takes over.
 - **Deploy fails with 403 on a Reed or Adzuna secret:** Part D step 39 hasn't run.
+- **`scheduledScan` never runs, or Cloud Scheduler shows `PERMISSION_DENIED`:** the scheduler's service account can't invoke the function. Do Part E step 68. If the deploy failed creating the schedule, do Part E step 54 and re-run the deploy.
+- **A scan fails with `FAILED_PRECONDITION` and "requires an index":** the funnel's indexes are still building or weren't deployed. Wait until **Firestore → Indexes** shows them Enabled (Part E step 66), then scan again.
+- **Jobs stuck "for review":** the model's output was unusable after a retry (`jobs.review.code`: `refusal`, `max_tokens` or `schema`). Re-score picks them up again; if one keeps failing, open an issue with the job ID (never paste the posting into chat).
+- **Runs keep stopping early with "run budget used":** the backlog is larger than one run's lease. It catches up over a few runs. To go faster, raise `config/app.monthlyCapPence` or set `config/app.funnel.runBudgetPence` (Part E step 72).
+- **CI fails with "recordings stale":** a prompt, schema or golden case changed. Run `LIVE=1 npm run eval` locally and commit `evals/recordings.jsonl` (`evals/README.md`).
 - **"The monthly AI spend cap has been reached":** check `usage/{yyyy-mm}` in Firestore. Raise `config/app.monthlyCapPence` deliberately, or wait for next month. Stale `reservations` entries expire on their own after 15 minutes.
 
 ## Local setup (per machine)
@@ -275,7 +324,7 @@ Before the `v0.3.0` deploy. Design: ADR-025 (robots.txt and keyed APIs), ADR-029
 6. **Run the app:** `npm run dev` builds the functions, starts the emulators (project `demo-hireframe`, UI on http://127.0.0.1:4000, including Functions) and the app on http://127.0.0.1:5173. Criteria v1 is seeded.
    - In the Google pop-up, pick **Dev Owner** to see the shell.
    - Pick **Add new account** to see "No access".
-   - Nothing touches production. CV reading and "Add a fact" use a fake model, which always returns the fake CV's facts. **System → Scan now** uses fake job APIs, a fake watchlist and one seeded LinkedIn-alert job.
+   - Nothing touches production. CV reading and "Add a fact" use a fake model, which always returns the fake CV's facts. The fake CV's facts and a work-rights setting are seeded. **System → Scan now** uses fake job APIs, a fake watchlist and one seeded LinkedIn-alert job, then runs the funnel on the fake model.
 7. **Fake CVs to upload:** `node scripts/make-cv-fixtures.ts` writes `tmp/fixtures/fake-cv.pdf`, `fake-cv.docx` and a `fake-cv-revised` pair (one reworded bullet, to try **Accept change**).
 8. **Real model and real job APIs locally (the model costs money):** put `ANTHROPIC_API_KEY=<key>` in `functions/.secret.local` (gitignored), plus `REED_API_KEY`, `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` for those sources, then run `LIVE=1 npm run dev`. Only upload fake CVs. Live scans count against the Reed and Adzuna quotas.
 

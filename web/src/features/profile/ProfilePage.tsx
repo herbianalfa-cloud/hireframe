@@ -4,6 +4,7 @@ import { FactList } from './FactList';
 import { useDocuments, useFacts } from './hooks';
 import { ReviewSection } from './ReviewSection';
 import { UploadCard } from './UploadCard';
+import { WorkRightsCard } from './WorkRightsCard';
 
 /** Profile: the fact library built from the CV and manual additions (PRD R2). */
 export function ProfilePage() {
@@ -30,6 +31,7 @@ export function ProfilePage() {
         <UploadCard documents={documents} facts={facts} />
         {facts.status === 'ready' ? <ReviewSection facts={facts.data} /> : null}
         <AddFactForm />
+        <WorkRightsCard />
         <FactList state={facts} />
         <DangerZone />
       </div>

@@ -1,4 +1,4 @@
-import type { CriteriaContent } from '@hireframe/shared';
+import { lanePoints, type CriteriaContent } from '@hireframe/shared';
 
 /**
  * The criteria form's working copy. Numbers are strings so a field can be empty or half-typed,
@@ -28,6 +28,8 @@ export interface Draft {
   freshnessDays: string;
   thresholds: { applyFit: string; applyLuck: string; nearMissFit: string; wildcardFit: string };
   weeklyTarget: string;
+  /** Fit points per S2 lane (ADR-034); versions saved before M4 show the defaults. */
+  lanePoints: { primary: string; secondary: string; opportunistic: string; wildcard: string };
 }
 
 let rowCounter = 0;
@@ -71,6 +73,15 @@ export function toDraft(content: CriteriaContent): Draft {
       wildcardFit: String(content.thresholds.wildcard_fit),
     },
     weeklyTarget: String(content.weekly_target),
+    lanePoints: (() => {
+      const points = lanePoints(content);
+      return {
+        primary: String(points.primary),
+        secondary: String(points.secondary),
+        opportunistic: String(points.opportunistic),
+        wildcard: String(points.wildcard),
+      };
+    })(),
   };
 }
 
@@ -128,6 +139,12 @@ export function toContent(draft: Draft): CriteriaContent {
       wildcard_fit: num(draft.thresholds.wildcardFit),
     },
     weekly_target: num(draft.weeklyTarget),
+    lane_points: {
+      primary: num(draft.lanePoints.primary),
+      secondary: num(draft.lanePoints.secondary),
+      opportunistic: num(draft.lanePoints.opportunistic),
+      wildcard: num(draft.lanePoints.wildcard),
+    },
   };
 }
 
@@ -138,6 +155,7 @@ const NUMBER_MESSAGES: readonly (readonly [string, string])[] = [
   ['freshness_days', 'Enter a whole number of days from 1 to 90.'],
   ['thresholds', 'Enter a score from 0 to 10.'],
   ['weekly_target', 'Enter a whole number from 1 to 100.'],
+  ['lane_points', 'Enter points from 0 to 3.'],
 ];
 
 /** Issue paths joined with "." mapped to a message. */

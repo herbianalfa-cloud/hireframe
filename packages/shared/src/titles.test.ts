@@ -1,33 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { CRITERIA_SEED_V1 } from './criteria-seed.js';
+import { TITLE_CASES } from './fixtures/title-cases.js';
 import { checkTitle, laneTitleVariants, matchesExcludedTitle } from './titles.js';
 
 const check = (title: string) => checkTitle(title, CRITERIA_SEED_V1);
 
 describe('seed v1 title rules', () => {
-  it.each([
-    // Asked for in the PR #4 review.
-    ['Junior Brand Manager', null],
-    ['Product Marketing Manager', 'manager'],
-    ['Senior Product Analyst', 'senior'],
-    // Business Analyst: only the listed words, immediately before the term, allow it.
-    ['Business Analyst', 'business-analyst'],
-    ['business analyst', 'business-analyst'],
-    ['Technical Business Analyst', null],
-    ['Junior Business Analyst', null],
-    ['Business Analyst - Technical', 'business-analyst'],
-    ['Technical Support / Business Analyst', 'business-analyst'],
-    ['Senior Technical Business Analyst', 'senior'],
-    ['Lead Technical Business Analyst', 'lead'],
-    // Manager: "Product/Account/Associate/Junior" must come directly before it.
-    ['Associate Product Manager', null],
-    ['Technical Account Manager', null],
-    ['Marketing Manager', 'manager'],
-    ['Head of Product', 'head-of'],
-    ['Data Analyst', 'data-analyst'],
-    ['Product Analyst', null],
-  ])('%s → %s', (title, excludedBy) => {
+  it.each(TITLE_CASES)('%s → %s', (title, excludedBy) => {
     expect(check(title).excludedBy).toBe(excludedBy);
   });
 

@@ -1,5 +1,6 @@
 import {
   checkCap,
+  liveReservedPence,
   PATHS,
   staleReservationIds,
   UNSETTLED_PURPOSE,
@@ -39,6 +40,45 @@ export interface UsageStore {
   reserve(input: ReserveInput): Promise<void>;
   /** Releases this call's reservation, charges stale ones and records the actual cost. */
   settle(input: SettleInput): Promise<void>;
+}
+
+// ---- Run leases (ADR-032) ----
+
+export interface LeaseInput {
+  month: string;
+  id: string;
+  /** The most this run may spend. */
+  maxPence: number;
+  capPence: number;
+  now: Date;
+}
+
+export interface LeaseGrant {
+  /** Pence reserved for the run (0 when the month has nothing left). */
+  grantedPence: number;
+  /** The month's spend plus everyone else's live reservations, before this lease. */
+  committedPence: number;
+  capPence: number;
+}
+
+/** What a run spent, aggregated in memory and settled in one transaction. */
+export interface LeaseSettlement {
+  costPence: number;
+  calls: Record<string, number>;
+  tokens: Record<string, TokenCounts>;
+  byPurpose: Record<string, number>;
+}
+
+export interface LeaseStore {
+  /** Reserves up to `maxPence` of what the month has left, in one transaction. */
+  reserveUpTo(input: LeaseInput): Promise<LeaseGrant>;
+  /** Releases the lease and records what the run spent, in one transaction. */
+  settleLease(input: {
+    month: string;
+    id: string;
+    now: Date;
+    settlement: LeaseSettlement;
+  }): Promise<void>;
 }
 
 export function emptyUsage(capPence: number, now: Date): Usage {
@@ -136,6 +176,61 @@ export function applySettle(previous: Usage, input: SettleInput): Usage {
   };
 }
 
+export function applyReserveUpTo(
+  current: Usage,
+  input: LeaseInput,
+): { usage: Usage; grant: LeaseGrant } {
+  const base = chargeStale(current, input.now);
+  const committed = round(base.spendPence + liveReservedPence(base.reservations, input.now));
+  const granted = round(Math.max(0, Math.min(input.maxPence, input.capPence - committed)));
+  const grant = { grantedPence: granted, committedPence: committed, capPence: input.capPence };
+  if (granted <= 0) return { usage: base, grant };
+  return {
+    usage: {
+      ...base,
+      capPence: input.capPence,
+      reservations: { ...base.reservations, [input.id]: { pence: granted, at: input.now } },
+      updatedAt: input.now,
+    },
+    grant,
+  };
+}
+
+function addCounts(
+  into: Record<string, number>,
+  from: Readonly<Record<string, number>>,
+): Record<string, number> {
+  const out = { ...into };
+  for (const [key, value] of Object.entries(from)) out[key] = round((out[key] ?? 0) + value);
+  return out;
+}
+
+export function applySettleLease(
+  previous: Usage,
+  input: { id: string; now: Date; settlement: LeaseSettlement },
+): Usage {
+  const current = chargeStale(previous, input.now, input.id);
+  const tokens = { ...current.tokens };
+  for (const [model, counts] of Object.entries(input.settlement.tokens)) {
+    const was = tokens[model] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    tokens[model] = {
+      input: was.input + counts.input,
+      output: was.output + counts.output,
+      cacheRead: was.cacheRead + counts.cacheRead,
+      cacheWrite: was.cacheWrite + counts.cacheWrite,
+    };
+  }
+  return {
+    ...current,
+    reservations: without(current.reservations, [input.id]),
+    spendPence: round(current.spendPence + input.settlement.costPence),
+    calls: addCounts(current.calls, input.settlement.calls),
+    tokens,
+    byPurpose: addCounts(current.byPurpose, input.settlement.byPurpose),
+    updatedAt: input.now,
+  };
+}
+
 /** Parses a usage document; a corrupt one throws, so nothing is spent until it's fixed. */
 function readUsage(data: unknown, capPence: number, now: Date): Usage {
   return data === undefined
@@ -143,8 +238,29 @@ function readUsage(data: unknown, capPence: number, now: Date): Usage {
     : UsageSchema.parse(timestampsToDates(data));
 }
 
-export function firestoreUsageStore(firestore: Firestore): UsageStore {
+export function firestoreUsageStore(firestore: Firestore): UsageStore & LeaseStore {
   return {
+    async reserveUpTo(input) {
+      const ref = firestore.doc(PATHS.usage(input.month));
+      return firestore.runTransaction(async (tx) => {
+        const snapshot = await tx.get(ref);
+        const { usage, grant } = applyReserveUpTo(
+          readUsage(snapshot.data(), input.capPence, input.now),
+          input,
+        );
+        tx.set(ref, usage);
+        return grant;
+      });
+    },
+
+    async settleLease(input) {
+      const ref = firestore.doc(PATHS.usage(input.month));
+      await firestore.runTransaction(async (tx) => {
+        const snapshot = await tx.get(ref);
+        tx.set(ref, applySettleLease(readUsage(snapshot.data(), 0, input.now), input));
+      });
+    },
+
     async reserve(input) {
       const ref = firestore.doc(PATHS.usage(input.month));
       await firestore.runTransaction(async (tx) => {

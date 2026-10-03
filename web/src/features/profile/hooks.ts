@@ -4,11 +4,13 @@ import {
   watchDocuments,
   watchFacts,
   watchFactVersions,
+  watchWorkRights,
   type DocumentView,
   type FactView,
   type LiveState,
   type Unsubscribe,
   type VersionView,
+  type WorkRightsView,
 } from '@/services/profile';
 
 function useLive<T>(subscribe: (callback: (state: LiveState<T>) => void) => Unsubscribe) {
@@ -32,4 +34,8 @@ export function useFactVersions(factId: string): LiveState<VersionView[]> {
     [factId],
   );
   return useLive(subscribe);
+}
+
+export function useWorkRights(): LiveState<WorkRightsView> {
+  return useLive(watchWorkRights);
 }

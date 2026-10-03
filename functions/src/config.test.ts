@@ -3,10 +3,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   API_TERMS_HOSTS,
+  defaultRunBudgetPence,
+  DEFAULT_MONTHLY_CAP_PENCE,
+  FUNNEL,
+  funnelLimits,
   hostPolicy,
   LLM,
   MODELS,
+  PURPOSE_CALLABLE,
   RUNTIME_SERVICE_ACCOUNT,
+  SCAN,
   type LlmPurpose,
 } from './config.js';
 
@@ -16,11 +22,45 @@ describe('time limits', () => {
     (purpose) => {
       const model = MODELS[purpose];
       expect(model.budgetMs + LLM.callableMarginMs).toBeLessThanOrEqual(
-        CALLABLE_TIMEOUT_SECONDS[purpose] * 1000,
+        CALLABLE_TIMEOUT_SECONDS[PURPOSE_CALLABLE[purpose]] * 1000,
       );
       expect(model.timeoutMs).toBeLessThanOrEqual(model.budgetMs - LLM.countTokensTimeoutMs);
     },
   );
+});
+
+describe('funnel deadlines (ADR-032)', () => {
+  const callableMs = CALLABLE_TIMEOUT_SECONDS.scanNow * 1000;
+
+  it('starts the funnel after the fetch budget and ends each stage before the callable', () => {
+    expect(SCAN.fetchBudgetMs).toBeLessThan(FUNNEL.s2StopMs);
+    expect(FUNNEL.s2StopMs + MODELS.triage.budgetMs).toBeLessThanOrEqual(FUNNEL.s3StopMs + 10_000);
+    expect(FUNNEL.s3StopMs + MODELS.deepRead.budgetMs + LLM.callableMarginMs).toBeLessThanOrEqual(
+      callableMs,
+    );
+  });
+
+  it('re-score shares the scan timeout', () => {
+    expect(CALLABLE_TIMEOUT_SECONDS.rescore).toBe(CALLABLE_TIMEOUT_SECONDS.scanNow);
+  });
+});
+
+describe('run budget (ADR-032)', () => {
+  it('fits every scheduled run in 75% of the monthly cap', () => {
+    expect(defaultRunBudgetPence(DEFAULT_MONTHLY_CAP_PENCE)).toBe(24);
+    expect(
+      defaultRunBudgetPence(DEFAULT_MONTHLY_CAP_PENCE) * FUNNEL.scheduledRunsPerMonth,
+    ).toBeLessThanOrEqual(DEFAULT_MONTHLY_CAP_PENCE * 0.75);
+    expect(defaultRunBudgetPence(3000)).toBe(48);
+  });
+
+  it('applies console overrides over the defaults', () => {
+    expect(funnelLimits(1500, { runBudgetPence: 30, s3MaxJobs: 10 })).toMatchObject({
+      runBudgetPence: 30,
+      s3MaxJobs: 10,
+      s2MaxJobs: FUNNEL.s2MaxJobs,
+    });
+  });
 });
 
 describe('runtime service account', () => {

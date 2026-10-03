@@ -254,3 +254,43 @@ export const ResetProfileResultSchema = z.object({
   files: z.int().min(0),
 });
 export type ResetProfileResult = z.infer<typeof ResetProfileResultSchema>;
+
+// ---- Profile settings (`profile/main`, M4, ADR-033) ----
+
+/**
+ * The owner's right to work in the UK, as S1 and the S2/S3 prompts need it. Personal data, so it
+ * lives only in Firebase (ADR-010). `validUntil` is an optional end date for time-limited
+ * permission; the prompts mention it, S1 doesn't use it.
+ */
+export const WORK_RIGHTS = ['unrestricted', 'time_limited', 'needs_sponsorship'] as const;
+export type WorkRights = (typeof WORK_RIGHTS)[number];
+
+/** `YYYY-MM-DD`, mirrored in firestore.rules. */
+export const ISO_DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+export const ProfileSettingsSchema = z.object({
+  workRights: z.enum(WORK_RIGHTS),
+  validUntil: z.string().regex(ISO_DATE_PATTERN).exactOptional(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  schemaVersion: z.literal(1),
+});
+export type ProfileSettings = z.infer<typeof ProfileSettingsSchema>;
+
+/** The work-rights part of the settings, which is all the funnel reads. */
+export type WorkRightsSetting = Pick<ProfileSettings, 'workRights' | 'validUntil'>;
+
+/** One line for the S2/S3 prompts and the candidate summary. */
+export function workRightsLine(setting: WorkRightsSetting | null): string {
+  if (!setting) return 'Work rights: not stated.';
+  switch (setting.workRights) {
+    case 'unrestricted':
+      return 'Work rights: no restrictions on working in the UK.';
+    case 'time_limited':
+      return `Work rights: time-limited UK work permission, no sponsorship needed now${
+        setting.validUntil ? `, valid until ${setting.validUntil}` : ''
+      }.`;
+    case 'needs_sponsorship':
+      return 'Work rights: needs visa sponsorship to work in the UK.';
+  }
+}

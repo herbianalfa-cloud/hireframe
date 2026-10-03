@@ -1,7 +1,8 @@
 /**
  * resetProfile against the Firestore and Storage emulators (ADR-023). Run with
  * `npm run test:rules`, which starts both. Proves the reset removes every fact, version, upload
- * document and uploaded file, and leaves config, criteria and usage alone.
+ * document, uploaded file and the work-rights setting, and leaves config, criteria and usage
+ * alone.
  */
 import { DOCS, PATHS, STORAGE_PATHS } from '@hireframe/shared';
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
@@ -56,6 +57,7 @@ beforeEach(async () => {
   await db.doc(DOCS.appConfig).set({ ownerUid: 'owner-uid', schemaVersion: 1 });
   await db.doc(DOCS.criteriaCurrent).set({ version: 1 });
   await db.doc(PATHS.usage('2026-10')).set({ spendPence: 12 });
+  await db.doc(DOCS.profileMain).set({ workRights: 'time_limited', schemaVersion: 1 });
   for (const factId of ['f1', 'f2', 'f3']) {
     await db.doc(PATHS.fact(factId)).set({ text: 'Fake fact' });
     await db.doc(PATHS.factVersion(factId, 1)).set({ change: 'created' });
@@ -79,6 +81,8 @@ describe('resetProfile on the emulators', () => {
     expect((await db.collection(PATHS.facts).get()).size).toBe(0);
     expect((await db.collection(PATHS.factVersions('f1')).get()).size).toBe(0);
     expect((await db.collection(PATHS.documents).get()).size).toBe(0);
+    // The work-rights setting is profile data too (M4).
+    expect((await db.doc(DOCS.profileMain).get()).exists).toBe(false);
     const [left] = await bucket().getFiles();
     expect(left.map((file) => file.name)).toEqual(['backups/2026-10-01.json']);
 

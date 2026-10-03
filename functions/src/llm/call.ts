@@ -44,6 +44,8 @@ export interface LlmCallInput<T> {
   /** Untrusted content must already be wrapped as data by the caller (see cv/prompt.ts). */
   user: string;
   schema: z.ZodType<T>;
+  /** Cache the system prompt (S3, where it repeats for every job in a run). */
+  cacheSystem?: boolean;
 }
 
 export interface LlmCallResult<T> {
@@ -97,6 +99,7 @@ export async function llmCall<T>(
       messages,
       schema: input.schema,
       timeoutMs: Math.min(model.timeoutMs, remainingMs()),
+      ...(input.cacheSystem ? { cacheSystem: true } : {}),
     };
     const inputTokens = inputTokenBound(await deps.transport.countTokens(request));
     const reservedPence = worstCasePence(
@@ -161,6 +164,8 @@ export async function llmCall<T>(
       stopReason: response.stopReason ?? 'none',
       inputTokens: response.tokens.input,
       outputTokens: response.tokens.output,
+      cacheReadTokens: response.tokens.cacheRead,
+      cacheWriteTokens: response.tokens.cacheWrite,
       costPence: cost,
     });
     return response;

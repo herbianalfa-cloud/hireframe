@@ -203,6 +203,16 @@ export const REED_SEARCH = {
   totalResults: 2,
 };
 
+/** Reed `/api/1.0/jobs/{id}`: the full description (M4 hydration). Fake text only. */
+export const REED_DETAILS = {
+  jobId: 50005678,
+  jobTitle: 'Graduate Product Analyst',
+  jobDescription:
+    '<p>Our client, a SaaS business in Leeds, is hiring a Graduate Product Analyst.</p>' +
+    '<ul><li>Build dashboards in SQL and Metabase</li><li>Run user interviews with customers</li></ul>' +
+    '<p>You have a degree and curiosity about how people use software.</p>',
+};
+
 export const ADZUNA_SEARCH = {
   __CLASS__: 'Adzuna::API::Response::JobSearchResults',
   count: 1,

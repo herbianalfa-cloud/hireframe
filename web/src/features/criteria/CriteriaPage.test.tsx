@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   criteriaErrorMessage,
   CriteriaConflictError,
+  rescore,
+  rescoreErrorMessage,
   saveCriteria,
   seedCriteria,
   watchCriteriaHistory,
@@ -24,6 +26,8 @@ vi.mock('@/services/criteria', () => {
     seedCriteria: vi.fn(),
     saveCriteria: vi.fn(),
     criteriaErrorMessage: vi.fn(() => "Couldn't save. Check your connection and try again."),
+    rescore: vi.fn(),
+    rescoreErrorMessage: vi.fn(() => 'A scan is running. Try again when it finishes.'),
   };
 });
 
@@ -177,6 +181,42 @@ describe('Criteria form', () => {
     expect(saveCriteria).not.toHaveBeenCalled();
   });
 
+  it('shows default lane points for a version saved before they existed, and saves them', async () => {
+    const user = userEvent.setup();
+    const old: Record<string, unknown> = { ...criteria };
+    delete old.lane_points;
+    givenState({ status: 'ready', criteria: old as CriteriaVersion });
+    vi.mocked(saveCriteria).mockResolvedValue(4);
+    render(<CriteriaPage />);
+
+    const wildcard = screen.getByLabelText('Wildcard');
+    expect((wildcard as HTMLInputElement).value).toBe('2');
+    await user.clear(wildcard);
+    await user.type(wildcard, '1.5');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(vi.mocked(saveCriteria).mock.calls[0]?.[0].lane_points).toEqual({
+      primary: 3,
+      secondary: 2,
+      opportunistic: 1,
+      wildcard: 1.5,
+    });
+  });
+
+  it('rejects lane points above 3', async () => {
+    const user = userEvent.setup();
+    givenState({ status: 'ready', criteria });
+    render(<CriteriaPage />);
+
+    const primary = screen.getByLabelText('Primary lane');
+    await user.clear(primary);
+    await user.type(primary, '4');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(screen.getByText('Enter points from 0 to 3.')).toBeDefined();
+    expect(saveCriteria).not.toHaveBeenCalled();
+  });
+
   it('shows the conflict message when the criteria changed elsewhere', async () => {
     const user = userEvent.setup();
     givenState({ status: 'ready', criteria });
@@ -193,5 +233,60 @@ describe('Criteria form', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(await screen.findByText(/changed in another tab/)).toBeDefined();
+  });
+});
+
+describe('Re-score', () => {
+  const RESULT = {
+    status: 'completed',
+    runId: 'r1',
+    counts: { jobs: 40, s1Changed: 5, recomputed: 10, queuedS2: 2, queuedS3: 1, unchanged: 22 },
+    funnel: {
+      s1: { passed: 0, skipped: 0 },
+      s2: { passed: 2, skipped: 0 },
+      s3: { apply: 1, near_miss: 0, wildcard: 0, skip: 0 },
+      review: 0,
+      queued: { s2: 0, s3: 1 },
+      costPence: 2.34,
+    },
+  } as const;
+
+  it('asks first, then re-scores once and reports what changed', async () => {
+    const user = userEvent.setup();
+    givenState({ status: 'ready', criteria });
+    vi.mocked(rescore).mockResolvedValue(RESULT);
+    render(<CriteriaPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Re-score last 14 days' }));
+    expect(screen.getByRole('dialog', { name: 'Re-score the last 14 days?' })).toBeDefined();
+    expect(rescore).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Re-score' }));
+
+    expect(rescore).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(
+        'Re-scored 40 jobs: 5 changed by rules, 10 re-scored without AI, 3 sent back to the AI, 22 unchanged. 1 job waits for the next run. Cost 2.3p.',
+      ),
+    ).toBeDefined();
+  });
+
+  it('does nothing when cancelled', async () => {
+    const user = userEvent.setup();
+    givenState({ status: 'ready', criteria });
+    render(<CriteriaPage />);
+    await user.click(screen.getByRole('button', { name: 'Re-score last 14 days' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(rescore).not.toHaveBeenCalled();
+  });
+
+  it('shows why a re-score failed', async () => {
+    const user = userEvent.setup();
+    givenState({ status: 'ready', criteria });
+    vi.mocked(rescore).mockRejectedValue(new Error('busy'));
+    render(<CriteriaPage />);
+    await user.click(screen.getByRole('button', { name: 'Re-score last 14 days' }));
+    await user.click(screen.getByRole('button', { name: 'Re-score' }));
+    expect(await screen.findByText('A scan is running. Try again when it finishes.')).toBeDefined();
+    expect(rescoreErrorMessage).toHaveBeenCalled();
   });
 });

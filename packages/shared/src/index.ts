@@ -1,8 +1,10 @@
 export * from './atomicity.js';
+export * from './candidate.js';
 export * from './callables.js';
 export { AppConfigSchema, type AppConfig } from './config.js';
 export * from './criteria.js';
 export * from './dedupe.js';
+export * from './funnel.js';
 export { CRITERIA_SEED_V1 } from './criteria-seed.js';
 export * from './titles.js';
 export { verifyEvidence } from './evidence.js';
@@ -14,6 +16,8 @@ export * from './merge.js';
 export { redactPii } from './pii.js';
 export * from './profile.js';
 export * from './removal.js';
+export * from './s1.js';
+export * from './score.js';
 export * from './usage.js';
 export { WATCHLIST_SEED } from './watchlist-seed.js';
 

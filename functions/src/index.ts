@@ -3,4 +3,5 @@
  * (region, runtime account, max instances) are set in ./options.ts.
  */
 export { addFact, parseCv, resetProfile } from './profile/callables.js';
-export { scanNow } from './scan/callables.js';
+export { rescore } from './funnel/callables.js';
+export { scanNow, scheduledScan } from './scan/callables.js';

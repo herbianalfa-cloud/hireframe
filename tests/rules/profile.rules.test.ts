@@ -34,6 +34,7 @@ import {
   buildFactWrite,
   buildKeepReview,
   buildUploadRemoval,
+  buildWorkRightsWrite,
   type FactWrite,
 } from '../../web/src/services/fact-writes.ts';
 
@@ -663,5 +664,99 @@ describe('removing an upload (ADR-023)', () => {
       await commit();
       await assertFails(commit());
     });
+  });
+});
+
+describe('work-rights setting on profile/main (ADR-033)', () => {
+  const settings = () => doc(dbFor('owner'), DOCS.profileMain);
+
+  async function seedOwnerOnly(): Promise<void> {
+    await env.clearFirestore();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), DOCS.appConfig), { ownerUid: OWNER, schemaVersion: 1 });
+    });
+  }
+
+  beforeEach(async () => {
+    await seedOwnerOnly();
+  });
+
+  it('lets the owner create, change and clear it with the web builder', async () => {
+    await assertSucceeds(
+      setDoc(
+        settings(),
+        buildWorkRightsWrite(
+          { workRights: 'time_limited', validUntil: '2028-06-30' },
+          false,
+          serverTimestamp(),
+        ),
+        { merge: true },
+      ),
+    );
+    await assertSucceeds(
+      setDoc(
+        settings(),
+        buildWorkRightsWrite({ workRights: 'needs_sponsorship' }, true, serverTimestamp()),
+        {
+          merge: true,
+        },
+      ),
+    );
+    const stored = (await getDoc(settings())).data();
+    expect(stored?.workRights).toBe('needs_sponsorship');
+    expect(stored && 'validUntil' in stored).toBe(false);
+    expect(stored?.createdAt).toBeDefined();
+  });
+
+  it.each([
+    ['an unknown value', { workRights: 'citizen' }],
+    ['a bad date', { validUntil: '30/06/2028' }],
+    ['an extra key', { note: 'x' }],
+    ['a client-chosen updatedAt', { updatedAt: CREATED }],
+    ['a client-chosen createdAt', { createdAt: CREATED }],
+  ])('denies %s', async (_name, patch) => {
+    await assertFails(
+      setDoc(settings(), {
+        workRights: 'time_limited',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        schemaVersion: 1,
+        ...patch,
+      }),
+    );
+  });
+
+  it('denies changing createdAt on update, and deleting the document', async () => {
+    await assertSucceeds(
+      setDoc(
+        settings(),
+        buildWorkRightsWrite({ workRights: 'unrestricted' }, false, serverTimestamp()),
+        { merge: true },
+      ),
+    );
+    await assertFails(
+      updateDoc(settings(), { createdAt: serverTimestamp(), updatedAt: serverTimestamp() }),
+    );
+    await assertFails(deleteDoc(settings()));
+  });
+
+  it.each(['anon', 'stranger'] as const)('denies %s', async (who) => {
+    await assertFails(
+      setDoc(
+        doc(dbFor(who), DOCS.profileMain),
+        buildWorkRightsWrite({ workRights: 'unrestricted' }, false, serverTimestamp()),
+        { merge: true },
+      ),
+    );
+  });
+
+  it('only allows profile/main, not other profile documents', async () => {
+    await assertFails(
+      setDoc(
+        doc(dbFor('owner'), 'profile/other'),
+        buildWorkRightsWrite({ workRights: 'unrestricted' }, false, serverTimestamp()),
+        { merge: true },
+      ),
+    );
   });
 });

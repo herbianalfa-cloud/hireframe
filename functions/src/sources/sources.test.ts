@@ -237,13 +237,13 @@ describe('board rotation when a host is full (ADR-029)', () => {
   });
   const url = (company: WatchedCompany) => workableBoardUrl(company.ats.token ?? '');
 
-  it('fits Workable boards into the budget at 5 s each: 43 a run', () => {
+  it('fits Workable boards into the budget at 5 s each: 36 a run', () => {
     const many = Array.from({ length: 50 }, (_, i) => workable(`co-${String(i).padStart(2, '0')}`));
     const { selected, deferred } = boardsThisRun(many, url);
-    expect(selected).toHaveLength(43);
-    expect(deferred).toBe(7);
-    // 43 boards × 5 s stays inside the 360 s fetch deadline with room for retries.
-    expect(selected.length * 5_000).toBeLessThanOrEqual(360_000 * 0.6);
+    expect(selected).toHaveLength(36);
+    expect(deferred).toBe(14);
+    // 36 boards × 5 s stays inside the 300 s fetch deadline with room for retries (ADR-032).
+    expect(selected.length * 5_000).toBeLessThanOrEqual(300_000 * 0.6);
   });
 
   it('takes never-scanned boards first, then the oldest, ties by ID', () => {
@@ -289,8 +289,8 @@ describe('board rotation when a host is full (ADR-029)', () => {
     const many = Array.from({ length: 45 }, (_, i) => workable(`co-${String(i).padStart(2, '0')}`));
     const source = createWorkableSource();
     await source.fetch(testContext({ http, companies: many }));
-    expect(requested.filter((u) => u.includes('/widget/accounts/'))).toHaveLength(43);
-    expect(source.health().deferred).toBe(2);
+    expect(requested.filter((u) => u.includes('/widget/accounts/'))).toHaveLength(36);
+    expect(source.health().deferred).toBe(9);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   HN_SEARCH,
   HN_THREAD,
   LEVER_BOARD,
+  REED_DETAILS,
   REED_SEARCH,
   WORKABLE_ACCOUNT,
 } from './fixtures.js';
@@ -19,6 +20,7 @@ const ROUTES: readonly [RegExp, unknown][] = [
   [/^https:\/\/api\.ashbyhq\.com\/posting-api\/job-board\/cobaltledger/, ASHBY_BOARD],
   [/^https:\/\/apply\.workable\.com\/api\/v1\/widget\/accounts\/deltadock/, WORKABLE_ACCOUNT],
   [/^https:\/\/www\.reed\.co\.uk\/api\/1\.0\/search/, REED_SEARCH],
+  [/^https:\/\/www\.reed\.co\.uk\/api\/1\.0\/jobs\/\d+$/, REED_DETAILS],
   [/^https:\/\/api\.adzuna\.com\/v1\/api\/jobs\/gb\/search\//, ADZUNA_SEARCH],
   [/^https:\/\/hn\.algolia\.com\/api\/v1\/search_by_date/, HN_SEARCH],
   [/^https:\/\/hn\.algolia\.com\/api\/v1\/items\/41000000$/, HN_THREAD],

@@ -41,6 +41,11 @@ vi.mock('@/services/profile', () => ({
   keepReview: vi.fn(),
   callableErrorMessage: vi.fn(() => 'Something went wrong. Try again.'),
   writeErrorMessage: vi.fn(() => "Couldn't save. Check your connection and try again."),
+  watchWorkRights: vi.fn((callback: (state: unknown) => void) => {
+    callback({ status: 'ready', data: null, invalid: 0 });
+    return () => undefined;
+  }),
+  saveWorkRights: vi.fn(),
 }));
 
 const NOW = new Date('2026-10-01T09:00:00Z');

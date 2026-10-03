@@ -25,10 +25,14 @@ import {
 import { useBrokenBoards, useJobCount, useRecentRuns, useSources } from './hooks';
 import {
   errorText,
+  funnelText,
+  rescoreText,
   RUN_STATUS_LABELS,
+  RUN_TRIGGER_LABELS,
   scanResultText,
   SOURCE_LABELS,
   SOURCE_STATUS_LABELS,
+  STOP_TEXT,
 } from './labels';
 
 const TIME_FORMAT = new Intl.DateTimeFormat('en-GB', {
@@ -258,10 +262,37 @@ function BrokenBoards() {
 }
 
 function runSummary(view: RunView, stalled: boolean): string {
-  const s0 = view.run.perStage.s0;
+  const { s0, rescore } = view.run.perStage;
   if (stalled) return 'Stopped before it finished';
+  if (rescore) return rescoreText(rescore);
   if (!s0) return view.run.status === 'running' ? 'In progress' : 'No jobs processed';
   return `${String(s0.new)} new · ${String(s0.merged)} merged · ${String(s0.duplicate)} known`;
+}
+
+/** Spend warnings and why the AI stages stopped early (PRD R11, ADR-032). */
+function RunNotes({ view }: { view: RunView }) {
+  const { flags = [], budget } = view.run;
+  const stoppedBy = budget?.stoppedBy;
+  if (flags.length === 0 && !stoppedBy) return null;
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {flags.includes('spend_80') ? (
+        <Badge variant="warning">
+          <TriangleAlert aria-hidden="true" />
+          80% of the monthly AI cap used
+        </Badge>
+      ) : null}
+      {flags.includes('deep_pause') ? (
+        <Badge variant="warning">
+          <CircleMinus aria-hidden="true" />
+          Deep reads paused
+        </Badge>
+      ) : null}
+      {stoppedBy && stoppedBy !== 'deep_pause' ? (
+        <span>Stopped early: {STOP_TEXT[stoppedBy]}.</span>
+      ) : null}
+    </p>
+  );
 }
 
 function RunBadge({ view, stalled }: { view: RunView; stalled: boolean }) {
@@ -316,13 +347,20 @@ function RecentRuns() {
     <ul className="mt-3 divide-y rounded-lg border bg-surface">
       {state.data.map((view) => {
         const stalled = isRunStalled(view.run, now);
+        const funnel = funnelText(view.run);
         return (
-          <li key={view.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-            <span className="text-sm">
-              {TIME_FORMAT.format(view.run.startedAt)}{' '}
-              <span className="text-muted-foreground">· {runSummary(view, stalled)}</span>
-            </span>
-            <RunBadge view={view} stalled={stalled} />
+          <li key={view.id} className="px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm">
+                {TIME_FORMAT.format(view.run.startedAt)}{' '}
+                <span className="text-muted-foreground">
+                  · {RUN_TRIGGER_LABELS[view.run.trigger]} · {runSummary(view, stalled)}
+                </span>
+              </span>
+              <RunBadge view={view} stalled={stalled} />
+            </div>
+            {funnel ? <p className="mt-1 text-xs text-muted-foreground">{funnel}</p> : null}
+            <RunNotes view={view} />
           </li>
         );
       })}
@@ -331,8 +369,9 @@ function RecentRuns() {
 }
 
 /**
- * System (PRD R12), the M3 part (ADR-029): Scan now, source health and recent runs. Spend and
- * error alerts arrive in M5.
+ * System (PRD R12): Scan now, source health and recent runs (M3, ADR-029), with each run's
+ * funnel counts per stage, cost and spend warnings (M4). The spend meter and error alerts
+ * arrive in M5.
  */
 export function SystemPage() {
   const [refreshKey, setRefreshKey] = useState(0);

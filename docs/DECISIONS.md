@@ -48,6 +48,8 @@ Context: a review of the docs before any code found invalid Firestore paths, ove
 
 Consequences: the spec is consistent before code exists; the M4 and M7 plans must implement these points (noted in ROADMAP.md).
 
+*The "Cost (M4)" bullet's S3 formula is superseded by ADR-032 (a per-run budget lease).*
+
 ## ADR-010 Personal details stay out of the repo
 Context: the repo is public, and the first docs pack described the candidate's education, work-rights status, dates and employer. Decision: docs describe the user generically. Candidate-specific values live in the Firebase profile and are templated into prompts and rules at runtime (e.g. `{profile.work_rights}`). The single initial commit was amended and force-pushed on 2026-09-30 (the `main` ruleset was briefly disabled, then restored with identical rules), so those details are not in branch history. Guardrails: `.gitignore` blocks CV/document/data-export file types; `npm run scan:pii` runs in `check` and CI; the PR template asks for no personal data in PR text. Consequences: S2 prompts and S1 work-rights blocker patterns must read from the profile; commit author metadata keeps the real name by choice (portfolio repo).
 
@@ -219,6 +221,8 @@ Rejected: a removal callable, because the versioned client path already gives hi
 
 Consequences: Remove upload is reversible from the Archived tab, but its proposed-change drops are not re-proposed unless the CV is uploaded again. Reset can't be undone: there is no backup until M8's weekly export. A new callable needs a one-time invoker binding (RUNBOOK Part C step 28).
 
+*Addendum (M4, ADR-033):* Reset profile also deletes `profile/main`, which now holds the work-rights setting.
+
 ## ADR-024 Evidence links on facts
 Context: some facts are best backed by something outside the CV, like a portfolio page, a certificate or a live dashboard. Decision: an optional `evidenceUrl` on the fact, which the owner sets in the Edit dialog.
 - Https only, at most 500 characters, no whitespace. The check lives in `EvidenceUrlSchema` (zod `z.url` with the https protocol) and is mirrored in firestore.rules.
@@ -311,3 +315,84 @@ Context: ARCHITECTURE said the watchlist is about 150 London/UK B2B SaaS compani
 - **Auto-growth** (adding companies that appear in alerts or aggregators) moves to M6, when alerts exist.
 
 Outcome of the first review (M3): 204 companies, 94 with a board (about 10 of them Workable, so rotation rarely applies). 110 have no board: wrong-company or dormant boards, 404s, nothing found, and 27 that Workable's rate limit left unchecked, which wait for `--recheck`. Consequences: detection relies on boards being named after the company. Unusual tokens need a pasted careers URL. A wrong board can only enter the seed through an owner-reviewed row.
+
+## ADR-032 Funnel spend: a run budget lease, stage shares and caps
+Context: ADR-009 said the S3 per-run cap should be lowered until "scheduled runs/month × S3 cap × max S3 cost" fits the monthly cap. With the models' list prices (platform.claude.com/docs/en/about-claude/pricing, checked 2026-10-03: Sonnet 5.5 $2/$10 per MTok, cache reads $0.20 and 5-minute writes $2.50; Haiku 4.5 $1/$5) and an S3 call's worst case of about 5p (4,000 output tokens, nothing cached), that formula allows about 4 deep reads a run. The typical S3 call costs about 1.5p and an S2 call about 0.15p. Separately, a reservation transaction per call on one `usage/{month}` document would contend at 300 S2 calls a run, and the scan callable has 540 s for ingest and the funnel together. Decision:
+- **A lease per run.**
+  - At funnel start, one transaction reserves `runBudgetPence` (or what the month has left) on `usage/{month}` as reservation `run-<runId>`.
+  - Every `llm.call()` in the run uses an in-memory `UsageStore` (`functions/src/llm/lease.ts`). It reserves the call's worst case against the lease, in-flight calls included, and settles the actual cost. So a run's real spend can never pass its lease.
+  - At the end, one transaction settles the lease with the actual spend, calls, tokens and per-purpose cost. A run killed mid-way leaves a stale reservation that is charged in full after 15 minutes, as ADR-016 does for any call.
+  - `llm.call()` itself is unchanged, so "every LLM call goes through `llm.call()`" still holds.
+- **The proven worst case is runs × lease.** The default lease is `floor(monthlyCap × 0.75 / 46)`: 46 is the most weekday runs a month can have, and the other 25% is for manual scans, re-scores and profile calls. That gives 24p at £15. Raising `config/app.monthlyCapPence` raises it, and `config/app.funnel.runBudgetPence` overrides it.
+- **Stage shares and caps.** S2 may use at most 40% of the lease, so triage can't starve deep reads. Count caps are upper bounds: S1 ≤ 2,000, S2 ≤ 300, S3 ≤ 25 (FUNNEL's provisional 60 is lowered). At £15 a run holds about 60 S2 and 8–9 S3 calls; the rest waits, newest first for S2 and best triage score first for S3.
+- **R11:** a run that starts with 80% of the month committed is flagged `spend_80`. From 90%, S3 is refused ("deep stages pause") while S2 continues up to the cap; S0/S1 always run.
+- **Time:** the scan's fetch budget drops from 360 s to 300 s (Workable now rotates 36 boards a scan). No new S2 call starts after 400 s and no new S3 call after 450 s; the deep-read budget of 60 s plus a 30 s margin ends inside the 540 s callable (`config.test.ts`).
+- **Rate limits:** each stage paces its request starts (triage 45/min, deep read 20/min) with 4 and 2 calls in flight. All of these are in `FUNNEL` (`functions/src/config.ts`), and the counts and rates can be overridden from `config/app.funnel`, which is parsed on its own so a typo can't fail the owner check.
+
+Consequences: at the default cap, steady-state volume fits and a large backlog takes several runs. If verdicts lag, raising the monthly cap is the lever. A crashed run overstates the month by its unused lease, never understates it. FUNNEL's per-run caps are now budget-first.
+
+## ADR-033 S1 rules and the work-rights setting
+Context: FUNNEL's S1 needs "wording that excludes {profile.work_rights}", but nothing structured stored work rights; only free-text constraint facts did. Some criteria entries are prose labels ("Big Four graduate schemes", "sponsorship-restricted wording"), not patterns. Decision:
+- **Work rights are an owner setting** on `profile/main`: `unrestricted`, `time_limited` or `needs_sponsorship`, plus an optional `validUntil` (YYYY-MM-DD) that only the prompts use. It's personal data, so it lives in Firebase only (ADR-010). The rules allow exactly these keys, server time and a fixed `createdAt`; Reset profile deletes the document.
+- **Right-to-work patterns:** "indefinite leave / settled status / citizens only / no visa holders" blocks time-limited and sponsorship-needing rights. "No sponsorship / must already have the right to work" blocks only sponsorship-needing rights. Until the setting exists, S1 never skips on this; it flags `work_rights_unknown`.
+- **Known labels expand in code:** the seed's blocker labels map to pattern sets (SC and DV clearance, driving licence, right to work), and any other blocker is matched as a phrase. A company entry is a company name unless it's a known group: Big Four graduate schemes (a Big Four company plus a graduate/trainee title cue), or train-and-deploy consultancies.
+- **Rule order and IDs:** `title:<id>`, `company`, `keyword:<term>` (title and text), `location` (non-UK and not remote; remote jobs elsewhere go to S2), `freshness`, `blocker:<kind>`, `experience`.
+- **Freshness** uses the posting date, or the first-seen date when there is none (a lower bound on age, flagged `freshness_unknown`). It is checked in S1 and again when a job leaves the S2 or S3 queue, so stale queued jobs skip for free. FUNNEL's "the only freshness check" is updated.
+- **Experience:** S1 skips only a required minimum above `experience_cap_years`, as FUNNEL.md and ADR-009 say. The highest ask that survives (required at the cap, or preferred/ambiguous at any level) is stored for the luck penalty.
+
+Consequences: S1 is pure and table-tested (`packages/shared/src/s1.test.ts`). Pattern lists will need tuning as real postings show gaps; the eval's tricky cases cover the known ones.
+
+## ADR-034 Code-recomputed scores, verdict mapping and lane points
+Context: FUNNEL says scores are "recomputed in code where possible" and verdicts follow fixed thresholds, but the rubric gives the wildcard lane 0 lane points, which makes `wildcard_fit` 6 almost unreachable (the most a wildcard job can score is 7). Model-set verdicts would also let injected text decide the outcome. Decision:
+- **The model extracts; code decides.**
+  - S3 returns requirements, each with level, type, match, gap type (when not met) and the fact aliases it relies on, plus the two rubric parts code can't judge (evidence 0–2, company fit 0–1) and the employer kind.
+  - Code computes fit (lane points + must coverage × 3 + evidence + company fit + nice coverage, capped at 4 on a missing domain must-have and at 2 on a hard blocker), luck (FUNNEL's adjustments, with company size from the watchlist when known) and the verdict.
+  - Verdict precedence is apply > wildcard > near_miss > skip, with thresholds from criteria. Near misses get a `shortfall` line from code.
+  - The model's own fit, luck and verdict are stored only to flag drift above 2.
+- **Citations are checked.** Facts appear as `F1…Fn` aliases (factId order). Unknown aliases are dropped, and a `met` or `partial` with no real fact becomes `missing`, flagged `unsupported_match`.
+- **Lane points move into criteria** as optional `lane_points` (0–3 each), seeded primary 3, secondary 2, opportunistic 1, **wildcard 2**. They are code-only, never in a prompt. A strong wildcard job (fit ≥ 7, luck ≥ 5) is therefore `apply` by precedence; a moderate one (fit 6–6.9) is `wildcard`.
+- With no must-haves extracted, coverage counts as half, rather than full marks.
+
+Consequences: changing thresholds, lane points or exclusions re-scores without a model call (ADR-037). The model's output still drives fit through requirement matches, so prompt quality matters; the eval measures it.
+
+*Addendum (M4 eval tuning, first live eval at 72.5%):* three scoring rules, all in code, applied on replay at no cost:
+- **A missing must-have caps fit at 6.9**, below `apply_fit`. Any must-have the profile doesn't meet keeps a job out of Apply, and the near miss's `shortfall` names it.
+- **A strong luck drag holds Apply back.** A single luck penalty (at most −2) couldn't stop an apply from fit ≥ 7 and luck ≥ 5. Now a big-brand employer, or an experience ask that survived S1 at or above `experience_cap_years`, makes the verdict `near_miss` ("Luck held back: …").
+- **The hard-blocker cap (fit ≤ 2) applies only when the requirement's text matches one of `criteria.blockers` in code** (`hitsCriteriaBlocker`, the same patterns S1 uses). The model labelling something a hard blocker (a portfolio, say) is no longer enough; such a requirement counts as an ordinary missing must-have.
+
+With those rules, a relabelled g21 (a strong wildcard job is Apply by precedence), and prompt changes (S3: "met" needs a fact showing that tool or skill or a clear equivalent; S2: skip only clear no's, pass uncertain roles with a low score), the live eval reached 85.0%. That is the baseline.
+
+## ADR-035 S3 runs synchronously; caching, refusals and pacing
+Context: ARCHITECTURE suggested Message Batches for deep reads. Batches are 50% cheaper (Sonnet 5.5 batch $1/$5 per MTok), but they're asynchronous (most finish within an hour, up to 24 h), cache hits inside a batch are best-effort, and they would need a poller function, a reservation that outlives the 15-minute TTL, and a second state machine. The 07:50 digest (M7) would often arrive before verdicts. Decision:
+- **S3 runs inside the scan**, time-boxed (ADR-032); whatever doesn't fit waits for the next run. Batches go to the ROADMAP parking lot, to revisit if M4's run data shows S3 spend is the binding constraint.
+- **Prompt caching on S3 only.** Its system prompt (instructions, facts, lanes, wildcards, company preferences, work rights) is identical for every job in a run and marked `cache_control: ephemeral` (5 minutes; calls in a run are seconds apart). S2's prompt is about 1,000 tokens, under Haiku 4.5's 4,096-token minimum (platform.claude.com/docs/en/build-with-claude/prompt-caching, checked 2026-10-03), so it isn't marked. Sonnet 5.5's minimum is 512 tokens.
+- **No refusal fallback.** Server-side fallbacks need a beta header (ADR-016 allows none) and don't run on Batches. A refusal, `max_tokens` or output that fails zod twice puts the job up for review (`review: {stage, code}`), and no verdict is guessed.
+- **Effort `low` for S3** (Sonnet 5.5 can't turn thinking off). The eval can compare effort levels later.
+
+Consequences: verdicts appear when Scan now finishes. S3 costs about 1.5p per job rather than about 0.9p batched.
+
+## ADR-036 Evals: a fake profile and recorded answers
+Context: FUNNEL requires an eval with a ≥ 80% agreement gate in CI, with no Anthropic key in GitHub. Judging against the owner's real profile would need local admin credentials (ADR-011 has none), and the recordings would hold model output about real facts, which can't be committed. Decision:
+- **The eval judges a fake candidate:** "Alex Example", the fake CV's facts with stable IDs and invented work rights (time-limited to 2028-06-30), with the public seed criteria. The owner labels 40 fake postings for "a candidate like this" (`evals/README.md`), blind to what each case was designed to test.
+- **Recorded answers:** each request's key is a SHA-256 over model, effort, max tokens, system prompt, caching flag, messages and output JSON schema.
+  - `npm run eval` replays `evals/recordings.jsonl`, with S1 and scoring running live, so CI checks every code change to rules, scoring and thresholds without a key.
+  - A changed prompt, schema, model or case misses its recording and fails "recordings stale". `LIVE=1 npm run eval` (local, through `llm.call()` with a 150p cap) refreshes them.
+- **Gates:** every case labelled; agreement ≥ 80% and not below `evals/baseline.json`; every injection case correct; the S1 title table (shared with `titles.test.ts`) at 100%.
+
+Consequences: the eval measures prompt and logic quality on a stand-in, not on the owner's profile. Real-profile agreement comes from 👍/👎 in M5 (PRD's ≥ 85% after two weeks). A personal eval from an owner export is in the parking lot. Each prompt change costs about 40p to re-record.
+
+## ADR-037 `scheduledScan`, `rescore` and their invocation
+Context: PRD R4 needs scans at 07:30 and 17:30 on weekdays, and R3 needs "Re-score" with "next run uses the changed criteria". ARCHITECTURE described Re-score as "re-run S2–S3". Decision:
+- **`scheduledScan`** (`onSchedule`, `30 7,17 * * 1-5`, Europe/London, 540 s, no retries) runs the same `runScan` as `scanNow`, with no cooldown. A busy lock is logged and the run skipped.
+- **Every run reads the current criteria version** at funnel start and stamps `criteriaVersion` on each job it judges.
+- **`rescore`** (owner callable, App Check consumed) takes the scan lock with no cooldown, records a `rescore` run, and covers jobs first seen in the last 14 days:
+  - S1 runs again (free), so a rule change skips or un-skips straight away. This goes beyond ARCHITECTURE's "S2–S3".
+  - Each judged job stores fingerprints of the exact S2 and S3 system prompts (plus model and prompt version). Where they still match, fit, luck and the verdict are recomputed in code from the stored output, with no model call. So changing thresholds, lane points, exclusions, the experience cap or freshness is free.
+  - Changed lanes, wildcards, company preferences, facts or work rights change a fingerprint, and those jobs are queued for the model.
+  - **Old verdicts stay until replaced:** a queued job keeps its verdict, scores and `criteriaVersion`, plus `rescoreQueuedAt`, until its new judgement is written in one update.
+- **Invocation:**
+  - the browser needs a public invoker binding on `rescore`, like every callable (RUNBOOK Part C step 28);
+  - Cloud Scheduler needs `cloudscheduler.googleapis.com`, and the deployer needs `roles/cloudscheduler.admin`;
+  - the scheduler's service account needs `run.invoker` on `scheduledScan`. The deploy account can't set IAM, so these are one-time manual steps (RUNBOOK Part E).
+
+Consequences: re-scores of threshold-only changes are instant and free. A re-score with changed prompt inputs spends up to one run budget and may leave jobs queued for the next scheduled run.

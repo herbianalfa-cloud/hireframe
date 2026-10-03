@@ -1,4 +1,5 @@
 import {
+  DOCS,
   FactSchema,
   isParseStalled,
   PATHS,
@@ -229,6 +230,8 @@ export function firestoreResetStore(firestore: Firestore): ResetStore {
       // recursiveDelete also removes each fact's versions subcollection.
       await firestore.recursiveDelete(facts);
       await firestore.recursiveDelete(documents);
+      // The work-rights setting (M4) is profile data too.
+      await firestore.doc(DOCS.profileMain).delete();
       return { facts: factCount.data().count, documents: documentCount.data().count };
     },
   };

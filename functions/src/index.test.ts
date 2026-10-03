@@ -16,6 +16,24 @@ const endpoints = Object.entries(deployed).map(
 );
 
 describe('deployed functions (ADR-017)', () => {
+  it('schedules scans at 07:30 and 17:30 on weekdays, UK time (PRD R4)', () => {
+    const endpoint = (
+      deployed.scheduledScan as unknown as {
+        __endpoint?: {
+          scheduleTrigger?: {
+            schedule?: string;
+            timeZone?: string;
+            retryConfig?: { retryCount?: number };
+          };
+        };
+      }
+    ).__endpoint;
+    expect(endpoint?.scheduleTrigger).toMatchObject({
+      schedule: '30 7,17 * * 1-5',
+      timeZone: 'Europe/London',
+    });
+  });
+
   it('exports at least one function', () => {
     expect(endpoints.length).toBeGreaterThan(0);
   });
@@ -41,7 +59,9 @@ describe('deployed functions (ADR-017)', () => {
     ['parseCv', ['ANTHROPIC_API_KEY']],
     ['addFact', ['ANTHROPIC_API_KEY']],
     ['resetProfile', []],
-    ['scanNow', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'REED_API_KEY']],
+    ['scanNow', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
+    ['scheduledScan', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
+    ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
   ])('%s mounts %j', (name, secrets) => {
     const endpoint = endpoints.find(([exported]) => exported === name)?.[1];
     expect(endpoint).toBeDefined();

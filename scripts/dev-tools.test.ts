@@ -12,6 +12,7 @@ import {
   DEV_OWNER,
   linkedInJobDocuments,
   ownerAccountBody,
+  profileSeedDocuments,
   toRestValue,
 } from './dev-seed.ts';
 
@@ -25,6 +26,21 @@ describe('isCiDeploy', () => {
 });
 
 describe('dev seed', () => {
+  it('seeds the fake CV facts as active v1 facts, each with its snapshot, and work rights', () => {
+    const now = new Date('2026-10-05T08:00:00Z');
+    const { settings, facts } = profileSeedDocuments(now);
+    expect(facts.length).toBeGreaterThanOrEqual(60);
+    expect(new Set(facts.map((f) => f.id)).size).toBe(facts.length);
+    const [first] = facts;
+    expect(first?.fact.fields).toMatchObject({
+      status: { stringValue: 'active' },
+      version: { integerValue: '1' },
+      source: { stringValue: 'cv' },
+    });
+    expect(first?.version.fields.change).toEqual({ stringValue: 'created' });
+    expect(settings.fields.workRights).toEqual({ stringValue: 'time_limited' });
+  });
+
   it('refuses any project that is not demo-*', () => {
     expect(assertDemoProject('demo-hireframe')).toBe('demo-hireframe');
     expect(() => assertDemoProject('hireframe-f6b03')).toThrow(/demo-\*/);

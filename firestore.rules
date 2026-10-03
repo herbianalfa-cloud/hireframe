@@ -6,6 +6,8 @@ rules_version = '2';
 // - Client writes are opened one milestone at a time, each with rules tests (tests/rules/).
 //   M2 opens fact edits with versioned snapshots (ADR-018) and criteria versions (ADR-019);
 //   M2.1 lets the owner mark an upload removed (ADR-023). M3 adds read-only `sources` (ADR-029).
+//   M4 lets the owner set their work rights on `profile/main` (ADR-033) and lane points on
+//   criteria versions (ADR-034).
 //   Everything else, including every write by the Admin SDK paths, stays client-deny.
 //   Unknown paths fall through to the default deny.
 service cloud.firestore {
@@ -90,6 +92,26 @@ service cloud.firestore {
         && after.updatedAt == request.time;
     }
 
+    // ---- Profile settings (`profile/main`, M4, ADR-033) ----
+
+    // The owner's work rights, with an optional valid-until date (YYYY-MM-DD). Mirrors
+    // ProfileSettingsSchema: exactly these keys, server time on every write, createdAt fixed.
+    function validProfileSettings() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['workRights', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && data.keys().hasOnly(['workRights', 'validUntil', 'createdAt', 'updatedAt',
+                                'schemaVersion'])
+        && data.workRights in ['unrestricted', 'time_limited', 'needs_sponsorship']
+        && (!('validUntil' in data)
+            || (data.validUntil is string
+                && data.validUntil.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')))
+        && data.updatedAt == request.time
+        && data.schemaVersion == 1
+        && (resource == null
+            ? data.createdAt == request.time
+            : data.createdAt == resource.data.createdAt);
+    }
+
     // ---- Criteria (packages/shared/src/criteria.ts) ----
 
     function criteriaPointerPath() {
@@ -121,7 +143,23 @@ service cloud.firestore {
         && data.freshness_days is int && data.freshness_days >= 1 && data.freshness_days <= 90
         && data.thresholds is map
         && hasExactly(data.thresholds, ['apply_fit', 'apply_luck', 'near_miss_fit', 'wildcard_fit'])
-        && data.weekly_target is int && data.weekly_target >= 1 && data.weekly_target <= 100;
+        && data.weekly_target is int && data.weekly_target >= 1 && data.weekly_target <= 100
+        && validLanePoints(data);
+    }
+
+    function validLanePoint(value) {
+      return value is number && value >= 0 && value <= 3;
+    }
+
+    // Optional (ADR-034): versions saved before M4 don't have it.
+    function validLanePoints(data) {
+      return !('lane_points' in data)
+        || (data.lane_points is map
+            && hasExactly(data.lane_points, ['primary', 'secondary', 'opportunistic', 'wildcard'])
+            && validLanePoint(data.lane_points.primary)
+            && validLanePoint(data.lane_points.secondary)
+            && validLanePoint(data.lane_points.opportunistic)
+            && validLanePoint(data.lane_points.wildcard));
     }
 
     // Version n is created together with the pointer moving from n-1 to n.
@@ -131,10 +169,15 @@ service cloud.firestore {
       let after = getAfter(criteriaPointerPath()).data.version;
       return after == before + 1
         && versionId == 'v' + string(after)
-        && hasExactly(data, ['lanes', 'wildcards', 'excluded_titles', 'excluded_keywords',
-                             'excluded_companies', 'experience_cap_years', 'blockers',
-                             'locations', 'company_prefs', 'freshness_days', 'thresholds',
-                             'weekly_target', 'version', 'createdAt', 'schemaVersion'])
+        && data.keys().hasAll(['lanes', 'wildcards', 'excluded_titles', 'excluded_keywords',
+                               'excluded_companies', 'experience_cap_years', 'blockers',
+                               'locations', 'company_prefs', 'freshness_days', 'thresholds',
+                               'weekly_target', 'version', 'createdAt', 'schemaVersion'])
+        && data.keys().hasOnly(['lanes', 'wildcards', 'excluded_titles', 'excluded_keywords',
+                                'excluded_companies', 'experience_cap_years', 'blockers',
+                                'locations', 'company_prefs', 'freshness_days', 'thresholds',
+                                'weekly_target', 'lane_points', 'version', 'createdAt',
+                                'schemaVersion'])
         && data.version == after
         && data.createdAt == request.time
         && data.schemaVersion == 1
@@ -164,6 +207,7 @@ service cloud.firestore {
 
     match /profile/{profileId} {
       allow read: if isOwner();
+      allow create, update: if isOwner() && profileId == 'main' && validProfileSettings();
 
       match /facts/{factId} {
         allow read: if isOwner();

@@ -18,6 +18,11 @@ export interface LlmRequest {
   schema: z.ZodType;
   /** Hard limit for this send (llm.call() trims it to the call's remaining budget). */
   timeoutMs: number;
+  /**
+   * Mark the system prompt for prompt caching (5-minute TTL). Only worth it when the prompt is
+   * over the model's minimum cacheable length and repeats across calls (S3, ADR-035).
+   */
+  cacheSystem?: boolean;
 }
 
 export interface LlmResponse {
@@ -31,6 +36,12 @@ export interface LlmResponse {
 export interface LlmTransport {
   countTokens(request: LlmRequest): Promise<number>;
   send(request: LlmRequest): Promise<LlmResponse>;
+}
+
+function system(request: LlmRequest): string | Anthropic.TextBlockParam[] {
+  return request.cacheSystem
+    ? [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }]
+    : request.system;
 }
 
 function outputConfig(request: LlmRequest): Anthropic.OutputConfig {
@@ -58,7 +69,7 @@ export function anthropicTransport(
       const result = await client.messages.countTokens(
         {
           model: request.model.id,
-          system: request.system,
+          system: system(request),
           messages: request.messages,
           output_config: outputConfig(request),
         },
@@ -77,7 +88,7 @@ export function anthropicTransport(
           {
             model: request.model.id,
             max_tokens: request.model.maxTokens,
-            system: request.system,
+            system: system(request),
             messages: request.messages,
             output_config: outputConfig(request),
           },

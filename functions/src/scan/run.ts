@@ -22,6 +22,7 @@ import {
 } from '@hireframe/shared';
 
 import { QUOTAS, SCAN } from '../config.js';
+import type { FunnelOutcome } from '../funnel/run.js';
 import type { HostPause, HttpClient } from '../http/client.js';
 import { errorFields, log } from '../log.js';
 import { addCalls, currentQuota, remainingCalls } from '../sources/queries.js';
@@ -34,10 +35,11 @@ import type {
 } from '../sources/types.js';
 
 /**
- * One ingest run (ADR-029): lock → seed companies → fetch every source in parallel → validate,
- * normalise and dedupe (ADR-030) → write new jobs at stage `s0` and new sources on known jobs →
- * company, source and run records → unlock. A failing source never fails the run (PRD R4).
- * M3 runs it from `scanNow` only; M4 adds the funnel after it and the schedule.
+ * One scan run (ADR-029, ADR-037): lock → seed companies → fetch every source in parallel →
+ * validate, normalise and dedupe (ADR-030) → write new jobs at stage `s0` and new sources on
+ * known jobs → company and source records → the funnel (S1–S3, funnel/run.ts) → run record →
+ * unlock. A failing source never fails the run (PRD R4), and neither does the funnel: its
+ * failure makes the run partial. Run by `scanNow` and `scheduledScan`.
  */
 
 export type LockResult =
@@ -88,6 +90,8 @@ export interface ScanDeps {
   cooldownMs: number;
   trigger: Run['trigger'];
   now: () => Date;
+  /** The funnel, run after ingest while the lock is held (M4). */
+  funnel?: (input: { runId: string; startedAt: Date }) => Promise<FunnelOutcome>;
 }
 
 export type ScanResult = ScanNowResult | { status: 'busy' };
@@ -376,18 +380,41 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     }
     await store.writeSourceHealth(health);
 
-    const status = runStatus(perSource, failedWrites + companyWrites.failedWrites);
+    // ---- The funnel: S1 on new jobs (and the backlog), then S2/S3 queues ----
+    let funnel: FunnelOutcome | null = null;
+    if (deps.funnel) {
+      try {
+        funnel = await deps.funnel({ runId, startedAt });
+        if (funnel.failedWrites > 0) run.errors.push({ code: 'funnel_write_failed' });
+      } catch (error) {
+        log.error('scan.failed', { runId, step: 'funnel', ...errorFields(error) });
+        run.errors.push({ code: 'funnel_failed' });
+      }
+    }
+
+    const funnelFailed = deps.funnel !== undefined && (funnel === null || funnel.failedWrites > 0);
+    let status = runStatus(perSource, failedWrites + companyWrites.failedWrites);
+    if (funnelFailed && status === 'succeeded') status = 'partial';
     const s0: S0Counts = plan.counts;
     const finished: Run = {
       ...run,
       status,
-      finishedAt,
+      finishedAt: deps.now(),
       perSource,
-      perStage: { s0 },
+      perStage: { s0, ...(funnel ? funnel.perStage : {}) },
+      costPence: funnel?.costPence ?? 0,
+      ...(funnel ? { budget: funnel.budget } : {}),
+      ...(funnel?.flags.length ? { flags: funnel.flags } : {}),
       errors: run.errors.slice(0, 50),
     };
     await store.finishRun(runId, finished);
-    log.info('scan.done', { runId, status, ...s0 });
+    log.info('scan.done', {
+      runId,
+      status,
+      ...s0,
+      costPence: finished.costPence,
+      ...(funnel?.budget.stoppedBy ? { stoppedBy: funnel.budget.stoppedBy } : {}),
+    });
     return {
       status: 'completed',
       runId,
@@ -406,6 +433,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
         ]),
       ),
       s0,
+      ...(funnel ? { funnel: funnel.summary } : {}),
     };
   } catch (error) {
     log.error('scan.failed', { runId, ...errorFields(error) });
