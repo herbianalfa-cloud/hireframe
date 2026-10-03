@@ -1,6 +1,7 @@
 /**
  * `npm run dev`: runs inside `firebase emulators:exec --project demo-hireframe`, seeds a
- * fake owner (Auth user + `config/app`) and criteria v1, then starts the Vite dev server.
+ * fake owner (Auth user + `config/app`), criteria v1 and the fake CV's facts with a work-rights
+ * setting, then starts the Vite dev server.
  * Callables run in the Functions emulator with a fake LLM unless LIVE=1 (ADR-017).
  * Stopping Vite (Ctrl+C) stops the emulators too.
  */
@@ -14,6 +15,7 @@ import {
   DEV_OWNER,
   linkedInJobDocuments,
   ownerAccountBody,
+  profileSeedDocuments,
 } from './dev-seed.ts';
 
 const projectId = assertDemoProject(process.env.GCLOUD_PROJECT);
@@ -54,6 +56,16 @@ await emulatorRequest('PATCH', `${documents}/config/app`, appConfigDocument(now)
 const criteria = criteriaSeedDocuments(now);
 await emulatorRequest('PATCH', `${documents}/criteria/v1`, criteria.v1);
 await emulatorRequest('PATCH', `${documents}/criteria/current`, criteria.current);
+const profile = profileSeedDocuments(now);
+await emulatorRequest('PATCH', `${documents}/profile/main`, profile.settings);
+for (const fact of profile.facts) {
+  await emulatorRequest('PATCH', `${documents}/profile/main/facts/${fact.id}`, fact.fact);
+  await emulatorRequest(
+    'PATCH',
+    `${documents}/profile/main/facts/${fact.id}/versions/1`,
+    fact.version,
+  );
+}
 const linkedIn = linkedInJobDocuments(now);
 await emulatorRequest('PATCH', `${documents}/jobs/${DEV_LINKEDIN_JOB_ID}`, linkedIn.job);
 await emulatorRequest(
@@ -63,12 +75,13 @@ await emulatorRequest(
 );
 
 console.log(
-  `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}), criteria v1 and one fake ` +
-    'LinkedIn-alert job. ' +
+  `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}), criteria v1, the fake ` +
+    `CV's ${String(profile.facts.length)} facts with work rights, and one fake LinkedIn-alert job. ` +
     'In the sign-in pop-up pick that account; "Add new account" gives a non-owner. ' +
     `CV and note parsing use ${process.env.LIVE === '1' ? 'the real Anthropic API (LIVE=1)' : 'a fake model'}; ` +
     'run `node scripts/make-cv-fixtures.ts` for fake CVs to upload. ' +
-    `System → Scan now uses ${process.env.LIVE === '1' ? 'the real job APIs (LIVE=1)' : 'fake job APIs'}.`,
+    `System → Scan now uses ${process.env.LIVE === '1' ? 'the real job APIs and model (LIVE=1)' : 'fake job APIs and a fake model'}, ` +
+    'then runs the funnel (S1–S3).',
 );
 
 const vite = spawn('npm', ['run', 'dev', '-w', '@hireframe/web'], { stdio: 'inherit' });
