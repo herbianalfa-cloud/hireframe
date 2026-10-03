@@ -317,6 +317,13 @@ export const RunBudgetSchema = z.object({
   usedPence: z.number().min(0),
   /** Why the model stages stopped early, if they did. */
   stoppedBy: z.enum(STOP_REASONS).exactOptional(),
+  /** Why each model stage stopped early, if it did (v0.4.1); `stoppedBy` is the first of these. */
+  stops: z
+    .object({
+      s2: z.enum(STOP_REASONS).exactOptional(),
+      s3: z.enum(STOP_REASONS).exactOptional(),
+    })
+    .exactOptional(),
 });
 export type RunBudget = z.infer<typeof RunBudgetSchema>;
 

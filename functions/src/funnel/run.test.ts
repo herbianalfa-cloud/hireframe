@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Job, Usage } from '@hireframe/shared';
+import { costPence, type Job, type Usage } from '@hireframe/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { FUNNEL, funnelLimits, type FunnelLimits } from '../config.js';
+import { FUNNEL, funnelLimits, PRICES_USD_PER_MTOK, type FunnelLimits } from '../config.js';
 import { fakeTransport } from '../llm/fake-transport.js';
 import type { LlmRequest, LlmResponse, LlmTransport } from '../llm/transport.js';
 import { emptyUsage } from '../llm/usage-store.js';
@@ -452,5 +452,111 @@ describe('re-score', () => {
     store.jobs.set('apply', applied);
     await run(deps(store, { criteria: testCriteria({ version: 4 }) }), daysAgo(14));
     expect(store.get('apply').status).toBe('applied');
+  });
+});
+
+/**
+ * The first production run (v0.4.1): the API reports dated snapshot IDs, calls cost what the
+ * eval's did, and the lease is the production 24p. Before F0 and F2, S2 stopped at 30 calls on a
+ * doubled price and S3 stopped at 5 on its own worst case.
+ */
+describe('throughput at the production lease', () => {
+  const FX = 0.85;
+  const HAIKU = PRICES_USD_PER_MTOK['claude-haiku-4-5'];
+  const SONNET = PRICES_USD_PER_MTOK['claude-sonnet-5-5'];
+  if (!HAIKU || !SONNET) throw new Error('price table');
+
+  function production() {
+    const inner = fakeTransport();
+    const sends: { purpose: string; at: number }[] = [];
+    const transport: LlmTransport = {
+      // Eval-sized prompts: triage about 1.5k tokens, the deep read about 9k with its system cached.
+      countTokens: (request) => Promise.resolve(request.purpose === 'triage' ? 1_500 : 9_000),
+      async send(request) {
+        sends.push({ purpose: request.purpose, at: clock });
+        // A real call takes time, so other calls are in flight meanwhile.
+        await new Promise((resolve) => setImmediate(resolve));
+        const reply = await inner.send(request);
+        return request.purpose === 'triage'
+          ? {
+              ...reply,
+              model: 'claude-haiku-4-5-20251001',
+              tokens: { input: 1_476, output: 61, cacheRead: 0, cacheWrite: 0 },
+            }
+          : {
+              ...reply,
+              model: 'claude-sonnet-5-5',
+              tokens: { input: 1_500, output: 700, cacheRead: 8_000, cacheWrite: 0 },
+            };
+      },
+    };
+    const store = memoryFunnelStore();
+    for (let i = 0; i < 400; i++) {
+      store.add(
+        `j${String(i).padStart(3, '0')}`,
+        testJob({ title: 'Product Analyst', postedAt: daysAgo(2) }),
+      );
+    }
+    return { store, transport, sends };
+  }
+
+  it('keeps S2 going past 30 and stops only on its share; S3 reads at least 8', async () => {
+    const { store, transport, sends } = production();
+    const leases = memoryLeaseStore();
+    const result = await run(deps(store, { transport, leases }));
+
+    expect(result.budget.leasePence).toBe(24);
+    expect(result.budget.stops?.s2).toBe('run_budget');
+    expect(result.perStage.s2.in).toBeGreaterThanOrEqual(55);
+    expect(result.perStage.s2.costPence).toBeLessThanOrEqual(24 * FUNNEL.s2Share);
+    expect(result.perStage.s3.in).toBeGreaterThanOrEqual(8);
+    expect(result.costPence).toBeLessThanOrEqual(24);
+    expect(leases.usage().spendPence).toBeLessThanOrEqual(24);
+
+    // Every S2 call settled at the Haiku price of its tokens, not the top rate.
+    const haikuCost = costPence(
+      { input: 1_476, output: 61, cacheRead: 0, cacheWrite: 0 },
+      HAIKU,
+      FX,
+    );
+    const called = logs.filter((line) => line.event === 'llm.called');
+    const triage = called.filter((line) => line.purpose === 'triage');
+    expect(triage.length).toBe(result.perStage.s2.in);
+    expect(new Set(triage.map((line) => line.costPence))).toEqual(new Set([haikuCost]));
+    expect(haikuCost).toBeLessThan(0.16);
+    expect(logs.some((line) => line.event === 'llm.unknown_model_price')).toBe(false);
+    const deepCost = costPence(
+      { input: 1_500, output: 700, cacheRead: 8_000, cacheWrite: 0 },
+      SONNET,
+      FX,
+    );
+    const deep = called.filter((line) => line.purpose === 'deepRead');
+    expect(new Set(deep.map((line) => line.costPence))).toEqual(new Set([deepCost]));
+
+    // Spend never passed the lease at any settle, and nothing started after a deadline.
+    let running = 0;
+    for (const line of called) {
+      running += Number(line.costPence);
+      expect(running).toBeLessThanOrEqual(24 + 1e-9);
+    }
+    const startedAt = TEST_NOW.getTime();
+    for (const send of sends) {
+      const limit = send.purpose === 'triage' ? FUNNEL.s2StopMs : FUNNEL.s3StopMs;
+      expect(send.at - startedAt).toBeLessThan(limit);
+    }
+  });
+
+  it('records separate stop reasons per stage', async () => {
+    const { store, transport } = production();
+    const result = await run(deps(store, { transport }));
+    expect(result.budget.stops).toEqual({ s2: 'run_budget', s3: expect.any(String) });
+    expect(result.budget.stoppedBy).toBe(result.budget.stops?.s3);
+  });
+
+  it('leaves no stop reason for a stage that finished its queue', async () => {
+    const store = memoryFunnelStore();
+    store.add('only', testJob());
+    const result = await run(deps(store));
+    expect(result.budget.stops).toBeUndefined();
   });
 });
