@@ -304,4 +304,4 @@ Context: ARCHITECTURE said the watchlist is about 150 London/UK B2B SaaS compani
 - **`companies` is server-written.** `scanNow` creates missing seed companies and never overwrites existing ones, so console edits (e.g. `watch: false`) stick.
 - **Auto-growth** (adding companies that appear in alerts or aggregators) moves to M6, when alerts exist.
 
-Consequences: detection relies on boards being named after the company. Unusual tokens need a pasted careers URL. A wrong board can only enter the seed through an owner-reviewed row.
+Outcome of the first review (M3): 204 companies, 94 with a board (about 10 of them Workable, so rotation rarely applies). 110 have no board: wrong-company or dormant boards, 404s, nothing found, and 27 that Workable's rate limit left unchecked, which wait for `--recheck`. Consequences: detection relies on boards being named after the company. Unusual tokens need a pasted careers URL. A wrong board can only enter the seed through an owner-reviewed row.

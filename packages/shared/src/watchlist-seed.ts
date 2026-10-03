@@ -7,4 +7,1935 @@ import type { CompanySeed } from './jobs.js';
  * (name, domain, ATS type and board token), no personal data. `scanNow` creates any company
  * missing from Firestore and never overwrites one that exists.
  */
-export const WATCHLIST_SEED: readonly CompanySeed[] = [];
+export const WATCHLIST_SEED: readonly CompanySeed[] = [
+  {
+    id: '10x-banking',
+    name: '10x Banking',
+    domain: '10xbanking.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'ably',
+    name: 'Ably',
+    domain: 'ably.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'accurx',
+    name: 'Accurx',
+    domain: 'accurx.com',
+    ats: {
+      type: 'ashby',
+      token: 'accurx',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'administrate',
+    name: 'Administrate',
+    domain: 'getadministrate.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Edinburgh',
+  },
+  {
+    id: 'allica-bank',
+    name: 'Allica Bank',
+    domain: 'allica.bank',
+    ats: {
+      type: 'ashby',
+      token: 'allica-bank',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'applied',
+    name: 'Applied',
+    domain: 'beapplied.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'arthur-online',
+    name: 'Arthur Online',
+    domain: 'arthuronline.co.uk',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'artificial-labs',
+    name: 'Artificial Labs',
+    domain: 'artificial.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'atom-learning',
+    name: 'Atom Learning',
+    domain: 'atomlearning.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'attest',
+    name: 'Attest',
+    domain: 'askattest.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'banked',
+    name: 'Banked',
+    domain: 'banked.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'beacon',
+    name: 'Beacon',
+    domain: 'beacon.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'beamery',
+    name: 'Beamery',
+    domain: 'beamery.com',
+    ats: {
+      type: 'ashby',
+      token: 'beamery',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'behavox',
+    name: 'Behavox',
+    domain: 'behavox.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'behavox',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'bidnamic',
+    name: 'Bidnamic',
+    domain: 'bidnamic.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'birdie',
+    name: 'Birdie',
+    domain: 'birdie.care',
+    ats: {
+      type: 'ashby',
+      token: 'birdie',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'brandwatch',
+    name: 'Brandwatch',
+    domain: 'brandwatch.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'brandwatch',
+    },
+    hq: 'Brighton',
+  },
+  {
+    id: 'bud',
+    name: 'Bud',
+    domain: 'thisisbud.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'bumble',
+    name: 'Bumble',
+    domain: 'bumble.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'by-miles',
+    name: 'By Miles',
+    domain: 'bymiles.co.uk',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'callsign',
+    name: 'Callsign',
+    domain: 'callsign.com',
+    ats: {
+      type: 'workable',
+      token: 'callsign',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'capital-on-tap',
+    name: 'Capital on Tap',
+    domain: 'capitalontap.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'capitalontap',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'carbonchain',
+    name: 'CarbonChain',
+    domain: 'carbonchain.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'carbonchain',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cera',
+    name: 'Cera',
+    domain: 'ceracare.co.uk',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'charliehr',
+    name: 'CharlieHR',
+    domain: 'charliehr.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'checkout-com',
+    name: 'Checkout.com',
+    domain: 'checkout.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'citymapper',
+    name: 'Citymapper',
+    domain: 'citymapper.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'clearbank',
+    name: 'ClearBank',
+    domain: 'clear.bank',
+    ats: {
+      type: 'ashby',
+      token: 'clearbank',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'clearscore',
+    name: 'ClearScore',
+    domain: 'clearscore.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cleo',
+    name: 'Cleo',
+    domain: 'meetcleo.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'cleo',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cloudsmith',
+    name: 'Cloudsmith',
+    domain: 'cloudsmith.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Belfast',
+  },
+  {
+    id: 'coadjute',
+    name: 'Coadjute',
+    domain: 'coadjute.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'codat',
+    name: 'Codat',
+    domain: 'codat.io',
+    ats: {
+      type: 'ashby',
+      token: 'codat',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cognism',
+    name: 'Cognism',
+    domain: 'cognism.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'cognism',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'complyadvantage',
+    name: 'ComplyAdvantage',
+    domain: 'complyadvantage.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'complyadvantage',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'concirrus',
+    name: 'Concirrus',
+    domain: 'concirrus.ai',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'contentsquare',
+    name: 'Contentsquare',
+    domain: 'contentsquare.com',
+    ats: {
+      type: 'lever',
+      token: 'contentsquare',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'copper',
+    name: 'Copper',
+    domain: 'copper.co',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cord',
+    name: 'Cord',
+    domain: 'cord.co',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cronofy',
+    name: 'Cronofy',
+    domain: 'cronofy.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Nottingham',
+  },
+  {
+    id: 'curve',
+    name: 'Curve',
+    domain: 'curve.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cuvva',
+    name: 'Cuvva',
+    domain: 'cuvva.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cybsafe',
+    name: 'CybSafe',
+    domain: 'cybsafe.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'cytora',
+    name: 'Cytora',
+    domain: 'cytora.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'darktrace',
+    name: 'Darktrace',
+    domain: 'darktrace.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Cambridge',
+  },
+  {
+    id: 'definely',
+    name: 'Definely',
+    domain: 'definely.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'deliveroo',
+    name: 'Deliveroo',
+    domain: 'deliveroo.co.uk',
+    ats: {
+      type: 'greenhouse',
+      token: 'deliveroo',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'designmynight',
+    name: 'DesignMyNight',
+    domain: 'designmynight.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'divido',
+    name: 'Divido',
+    domain: 'divido.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'dojo',
+    name: 'Dojo',
+    domain: 'dojo.tech',
+    ats: {
+      type: 'greenhouse',
+      token: 'dojo',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'duco',
+    name: 'Duco',
+    domain: 'du.co',
+    ats: {
+      type: 'greenhouse',
+      token: 'duco',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'ebury',
+    name: 'Ebury',
+    domain: 'ebury.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'ebury',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'egress',
+    name: 'Egress',
+    domain: 'egress.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'elevenlabs',
+    name: 'ElevenLabs',
+    domain: 'elevenlabs.io',
+    ats: {
+      type: 'ashby',
+      token: 'elevenlabs',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'elliptic',
+    name: 'Elliptic',
+    domain: 'elliptic.co',
+    ats: {
+      type: 'ashby',
+      token: 'elliptic',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'elvie',
+    name: 'Elvie',
+    domain: 'elvie.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'faculty',
+    name: 'Faculty',
+    domain: 'faculty.ai',
+    ats: {
+      type: 'ashby',
+      token: 'faculty',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'featurespace',
+    name: 'Featurespace',
+    domain: 'featurespace.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Cambridge',
+  },
+  {
+    id: 'feefo',
+    name: 'Feefo',
+    domain: 'feefo.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Petersfield',
+  },
+  {
+    id: 'fixflo',
+    name: 'Fixflo',
+    domain: 'fixflo.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'flexa',
+    name: 'Flexa',
+    domain: 'flexa.careers',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'flo-health',
+    name: 'Flo Health',
+    domain: 'flo.health',
+    ats: {
+      type: 'greenhouse',
+      token: 'flohealth',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'flock',
+    name: 'Flock',
+    domain: 'flockcover.com',
+    ats: {
+      type: 'ashby',
+      token: 'flock',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'form3',
+    name: 'Form3',
+    domain: 'form3.tech',
+    ats: {
+      type: 'greenhouse',
+      token: 'form3',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'freeagent',
+    name: 'FreeAgent',
+    domain: 'freeagent.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Edinburgh',
+  },
+  {
+    id: 'freetrade',
+    name: 'Freetrade',
+    domain: 'freetrade.io',
+    ats: {
+      type: 'ashby',
+      token: 'freetrade',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'fresha',
+    name: 'Fresha',
+    domain: 'fresha.com',
+    ats: {
+      type: 'lever',
+      token: 'fresha',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'funding-circle',
+    name: 'Funding Circle',
+    domain: 'fundingcircle.com',
+    ats: {
+      type: 'ashby',
+      token: 'fundingcircle',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'fuse-energy',
+    name: 'Fuse Energy',
+    domain: 'fuseenergy.com',
+    ats: {
+      type: 'workable',
+      token: 'fuseenergy',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'fyxer-ai',
+    name: 'Fyxer AI',
+    domain: 'fyxer.com',
+    ats: {
+      type: 'ashby',
+      token: 'fyxer',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'gearset',
+    name: 'Gearset',
+    domain: 'gearset.com',
+    ats: {
+      type: 'ashby',
+      token: 'gearset',
+    },
+    hq: 'Cambridge',
+  },
+  {
+    id: 'genie-ai',
+    name: 'Genie AI',
+    domain: 'genieai.co',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'gocardless',
+    name: 'GoCardless',
+    domain: 'gocardless.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'gocardless',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'goodlord',
+    name: 'Goodlord',
+    domain: 'goodlord.co',
+    ats: {
+      type: 'ashby',
+      token: 'goodlord',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'granola',
+    name: 'Granola',
+    domain: 'granola.ai',
+    ats: {
+      type: 'ashby',
+      token: 'granola',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'greyparrot',
+    name: 'Greyparrot',
+    domain: 'greyparrot.ai',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'habito',
+    name: 'Habito',
+    domain: 'habito.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'healx',
+    name: 'Healx',
+    domain: 'healx.io',
+    ats: {
+      type: 'lever',
+      token: 'healx',
+    },
+    hq: 'Cambridge',
+  },
+  {
+    id: 'hero',
+    name: 'Hero',
+    domain: 'usehero.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'hibob',
+    name: 'Hibob',
+    domain: 'hibob.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'hometree',
+    name: 'Hometree',
+    domain: 'hometree.co.uk',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'hubble',
+    name: 'Hubble',
+    domain: 'hubblehq.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'huboo',
+    name: 'Huboo',
+    domain: 'huboo.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Bristol',
+  },
+  {
+    id: 'huma',
+    name: 'Huma',
+    domain: 'huma.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'hurree',
+    name: 'Hurree',
+    domain: 'hurree.co',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Belfast',
+  },
+  {
+    id: 'hyperexponential',
+    name: 'hyperexponential',
+    domain: 'hyperexponential.com',
+    ats: {
+      type: 'ashby',
+      token: 'hyperexponential',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'immersive-labs',
+    name: 'Immersive Labs',
+    domain: 'immersivelabs.com',
+    ats: {
+      type: 'ashby',
+      token: 'immersivelabs',
+    },
+    hq: 'Bristol',
+  },
+  {
+    id: 'iwoca',
+    name: 'iwoca',
+    domain: 'iwoca.co.uk',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'juro',
+    name: 'Juro',
+    domain: 'juro.com',
+    ats: {
+      type: 'ashby',
+      token: 'juro',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'kaluza',
+    name: 'Kaluza',
+    domain: 'kaluza.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'kaluza',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'kheiron-medical',
+    name: 'Kheiron Medical',
+    domain: 'kheironmed.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'ki-insurance',
+    name: 'Ki Insurance',
+    domain: 'ki-insurance.com',
+    ats: {
+      type: 'workable',
+      token: 'ki-insurance',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'kpler',
+    name: 'Kpler',
+    domain: 'kpler.com',
+    ats: {
+      type: 'lever',
+      token: 'kpler',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'kraken-technologies',
+    name: 'Kraken Technologies',
+    domain: 'kraken.tech',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'laka',
+    name: 'Laka',
+    domain: 'laka.co',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'lantum',
+    name: 'Lantum',
+    domain: 'lantum.com',
+    ats: {
+      type: 'workable',
+      token: 'lantum',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'learnerbly',
+    name: 'Learnerbly',
+    domain: 'learnerbly.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'legl',
+    name: 'Legl',
+    domain: 'legl.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'lendable',
+    name: 'Lendable',
+    domain: 'lendable.co.uk',
+    ats: {
+      type: 'ashby',
+      token: 'lendable',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'lindus-health',
+    name: 'Lindus Health',
+    domain: 'lindushealth.com',
+    ats: {
+      type: 'ashby',
+      token: 'lindus',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'luminance',
+    name: 'Luminance',
+    domain: 'luminance.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'lyst',
+    name: 'Lyst',
+    domain: 'lyst.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'marshmallow',
+    name: 'Marshmallow',
+    domain: 'marshmallow.com',
+    ats: {
+      type: 'ashby',
+      token: 'marshmallow',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'matillion',
+    name: 'Matillion',
+    domain: 'matillion.com',
+    ats: {
+      type: 'lever',
+      token: 'matillion',
+    },
+    hq: 'Manchester',
+  },
+  {
+    id: 'memrise',
+    name: 'Memrise',
+    domain: 'memrise.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'mention-me',
+    name: 'Mention Me',
+    domain: 'mention-me.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'metaview',
+    name: 'Metaview',
+    domain: 'metaview.ai',
+    ats: {
+      type: 'ashby',
+      token: 'metaview',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'mind-foundry',
+    name: 'Mind Foundry',
+    domain: 'mindfoundry.ai',
+    ats: {
+      type: 'greenhouse',
+      token: 'mindfoundry',
+    },
+    hq: 'Oxford',
+  },
+  {
+    id: 'modulr',
+    name: 'Modulr',
+    domain: 'modulrfinance.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'moneybox',
+    name: 'Moneybox',
+    domain: 'moneyboxapp.com',
+    ats: {
+      type: 'ashby',
+      token: 'moneybox',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'moneyhub',
+    name: 'Moneyhub',
+    domain: 'moneyhub.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Bristol',
+  },
+  {
+    id: 'monzo',
+    name: 'Monzo',
+    domain: 'monzo.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'monzo',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'multiverse',
+    name: 'Multiverse',
+    domain: 'multiverse.io',
+    ats: {
+      type: 'ashby',
+      token: 'multiverse',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'nory',
+    name: 'Nory',
+    domain: 'nory.ai',
+    ats: {
+      type: 'ashby',
+      token: 'nory',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'numan',
+    name: 'Numan',
+    domain: 'numan.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'oaknorth',
+    name: 'OakNorth',
+    domain: 'oaknorth.com',
+    ats: {
+      type: 'ashby',
+      token: 'oaknorth',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'octopus-energy',
+    name: 'Octopus Energy',
+    domain: 'octopus.energy',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'ohme',
+    name: 'Ohme',
+    domain: 'ohme-ev.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'ohme',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'ometria',
+    name: 'Ometria',
+    domain: 'ometria.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'omnipresent',
+    name: 'Omnipresent',
+    domain: 'omnipresent.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'onfido',
+    name: 'Onfido',
+    domain: 'onfido.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'ophelos',
+    name: 'Ophelos',
+    domain: 'ophelos.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'ophelos',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'orbital',
+    name: 'Orbital',
+    domain: 'orbital.tech',
+    ats: {
+      type: 'ashby',
+      token: 'orbital',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'oviva',
+    name: 'Oviva',
+    domain: 'oviva.com',
+    ats: {
+      type: 'ashby',
+      token: 'oviva',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'packfleet',
+    name: 'Packfleet',
+    domain: 'packfleet.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'paddle',
+    name: 'Paddle',
+    domain: 'paddle.com',
+    ats: {
+      type: 'ashby',
+      token: 'paddle',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'patchwork-health',
+    name: 'Patchwork Health',
+    domain: 'patchwork.health',
+    ats: {
+      type: 'workable',
+      token: 'patchworkhealth',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'payhawk',
+    name: 'Payhawk',
+    domain: 'payhawk.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'paysend',
+    name: 'Paysend',
+    domain: 'paysend.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'peak',
+    name: 'Peak',
+    domain: 'peak.ai',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Manchester',
+  },
+  {
+    id: 'peppy',
+    name: 'Peppy',
+    domain: 'peppy.health',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'physicsx',
+    name: 'PhysicsX',
+    domain: 'physicsx.ai',
+    ats: {
+      type: 'greenhouse',
+      token: 'physicsx',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'plaid',
+    name: 'Plaid',
+    domain: 'plaid.com',
+    ats: {
+      type: 'ashby',
+      token: 'plaid',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'plentific',
+    name: 'Plentific',
+    domain: 'plentific.com',
+    ats: {
+      type: 'ashby',
+      token: 'plentific',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'pleo',
+    name: 'Pleo',
+    domain: 'pleo.io',
+    ats: {
+      type: 'ashby',
+      token: 'pleo',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'pockit',
+    name: 'Pockit',
+    domain: 'pockit.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'pod-point',
+    name: 'Pod Point',
+    domain: 'pod-point.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'polyai',
+    name: 'PolyAI',
+    domain: 'poly.ai',
+    ats: {
+      type: 'greenhouse',
+      token: 'polyai',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'previse',
+    name: 'Previse',
+    domain: 'previse.co',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'primarybid',
+    name: 'PrimaryBid',
+    domain: 'primarybid.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'primer',
+    name: 'Primer',
+    domain: 'primer.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'prolific',
+    name: 'Prolific',
+    domain: 'prolific.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'prolific',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'pulsar',
+    name: 'Pulsar',
+    domain: 'pulsarplatform.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'quantexa',
+    name: 'Quantexa',
+    domain: 'quantexa.com',
+    ats: {
+      type: 'ashby',
+      token: 'quantexa',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'railsr',
+    name: 'Railsr',
+    domain: 'railsr.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'ravelin',
+    name: 'Ravelin',
+    domain: 'ravelin.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'redgate',
+    name: 'Redgate',
+    domain: 'red-gate.com',
+    ats: {
+      type: 'ashby',
+      token: 'red-gate',
+    },
+    hq: 'Cambridge',
+  },
+  {
+    id: 'resdiary',
+    name: 'ResDiary',
+    domain: 'resdiary.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Glasgow',
+  },
+  {
+    id: 'reviews-io',
+    name: 'Reviews.io',
+    domain: 'reviews.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Brighton',
+  },
+  {
+    id: 'revolut',
+    name: 'Revolut',
+    domain: 'revolut.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'robin-ai',
+    name: 'Robin AI',
+    domain: 'robinai.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'satellite-vu',
+    name: 'Satellite Vu',
+    domain: 'satellitevu.com',
+    ats: {
+      type: 'workable',
+      token: 'satellitevu',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'seedlegals',
+    name: 'SeedLegals',
+    domain: 'seedlegals.com',
+    ats: {
+      type: 'workable',
+      token: 'seedlegals',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'seneca-learning',
+    name: 'Seneca Learning',
+    domain: 'senecalearning.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'signal-ai',
+    name: 'Signal AI',
+    domain: 'signal-ai.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'skyscanner',
+    name: 'Skyscanner',
+    domain: 'skyscanner.net',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Edinburgh',
+  },
+  {
+    id: 'slerp',
+    name: 'Slerp',
+    domain: 'slerp.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'snowplow',
+    name: 'Snowplow',
+    domain: 'snowplow.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'snyk',
+    name: 'Snyk',
+    domain: 'snyk.io',
+    ats: {
+      type: 'ashby',
+      token: 'snyk',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'soldo',
+    name: 'Soldo',
+    domain: 'soldo.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'sona',
+    name: 'Sona',
+    domain: 'getsona.com',
+    ats: {
+      type: 'ashby',
+      token: 'sona',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'sparx-learning',
+    name: 'Sparx Learning',
+    domain: 'sparx-learning.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'sparxlearning',
+    },
+    hq: 'Exeter',
+  },
+  {
+    id: 'speechmatics',
+    name: 'Speechmatics',
+    domain: 'speechmatics.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'speechmatics',
+    },
+    hq: 'Cambridge',
+  },
+  {
+    id: 'spill',
+    name: 'Spill',
+    domain: 'spill.chat',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'stability-ai',
+    name: 'Stability AI',
+    domain: 'stability.ai',
+    ats: {
+      type: 'greenhouse',
+      token: 'stabilityai',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'starling-bank',
+    name: 'Starling Bank',
+    domain: 'starlingbank.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'sumup',
+    name: 'SumUp',
+    domain: 'sumup.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'sumup',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'superscript',
+    name: 'Superscript',
+    domain: 'gosuperscript.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'sylvera',
+    name: 'Sylvera',
+    domain: 'sylvera.com',
+    ats: {
+      type: 'ashby',
+      token: 'sylvera',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'synthesia',
+    name: 'Synthesia',
+    domain: 'synthesia.io',
+    ats: {
+      type: 'ashby',
+      token: 'synthesia',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'tenzo',
+    name: 'Tenzo',
+    domain: 'gotenzo.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'tessl',
+    name: 'Tessl',
+    domain: 'tessl.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'teya',
+    name: 'Teya',
+    domain: 'teya.com',
+    ats: {
+      type: 'ashby',
+      token: 'teya',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'third-space-learning',
+    name: 'Third Space Learning',
+    domain: 'thirdspacelearning.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'thought-machine',
+    name: 'Thought Machine',
+    domain: 'thoughtmachine.net',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'tide',
+    name: 'Tide',
+    domain: 'tide.co',
+    ats: {
+      type: 'greenhouse',
+      token: 'tide',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'token-io',
+    name: 'Token.io',
+    domain: 'token.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'tractable',
+    name: 'Tractable',
+    domain: 'tractable.ai',
+    ats: {
+      type: 'ashby',
+      token: 'tractable',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'tray-ai',
+    name: 'Tray.ai',
+    domain: 'tray.ai',
+    ats: {
+      type: 'ashby',
+      token: 'tray-ai',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'treatwell',
+    name: 'Treatwell',
+    domain: 'treatwell.co.uk',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'treefera',
+    name: 'Treefera',
+    domain: 'treefera.com',
+    ats: {
+      type: 'ashby',
+      token: 'treefera',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'truelayer',
+    name: 'TrueLayer',
+    domain: 'truelayer.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'truelayer',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'trustpilot',
+    name: 'Trustpilot',
+    domain: 'trustpilot.com',
+    ats: {
+      type: 'greenhouse',
+      token: 'trustpilot',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'unibuddy',
+    name: 'Unibuddy',
+    domain: 'unibuddy.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'unidays',
+    name: 'Unidays',
+    domain: 'myunidays.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'Nottingham',
+  },
+  {
+    id: 'unitary',
+    name: 'Unitary',
+    domain: 'unitary.ai',
+    ats: {
+      type: 'workable',
+      token: 'unitary',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'unmind',
+    name: 'Unmind',
+    domain: 'unmind.com',
+    ats: {
+      type: 'ashby',
+      token: 'unmind',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'up-learn',
+    name: 'Up Learn',
+    domain: 'uplearn.co.uk',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'v7',
+    name: 'V7',
+    domain: 'v7labs.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'vestd',
+    name: 'Vestd',
+    domain: 'vestd.com',
+    ats: {
+      type: 'workable',
+      token: 'vestd',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'vitesse',
+    name: 'Vitesse',
+    domain: 'vitesse.io',
+    ats: {
+      type: 'ashby',
+      token: 'vitesse',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'volt',
+    name: 'Volt',
+    domain: 'volt.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'wayve',
+    name: 'Wayve',
+    domain: 'wayve.ai',
+    ats: {
+      type: 'ashby',
+      token: 'wayve',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'weavr',
+    name: 'Weavr',
+    domain: 'weavr.io',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'what3words',
+    name: 'what3words',
+    domain: 'what3words.com',
+    ats: {
+      type: 'ashby',
+      token: 'what3words',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'wise',
+    name: 'Wise',
+    domain: 'wise.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'yapily',
+    name: 'Yapily',
+    domain: 'yapily.com',
+    ats: {
+      type: 'workable',
+      token: 'yapily',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'yieldify',
+    name: 'Yieldify',
+    domain: 'yieldify.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'yoti',
+    name: 'Yoti',
+    domain: 'yoti.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'yulife',
+    name: 'YuLife',
+    domain: 'yulife.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'zego',
+    name: 'Zego',
+    domain: 'zego.com',
+    ats: {
+      type: 'ashby',
+      token: 'zego',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'zencargo',
+    name: 'Zencargo',
+    domain: 'zencargo.com',
+    ats: {
+      type: 'none',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'zilch',
+    name: 'Zilch',
+    domain: 'zilch.com',
+    ats: {
+      type: 'ashby',
+      token: 'zilch',
+    },
+    hq: 'London',
+  },
+  {
+    id: 'zopa',
+    name: 'Zopa',
+    domain: 'zopa.com',
+    ats: {
+      type: 'lever',
+      token: 'zopa',
+    },
+    hq: 'London',
+  },
+];

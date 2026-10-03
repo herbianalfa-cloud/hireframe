@@ -28,6 +28,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
     No schedule until M4.
   - **System screen** (pulled forward from M5): Scan now, a card per source (status, counts, why it isn't OK, Adzuna calls today with "Jobs by Adzuna"), broken job boards, the job count and the last five runs.
+  - **Watchlist seed:** 204 London/UK companies, 94 with a verified job board. Detection matches names exactly, never confirms an empty board, marks rate-limited probes `unchecked`, and `--recheck` re-detects only those rows. Workable is spaced 5 s apart.
   - **Company watchlist** (ADR-031): `node scripts/detect-ats.ts` finds each candidate's job board through the official board APIs only (or a careers URL you paste). It never fetches careers pages. It writes a review CSV, and `--write` turns your reviewed CSV into `packages/shared/src/watchlist-seed.ts`. `scanNow` creates missing seed companies and never overwrites existing ones.
   - **ADRs 025–031:**
     - robots.txt vs keyed APIs;

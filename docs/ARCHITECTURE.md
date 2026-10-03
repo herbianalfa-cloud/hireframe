@@ -46,7 +46,7 @@
 | YC jobs / Work at a Startup, Escape the City | **Email alerts only**, via Gmail bridge | Checked in M3: their terms forbid automated access (ADR-026, ADR-028) |
 | LinkedIn, Wellfound, Welcome to the Jungle | **Email alerts only**, via Gmail bridge | Never scraped |
 
-**Company watchlist** (`companies` collection) drives the ATS boards: seeded with ~150 London/UK B2B SaaS and startups (`packages/shared/src/watchlist-seed.ts`). Candidates come from people; `node scripts/detect-ats.ts` finds each one's ATS type and board token by probing only the official board APIs (or parsing a careers URL the owner pastes), and the owner reviews the result. No careers page is fetched (ADR-031). `scanNow` creates missing seed companies and never overwrites existing ones. From M6 it grows when a company appears in alerts or aggregators and its ATS is detectable.
+**Company watchlist** (`companies` collection) drives the ATS boards: seeded with 204 London/UK B2B SaaS companies and startups, 94 of them with a detected board (the rest are kept for matching aggregator jobs) (`packages/shared/src/watchlist-seed.ts`). Candidates come from people; `node scripts/detect-ats.ts` finds each one's ATS type and board token by probing only the official board APIs (or parsing a careers URL the owner pastes), and the owner reviews the result. No careers page is fetched (ADR-031). `scanNow` creates missing seed companies and never overwrites existing ones. From M6 it grows when a company appears in alerts or aggregators and its ATS is detectable.
 
 Each source module implements (`functions/src/sources/types.ts`):
 ```ts
