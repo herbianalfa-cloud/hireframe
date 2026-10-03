@@ -16,7 +16,8 @@ import {
 /**
  * Reed Jobseeker API (keyed, Basic auth with the key as the user name; ADR-025):
  * `www.reed.co.uk/api/1.0/search?keywords=…`. Search results carry a snippet only; full text
- * comes from `/api/1.0/jobs/{id}` for S2 survivors in M4. Queries come from the lane titles.
+ * comes from `/api/1.0/jobs/{id}` for jobs S2 passed (funnel/hydrate.ts, M4). Queries come from
+ * the lane titles.
  */
 export const ReedResultSchema = z.object({
   jobId: z.number().int().positive(),
@@ -35,6 +36,16 @@ export type ReedResult = z.infer<typeof ReedResultSchema>;
 const ReedEnvelope = z
   .object({ results: z.array(z.unknown()).nullish() })
   .transform((value) => value.results ?? []);
+
+/** `/api/1.0/jobs/{id}`: one job's details, with the full description as HTML. */
+export const ReedDetailsSchema = z.object({
+  jobId: z.number().int().positive(),
+  jobDescription: z.string().min(1),
+});
+
+export function reedDetailsUrl(jobId: string): string | null {
+  return /^\d{1,12}$/.test(jobId) ? `https://www.reed.co.uk/api/1.0/jobs/${jobId}` : null;
+}
 
 export function reedSearchUrl(keywords: string): string {
   const params = new URLSearchParams({
