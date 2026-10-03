@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { CRITERIA_SEED_V1 } from './criteria-seed.js';
-import { CRITERIA_CONTENT_KEYS, CriteriaContentSchema, criteriaVersionId } from './criteria.js';
+import {
+  CRITERIA_CONTENT_KEYS,
+  CriteriaContentSchema,
+  criteriaVersionId,
+  DEFAULT_LANE_POINTS,
+  lanePoints,
+  OPTIONAL_CRITERIA_KEYS,
+} from './criteria.js';
 
 describe('criteria seed v1', () => {
   it('parses against the schema', () => {
@@ -56,6 +63,31 @@ describe('CriteriaContentSchema', () => {
     ['a bad excluded title id', { excluded_titles: [{ id: 'Not OK', term: 'Senior' }] }],
   ])('rejects %s', (_name, patch) => {
     expect(CriteriaContentSchema.safeParse({ ...CRITERIA_SEED_V1, ...patch }).success).toBe(false);
+  });
+
+  it('accepts versions saved before lane_points existed, with the default points', () => {
+    const old: Record<string, unknown> = { ...CRITERIA_SEED_V1 };
+    delete old.lane_points;
+    const parsed = CriteriaContentSchema.parse(old);
+    expect(parsed.lane_points).toBeUndefined();
+    expect(lanePoints(parsed)).toEqual(DEFAULT_LANE_POINTS);
+    expect(OPTIONAL_CRITERIA_KEYS).toEqual(['lane_points']);
+  });
+
+  it('gives the wildcard lane 2 points in the seed (ADR-034)', () => {
+    expect(lanePoints(CRITERIA_SEED_V1)).toEqual({
+      primary: 3,
+      secondary: 2,
+      opportunistic: 1,
+      wildcard: 2,
+    });
+  });
+
+  it('rejects lane points outside 0–3', () => {
+    const lane_points = { ...DEFAULT_LANE_POINTS, wildcard: 4 };
+    expect(CriteriaContentSchema.safeParse({ ...CRITERIA_SEED_V1, lane_points }).success).toBe(
+      false,
+    );
   });
 
   it('names versions v1, v2, …', () => {

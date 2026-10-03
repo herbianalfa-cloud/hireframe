@@ -121,7 +121,23 @@ service cloud.firestore {
         && data.freshness_days is int && data.freshness_days >= 1 && data.freshness_days <= 90
         && data.thresholds is map
         && hasExactly(data.thresholds, ['apply_fit', 'apply_luck', 'near_miss_fit', 'wildcard_fit'])
-        && data.weekly_target is int && data.weekly_target >= 1 && data.weekly_target <= 100;
+        && data.weekly_target is int && data.weekly_target >= 1 && data.weekly_target <= 100
+        && validLanePoints(data);
+    }
+
+    function validLanePoint(value) {
+      return value is number && value >= 0 && value <= 3;
+    }
+
+    // Optional (ADR-034): versions saved before M4 don't have it.
+    function validLanePoints(data) {
+      return !('lane_points' in data)
+        || (data.lane_points is map
+            && hasExactly(data.lane_points, ['primary', 'secondary', 'opportunistic', 'wildcard'])
+            && validLanePoint(data.lane_points.primary)
+            && validLanePoint(data.lane_points.secondary)
+            && validLanePoint(data.lane_points.opportunistic)
+            && validLanePoint(data.lane_points.wildcard));
     }
 
     // Version n is created together with the pointer moving from n-1 to n.
@@ -131,10 +147,15 @@ service cloud.firestore {
       let after = getAfter(criteriaPointerPath()).data.version;
       return after == before + 1
         && versionId == 'v' + string(after)
-        && hasExactly(data, ['lanes', 'wildcards', 'excluded_titles', 'excluded_keywords',
-                             'excluded_companies', 'experience_cap_years', 'blockers',
-                             'locations', 'company_prefs', 'freshness_days', 'thresholds',
-                             'weekly_target', 'version', 'createdAt', 'schemaVersion'])
+        && data.keys().hasAll(['lanes', 'wildcards', 'excluded_titles', 'excluded_keywords',
+                               'excluded_companies', 'experience_cap_years', 'blockers',
+                               'locations', 'company_prefs', 'freshness_days', 'thresholds',
+                               'weekly_target', 'version', 'createdAt', 'schemaVersion'])
+        && data.keys().hasOnly(['lanes', 'wildcards', 'excluded_titles', 'excluded_keywords',
+                                'excluded_companies', 'experience_cap_years', 'blockers',
+                                'locations', 'company_prefs', 'freshness_days', 'thresholds',
+                                'weekly_target', 'lane_points', 'version', 'createdAt',
+                                'schemaVersion'])
         && data.version == after
         && data.createdAt == request.time
         && data.schemaVersion == 1

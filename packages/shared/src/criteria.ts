@@ -22,6 +22,27 @@ export const ExcludedTitleSchema = z.object({
 export type ExcludedTitle = z.infer<typeof ExcludedTitleSchema>;
 
 const Score = z.number().min(0).max(10);
+const LanePoint = z.number().min(0).max(3);
+
+/**
+ * Fit points a job gets for the lane S2 put it in (docs/FUNNEL.md "Rubric", ADR-034). Used only in
+ * code, never in a prompt, so changing them re-scores without a model call. Optional so criteria
+ * versions saved before M4 stay valid; `lanePoints` fills in the default.
+ */
+export const LanePointsSchema = z.object({
+  primary: LanePoint,
+  secondary: LanePoint,
+  opportunistic: LanePoint,
+  wildcard: LanePoint,
+});
+export type LanePoints = z.infer<typeof LanePointsSchema>;
+
+export const DEFAULT_LANE_POINTS: LanePoints = {
+  primary: 3,
+  secondary: 2,
+  opportunistic: 1,
+  wildcard: 2,
+};
 
 export const CriteriaContentSchema = z.object({
   lanes: z.object({
@@ -52,13 +73,26 @@ export const CriteriaContentSchema = z.object({
     wildcard_fit: Score,
   }),
   weekly_target: z.int().min(1).max(100),
+  lane_points: LanePointsSchema.exactOptional(),
 });
 export type CriteriaContent = z.infer<typeof CriteriaContentSchema>;
 
-/** Top-level content keys; firestore.rules checks a written version has exactly these. */
-export const CRITERIA_CONTENT_KEYS = Object.keys(
-  CriteriaContentSchema.shape,
+/** Optional content keys: a version may leave them out (saved before they existed). */
+export const OPTIONAL_CRITERIA_KEYS = [
+  'lane_points',
+] as const satisfies readonly (keyof CriteriaContent)[];
+
+/**
+ * Required top-level content keys. firestore.rules checks a written version has all of these and
+ * nothing besides them and `OPTIONAL_CRITERIA_KEYS`.
+ */
+export const CRITERIA_CONTENT_KEYS = Object.keys(CriteriaContentSchema.shape).filter(
+  (key) => !(OPTIONAL_CRITERIA_KEYS as readonly string[]).includes(key),
 ) as readonly (keyof CriteriaContent)[];
+
+export function lanePoints(criteria: Pick<CriteriaContent, 'lane_points'>): LanePoints {
+  return criteria.lane_points ?? DEFAULT_LANE_POINTS;
+}
 
 export const CriteriaVersionSchema = CriteriaContentSchema.extend({
   version: z.int().min(1),

@@ -203,8 +203,44 @@ describe('saving a new criteria version (owner)', () => {
     ['lanes without secondary', { lanes: { primary: [], opportunistic: [] } }],
     ['a client-chosen createdAt', { createdAt: AT }],
     ['a non-list wildcards field', { wildcards: 'AI' }],
+    [
+      'lane points above 3',
+      { lane_points: { primary: 4, secondary: 2, opportunistic: 1, wildcard: 2 } },
+    ],
+    [
+      'lane points without wildcard',
+      { lane_points: { primary: 3, secondary: 2, opportunistic: 1 } },
+    ],
+    [
+      'a string lane point',
+      { lane_points: { primary: '3', secondary: 2, opportunistic: 1, wildcard: 2 } },
+    ],
+    [
+      'an extra lane point',
+      { lane_points: { primary: 3, secondary: 2, opportunistic: 1, wildcard: 2, none: 0 } },
+    ],
   ])('denies a version with %s', async (_name, patch) => {
     await assertFails(save(dbFor('owner'), { version: 2, patch }));
+  });
+
+  it('allows a version with or without lane_points (ADR-034)', async () => {
+    await assertSucceeds(
+      save(dbFor('owner'), {
+        version: 2,
+        patch: { lane_points: { primary: 3, secondary: 2.5, opportunistic: 0, wildcard: 2 } },
+      }),
+    );
+    const without = versionDoc(3);
+    delete without.lane_points;
+    const db = dbFor('owner');
+    const batch = writeBatch(db);
+    batch.set(doc(db, PATHS.criteriaVersion('v3')), without);
+    batch.set(doc(db, DOCS.criteriaCurrent), {
+      version: 3,
+      updatedAt: serverTimestamp(),
+      schemaVersion: 1,
+    });
+    await assertSucceeds(batch.commit());
   });
 
   it('denies a version with a missing key', async () => {

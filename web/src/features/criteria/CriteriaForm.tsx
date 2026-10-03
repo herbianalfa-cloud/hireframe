@@ -46,6 +46,13 @@ function Section({
   );
 }
 
+const LANE_POINT_FIELDS = [
+  ['primary', 'Primary lane'],
+  ['secondary', 'Secondary lane'],
+  ['opportunistic', 'Opportunistic lane'],
+  ['wildcard', 'Wildcard'],
+] as const satisfies readonly (readonly [keyof Draft['lanePoints'], string])[];
+
 function NumberField({
   label,
   value,
@@ -480,6 +487,29 @@ export function CriteriaForm({ criteria }: { criteria: CriteriaVersion }) {
                   edit({ thresholds: { ...thresholds, wildcardFit: value } });
                 }}
               />
+            </div>
+          </div>
+          <div>
+            <h3 className="text-sm font-medium">Lane points</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Fit points a job gets for its lane, from 0 to 3. Changing them re-scores without new
+              AI calls.
+            </p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              {LANE_POINT_FIELDS.map(([key, label]) => (
+                <NumberField
+                  key={key}
+                  label={label}
+                  value={draft.lanePoints[key]}
+                  min={0}
+                  max={3}
+                  step={0.5}
+                  error={errorAt(errors, `lane_points.${key}`)}
+                  onChange={(value) => {
+                    edit({ lanePoints: { ...draft.lanePoints, [key]: value } });
+                  }}
+                />
+              ))}
             </div>
           </div>
           <NumberField

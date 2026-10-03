@@ -4,7 +4,8 @@ import type { CriteriaContent } from './criteria.js';
  * Criteria v1, from docs/FUNNEL.md "Seed criteria (v1)". `excluded_titles` is structured so the
  * S1 rules (M4) can apply "unless immediately preceded by" with `checkTitle` (titles.ts) instead
  * of parsing prose. "Technical" is an allowed prefix for Business Analyst because "Technical
- * Business Analyst" is a secondary-lane title.
+ * Business Analyst" is a secondary-lane title. `lane_points` gives the wildcard lane 2 rather than
+ * the rubric's original 0, so `wildcard_fit` 6 is reachable (ADR-034).
  */
 export const CRITERIA_SEED_V1: CriteriaContent = {
   lanes: {
@@ -92,4 +93,5 @@ export const CRITERIA_SEED_V1: CriteriaContent = {
   freshness_days: 14,
   thresholds: { apply_fit: 7, apply_luck: 5, near_miss_fit: 5, wildcard_fit: 6 },
   weekly_target: 10,
+  lane_points: { primary: 3, secondary: 2, opportunistic: 1, wildcard: 2 },
 };

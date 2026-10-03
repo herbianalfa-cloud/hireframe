@@ -177,6 +177,42 @@ describe('Criteria form', () => {
     expect(saveCriteria).not.toHaveBeenCalled();
   });
 
+  it('shows default lane points for a version saved before they existed, and saves them', async () => {
+    const user = userEvent.setup();
+    const old: Record<string, unknown> = { ...criteria };
+    delete old.lane_points;
+    givenState({ status: 'ready', criteria: old as CriteriaVersion });
+    vi.mocked(saveCriteria).mockResolvedValue(4);
+    render(<CriteriaPage />);
+
+    const wildcard = screen.getByLabelText('Wildcard');
+    expect((wildcard as HTMLInputElement).value).toBe('2');
+    await user.clear(wildcard);
+    await user.type(wildcard, '1.5');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(vi.mocked(saveCriteria).mock.calls[0]?.[0].lane_points).toEqual({
+      primary: 3,
+      secondary: 2,
+      opportunistic: 1,
+      wildcard: 1.5,
+    });
+  });
+
+  it('rejects lane points above 3', async () => {
+    const user = userEvent.setup();
+    givenState({ status: 'ready', criteria });
+    render(<CriteriaPage />);
+
+    const primary = screen.getByLabelText('Primary lane');
+    await user.clear(primary);
+    await user.type(primary, '4');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(screen.getByText('Enter points from 0 to 3.')).toBeDefined();
+    expect(saveCriteria).not.toHaveBeenCalled();
+  });
+
   it('shows the conflict message when the criteria changed elsewhere', async () => {
     const user = userEvent.setup();
     givenState({ status: 'ready', criteria });
