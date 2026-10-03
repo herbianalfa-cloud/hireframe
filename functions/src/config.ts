@@ -304,3 +304,9 @@ export function funnelLimits(monthlyCapPence: number, overrides: FunnelOverrides
     reedHydratePerRun: overrides.reedHydratePerRun ?? FUNNEL.reedHydratePerRun,
   };
 }
+
+/** PRD R4: 07:30 and 17:30 on weekdays, UK time (Cloud Scheduler handles the clock change). */
+export const SCHEDULE = {
+  cron: '30 7,17 * * 1-5',
+  timeZone: 'Europe/London',
+} as const;

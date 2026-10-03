@@ -10,6 +10,7 @@ import {
   PATHS,
   ProfileSettingsSchema,
   QuotaSchema,
+  SourceHealthSchema,
   type FunnelFact,
   type Quota,
   type QueueStage,
@@ -17,6 +18,7 @@ import {
 import { FieldValue, type Firestore, type Query } from 'firebase-admin/firestore';
 
 import { SCAN } from '../config.js';
+import type { HostPause } from '../http/client.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 import type { JobPatch } from './judgement.js';
@@ -55,6 +57,8 @@ export function patchUpdate(patch: JobPatch, now: Date): Record<string, unknown>
 export interface FirestoreFunnelStore extends FunnelStore {
   saveFullText(jobId: string, text: string, now: Date): Promise<void>;
   reedQuota(): Promise<Quota | undefined>;
+  /** Hosts Reed's last scan was told to stay away from (a long Retry-After). */
+  reedPauses(): Promise<HostPause[]>;
   saveReedQuota(quota: Quota): Promise<void>;
 }
 
@@ -221,6 +225,16 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
       const snapshot = await db.doc(PATHS.source('reed')).get();
       const parsed = QuotaSchema.safeParse(timestampsToDates(snapshot.get('quota')));
       return parsed.success ? parsed.data : undefined;
+    },
+
+    async reedPauses() {
+      const snapshot = await db.doc(PATHS.source('reed')).get();
+      const parsed = SourceHealthSchema.shape.pausedHosts.safeParse(
+        timestampsToDates(snapshot.get('pausedHosts')),
+      );
+      return parsed.success
+        ? parsed.data.map(({ host, until }) => ({ host, until: until.getTime() }))
+        : [];
     },
 
     async saveReedQuota(quota) {
