@@ -48,6 +48,7 @@ const DATA_MODEL_DOCS = [
   'usage/2026-09',
   'events/event-1',
   DOCS.scanLock,
+  'sources/greenhouse',
 ];
 
 /** Paths outside the data model must be denied even to the owner. */
@@ -148,6 +149,10 @@ describe('with an owner configured', () => {
     };
     await assertFails(setDoc(doc(db, 'profile/main/documents/doc-2'), document));
     await assertFails(updateDoc(doc(db, 'profile/main/documents/doc-1'), { status: 'parsed' }));
+    // M3 scan records (ADR-029): jobs, source health and the scan lock are Admin-only.
+    await assertFails(updateDoc(doc(db, 'jobs/job-1'), { status: 'applied' }));
+    await assertFails(setDoc(doc(db, 'sources/adzuna'), { status: 'ok', ...at }));
+    await assertFails(setDoc(doc(db, DOCS.scanLock), { schemaVersion: 1 }));
   });
 
   it('does not let a stranger overwrite config/app to claim ownership', async () => {

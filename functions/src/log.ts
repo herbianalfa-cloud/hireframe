@@ -23,7 +23,24 @@ export type LogEvent =
   | 'parse_cv.duplicate'
   | 'add_fact.done'
   | 'profile.fact_invalid'
-  | 'profile.reset';
+  | 'profile.reset'
+  | 'http.retry'
+  | 'http.failed'
+  | 'http.robots_blocked'
+  | 'http.host_paused'
+  | 'scan.started'
+  | 'scan.done'
+  | 'scan.refused'
+  | 'scan.failed'
+  | 'source.done'
+  | 'source.failed'
+  | 'ingest.invalid_item'
+  | 'ingest.write_failed'
+  | 'dedupe.conflict'
+  | 'watchlist.seeded'
+  | 'store.invalid_doc'
+  | 'ingest.keys_truncated'
+  | 'scan.recovered';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

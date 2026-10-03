@@ -1,11 +1,16 @@
+import { dedupeKey, JobSchema, normaliseRawJob } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
+
+import { LINKEDIN_ALERT_JOB } from '../packages/shared/src/fixtures/jobs.ts';
 
 import { isCiDeploy } from './assert-ci.ts';
 import {
   appConfigDocument,
   assertDemoProject,
   criteriaSeedDocuments,
+  DEV_LINKEDIN_JOB_KEYS,
   DEV_OWNER,
+  linkedInJobDocuments,
   ownerAccountBody,
   toRestValue,
 } from './dev-seed.ts';
@@ -62,5 +67,32 @@ describe('criteria seed documents', () => {
 
   it('encodes fractional numbers as doubles', () => {
     expect(toRestValue(0.5)).toEqual({ doubleValue: 0.5 });
+  });
+});
+
+describe('dev LinkedIn-alert job', () => {
+  it('has the keys the shared dedupe computes for the same posting', () => {
+    expect(normaliseRawJob(LINKEDIN_ALERT_JOB)?.keys).toEqual([...DEV_LINKEDIN_JOB_KEYS]);
+    expect(dedupeKey('Acme Analytics Ltd', 'Product Analyst', 'london')).toBe(
+      DEV_LINKEDIN_JOB_KEYS[0],
+    );
+  });
+
+  it('is a valid job once decoded', () => {
+    const now = new Date('2026-10-01T08:00:00Z');
+    const { job } = linkedInJobDocuments(now);
+    const decode = (value: unknown): unknown => {
+      const v = value as Record<string, unknown>;
+      if ('stringValue' in v) return v.stringValue;
+      if ('integerValue' in v) return Number(v.integerValue);
+      if ('timestampValue' in v) return new Date(String(v.timestampValue));
+      if ('arrayValue' in v) return (v.arrayValue as { values: unknown[] }).values.map(decode);
+      if ('mapValue' in v) {
+        const fields = (v.mapValue as { fields: Record<string, unknown> }).fields;
+        return Object.fromEntries(Object.entries(fields).map(([k, inner]) => [k, decode(inner)]));
+      }
+      throw new Error('unexpected value');
+    };
+    expect(JobSchema.safeParse(decode({ mapValue: job })).success).toBe(true);
   });
 });

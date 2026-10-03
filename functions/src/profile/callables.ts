@@ -7,17 +7,15 @@ import { defineSecret } from 'firebase-functions/params';
 
 import { bucket, db } from '../admin.js';
 import { requireOwner } from '../auth.js';
+import { loadDevFakes, ownerOptions, useFakes } from '../callable.js';
 import {
   ANTHROPIC_SECRET_NAME,
-  CALLABLE,
   DEFAULT_FX_USD_TO_GBP,
   DEFAULT_MONTHLY_CAP_PENCE,
-  REGION,
 } from '../config.js';
 import { extractText } from '../cv/extract.js';
 import { safeHandler } from '../errors.js';
 import { llmCall, type LlmCallDeps, type LlmCallInput } from '../llm/call.js';
-import { fakeTransport } from '../llm/fake-transport.js';
 import { anthropicTransport } from '../llm/transport.js';
 import { firestoreUsageStore } from '../llm/usage-store.js';
 import { addFactHandler } from './addFact.js';
@@ -27,17 +25,11 @@ import { bucketFileDeleter, firestoreProfileStore, firestoreResetStore } from '.
 
 const anthropicApiKey = defineSecret(ANTHROPIC_SECRET_NAME);
 
-/**
- * The emulator runs without App Check (local dev has no reCAPTCHA) and with the fake LLM unless
- * LIVE=1. Deployed functions never see FUNCTIONS_EMULATOR, so production always enforces App
- * Check, consumes the token (replay protection for calls that spend money) and calls Anthropic.
- */
-const inEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-const useFakeLlm = inEmulator && process.env.LIVE !== '1';
-
-function llmFor(config: AppConfig) {
+async function llmFor(config: AppConfig) {
   const deps: LlmCallDeps = {
-    transport: useFakeLlm ? fakeTransport() : anthropicTransport(anthropicApiKey.value()),
+    transport: useFakes
+      ? (await loadDevFakes()).fakeTransport()
+      : anthropicTransport(anthropicApiKey.value()),
     usage: firestoreUsageStore(db()),
     capPence: config.monthlyCapPence ?? DEFAULT_MONTHLY_CAP_PENCE,
     fxUsdToGbp: config.fxUsdToGbp ?? DEFAULT_FX_USD_TO_GBP,
@@ -53,13 +45,6 @@ async function readFile(path: string): Promise<Uint8Array | null> {
   return new Uint8Array(contents);
 }
 
-const ownerOptions: CallableOptions = {
-  region: REGION, // also set globally; stated here so a callable can never land elsewhere
-  enforceAppCheck: !inEmulator,
-  consumeAppCheckToken: !inEmulator,
-  memory: CALLABLE.memory,
-};
-
 /** Only callables that call the model mount the Anthropic key. */
 const llmOptions: CallableOptions = { ...ownerOptions, secrets: [anthropicApiKey] };
 
@@ -71,7 +56,7 @@ export const parseCv = onCall(
       store: firestoreProfileStore(db()),
       readFile,
       extract: extractText,
-      llm: llmFor(config),
+      llm: await llmFor(config),
       now: () => new Date(),
     });
   }),
@@ -83,7 +68,7 @@ export const addFact = onCall(
     const config = await requireOwner(request);
     return addFactHandler(request.data, {
       store: firestoreProfileStore(db()),
-      llm: llmFor(config),
+      llm: await llmFor(config),
       now: () => new Date(),
     });
   }),

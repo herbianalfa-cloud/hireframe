@@ -101,3 +101,106 @@ export const MERGE = { similar: 0.6 } as const;
 
 /** Less extracted text than this means a scanned or empty file. */
 export const MIN_CV_TEXT_CHARS = 200;
+
+// ---- Sources and scanning (M3, ADR-025, ADR-029) ----
+
+/** Secret Manager names for the keyed job APIs; mounted on `scanNow` only. */
+export const SOURCE_SECRET_NAMES = {
+  reedApiKey: 'REED_API_KEY',
+  adzunaAppId: 'ADZUNA_APP_ID',
+  adzunaAppKey: 'ADZUNA_APP_KEY',
+} as const;
+
+export const SCAN = {
+  productToken: 'HireframeBot',
+  userAgent: 'HireframeBot/0.3 (+https://github.com/herbianalfa-cloud/hireframe)',
+  maxAttempts: 3,
+  backoffBaseMs: 1_000,
+  /** A Retry-After longer than this fails the request instead of stalling the run. */
+  retryAfterCapMs: 30_000,
+  /** Largest response body read (a big Greenhouse board with content or an HN thread). */
+  maxBodyBytes: 20 * 1024 * 1024,
+  /** No request starts after this much of the run; the rest is dedupe and writes. */
+  fetchBudgetMs: 360_000,
+  /** A lock older than this belongs to a scan that died (callable timeout is 9 min). */
+  lockStaleMs: 12 * 60_000,
+  /** A manual scan this soon after the last one is skipped (double taps, ADR-029). */
+  cooldownMs: 5 * 60_000,
+  emulatorCooldownMs: 30_000,
+  /** Firestore allows 500 writes per batch. */
+  writeBatchOps: 400,
+  /** `array-contains-any` takes at most 30 values. */
+  keyLookupChunk: 30,
+  /** Key-lookup queries in flight at once. */
+  keyLookupConcurrency: 8,
+  /** Seed company refs read per `getAll`. */
+  seedReadChunk: 200,
+  /** Candidates detect-ats checks at once; each host is still spaced by its interval. */
+  detectWorkers: 4,
+  /** ATS boards fetched at once per source; each host is still spaced by its interval. */
+  boardConcurrency: 4,
+  /**
+   * Share of the fetch budget one ATS host's boards may fill. A host with more boards than fit
+   * (count × its interval) rotates: the least recently scanned go first, the rest wait a run.
+   * Workable at 5 s gets 43 boards a run; Greenhouse at 1 s gets 216 (ADR-029).
+   */
+  boardTimeShare: 0.6,
+} as const;
+
+export interface HostPolicyConfig {
+  robots: 'enforce' | 'api-terms';
+  intervalMs: number;
+  timeoutMs: number;
+}
+
+const DEFAULT_HOST_POLICY: HostPolicyConfig = {
+  robots: 'enforce',
+  intervalMs: 1_000,
+  timeoutMs: 20_000,
+};
+
+/**
+ * Per-host overrides. `api-terms` hosts are keyed APIs that follow their developer terms
+ * instead of robots.txt (ADR-025); adding one needs an ADR.
+ */
+const HOST_POLICIES: Readonly<Record<string, Partial<HostPolicyConfig>>> = {
+  'www.reed.co.uk': { robots: 'api-terms', intervalMs: 1_000 },
+  // 20 requests a minute, under Adzuna's 25.
+  'api.adzuna.com': { robots: 'api-terms', intervalMs: 3_000 },
+  // Workable rate-limits (Cloudflare 1015) at 1 request/s. Called directly on
+  // apply.workable.com, where its documented endpoint redirects, so no redirect skips the
+  // host's robots check or spacing (ADR-027).
+  'apply.workable.com': { intervalMs: 5_000 },
+  // A whole "Who is hiring?" thread is a few MB.
+  'hn.algolia.com': { timeoutMs: 45_000 },
+};
+
+export function hostPolicy(host: string): HostPolicyConfig {
+  return { ...DEFAULT_HOST_POLICY, ...HOST_POLICIES[host.toLowerCase()] };
+}
+
+export const API_TERMS_HOSTS = Object.entries(HOST_POLICIES)
+  .filter(([, policy]) => policy.robots === 'api-terms')
+  .map(([host]) => host);
+
+export interface QuotaLimits {
+  perRun: number;
+  perDay: number;
+  perWeek: number;
+  perMonth: number;
+}
+
+/**
+ * API call budgets (ADR-025). Adzuna: 25/min, 250/day, 1,000/week, 2,500/month, kept 10%
+ * under. Reed: terms not published; a conservative budget until its clauses are cited.
+ */
+export const QUOTAS = {
+  adzuna: { perRun: 20, perDay: 225, perWeek: 900, perMonth: 2_250 },
+  reed: { perRun: 30, perDay: 300, perWeek: 1_500, perMonth: 6_000 },
+} as const satisfies Record<string, QuotaLimits>;
+
+export const SOURCE_QUERIES = {
+  reed: { resultsToTake: 100, distanceMiles: 20 },
+  adzuna: { resultsPerPage: 50, country: 'gb' },
+  hn: { maxComments: 1_500 },
+} as const;

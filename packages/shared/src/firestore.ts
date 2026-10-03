@@ -13,6 +13,7 @@ export const COLLECTIONS = {
   usage: 'usage',
   events: 'events',
   locks: 'locks',
+  sources: 'sources',
 } as const;
 
 /** Well-known document paths. */
@@ -42,6 +43,13 @@ export const PATHS = {
   document: (docId: string) => `${DOCS.profileMain}/${SUBCOLLECTIONS.documents}/${docId}`,
   criteriaVersion: (versionId: string) => `${COLLECTIONS.criteria}/${versionId}`,
   usage: (month: string) => `${COLLECTIONS.usage}/${month}`,
+  job: (jobId: string) => `${COLLECTIONS.jobs}/${jobId}`,
+  /** Full text, kept apart so job list reads stay cheap. */
+  jobDescription: (jobId: string) =>
+    `${COLLECTIONS.jobs}/${jobId}/${SUBCOLLECTIONS.description}/raw`,
+  run: (runId: string) => `${COLLECTIONS.runs}/${runId}`,
+  source: (sourceId: string) => `${COLLECTIONS.sources}/${sourceId}`,
+  company: (companyId: string) => `${COLLECTIONS.companies}/${companyId}`,
 } as const;
 
 /** Cloud Storage object paths (storage.rules). */

@@ -5,8 +5,8 @@ rules_version = '2';
 // - `config/*` is never writable from a client, so no signed-in user can claim ownership.
 // - Client writes are opened one milestone at a time, each with rules tests (tests/rules/).
 //   M2 opens fact edits with versioned snapshots (ADR-018) and criteria versions (ADR-019);
-//   M2.1 lets the owner mark an upload removed (ADR-023). Everything else, including every
-//   write by the Admin SDK paths, stays client-deny.
+//   M2.1 lets the owner mark an upload removed (ADR-023). M3 adds read-only `sources` (ADR-029).
+//   Everything else, including every write by the Admin SDK paths, stays client-deny.
 //   Unknown paths fall through to the default deny.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -213,6 +213,11 @@ service cloud.firestore {
     }
 
     match /locks/{lockId} {
+      allow read: if isOwner();
+    }
+
+    // Source health for the System screen (ADR-029); written by the Admin SDK only.
+    match /sources/{sourceId} {
       allow read: if isOwner();
     }
   }

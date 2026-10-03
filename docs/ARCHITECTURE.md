@@ -39,19 +39,20 @@
 | Greenhouse | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Public job board API |
 | Lever | `api.lever.co/v0/postings/{company}?mode=json` | Public |
 | Ashby | `api.ashbyhq.com/posting-api/job-board/{name}?includeCompensation=true` | Public |
-| Workable | Public account widget/jobs endpoint | Verify endpoint in M3 |
-| Reed | Reed Jobseeker API (free key, Basic auth) | UK |
-| Adzuna | Adzuna API (free app_id/app_key), country `gb` | UK aggregator |
-| Hacker News "Who's Hiring" | HN Algolia API, latest monthly thread | Filter UK/London/remote-UK |
-| YC jobs, Escape the City | **Verify robots.txt + ToS in M3.** If disallowed, use their email alerts instead | Don't assume |
-| LinkedIn, Wellfound, Work at a Startup, Welcome to the Jungle | **Email alerts only**, via Gmail bridge | Never scraped |
+| Workable | `apply.workable.com/api/v1/widget/accounts/{subdomain}?details=true`, where the documented `www.workable.com/api/accounts/{subdomain}` redirects; called directly so its robots.txt and 5 s spacing apply | Verified in M3 (ADR-027) |
+| Reed | Reed Jobseeker API `/api/1.0/search` (free key, Basic auth) | UK; keyed API under its developer terms, budget ≤ 30 calls/run and ≤ 300/day (ADR-025). Snippets only; full text for S2 survivors in M4 |
+| Adzuna | Adzuna API (free app_id/app_key), country `gb` | UK aggregator; keyed API under its terms: 3 s between calls, ≤ 20/run, persisted day/week/month quotas under 250/1,000/2,500 (ADR-025). Snippets only; "Jobs by Adzuna" attribution on listings (M5) |
+| Hacker News "Who's Hiring" | HN Algolia API, latest monthly thread | Keeps UK, London and remote-UK/Europe/anywhere postings |
+| YC jobs / Work at a Startup, Escape the City | **Email alerts only**, via Gmail bridge | Checked in M3: their terms forbid automated access (ADR-026, ADR-028) |
+| LinkedIn, Wellfound, Welcome to the Jungle | **Email alerts only**, via Gmail bridge | Never scraped |
 
-**Company watchlist** (`companies` collection) drives the ATS boards: seeded with ~150 London/UK B2B SaaS and startups, with ATS type + board token auto-detected from their careers page. Grows automatically when a company appears in alerts/aggregators and its ATS is detectable.
+**Company watchlist** (`companies` collection) drives the ATS boards: seeded with 204 London/UK B2B SaaS companies and startups, 94 of them with a detected board (the rest are kept for matching aggregator jobs) (`packages/shared/src/watchlist-seed.ts`). Candidates come from people; `node scripts/detect-ats.ts` finds each one's ATS type and board token by probing only the official board APIs (or parsing a careers URL the owner pastes), and the owner reviews the result. No careers page is fetched (ADR-031). `scanNow` creates missing seed companies and never overwrites existing ones. From M6 it grows when a company appears in alerts or aggregators and its ATS is detectable.
 
-Each source module implements:
+Each source module implements (`functions/src/sources/types.ts`):
 ```ts
 interface Source { id: string; fetch(ctx): Promise<RawJob[]>; health(): SourceHealth }
 ```
+Every request goes through one HTTP client (ADR-029): `HireframeBot` User-Agent, per-host spacing (≥ 1 s, robots `Crawl-delay` honoured), robots.txt for web pages and unkeyed endpoints (keyed APIs follow their terms, ADR-025), a per-request timeout and a run deadline, at most 3 attempts with backoff on 429/5xx, and zod on every response. Each posting is validated on its own, so one odd posting never loses a board, and one failing source never fails a run.
 
 ## Data model (Firestore)
 All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
@@ -61,22 +62,23 @@ All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 - `profile/main/facts/{factId}` — `{ type, text, evidence, source: 'cv'|'manual', sourceDocId?, dates{start?,end?}, tags[], lanes[], status: 'active'|'archived', version, review?: {kind: 'changed', proposed, docId, at}, evidenceVerified, evidenceUrl? }`. Created by `parseCv`/`addFact`; the owner edits with a versioned client batch (ADR-018). `evidenceUrl` is an owner-set https link, never model-drafted (ADR-024)
 - `profile/main/facts/{factId}/versions/{n}` — immutable `{ snapshot, change, at }`: the fact exactly as it was at version n
 - `profile/main/documents/{docId}` — uploaded CV (file at Storage `profile/documents/{docId}/cv.{pdf|docx}`, max 5 MiB, immutable) and its parse status, summary, model, prompt version and cost; `sha256` of the file, `duplicateOf?` when the same file was already read (not read again, ADR-022), and `removedAt?` once the owner removed the upload (ADR-023)
-- `companies/{companyId}` — `{ name, domain, ats: {type, token}, size?, stage?, hq, watch: bool, lastScannedAt }`
-- `jobs/{jobId}` — `{ dedupeKey, title, company, companyId?, location, remote, url, sources[{id, url, externalId, seenAt}], postedAt, firstSeenAt, descriptionRef, salary?, stage: 's0'..'s3', verdict?, fitScore?, luckScore?, reason?, matchedFactIds[], gaps[{type, text}], criteriaVersion, promptVersion, status: 'new'|'saved'|'applied'|'skipped'|'interview'|'offer'|'rejected', feedback?: {agree: bool, note?} }`
-- `jobs/{jobId}/description/raw` — full text (kept separate to keep list reads cheap). Purged after 60 days for `skip` jobs.
+- `companies/{companyId}` — `{ name, domain, ats: {type: 'greenhouse'|'lever'|'ashby'|'workable'|'none', token?, host?: 'eu'}, size?, stage?, hq, watch: bool, origin: 'seed'|'manual'|'detected', lastScannedAt?, lastScan?: {status: 'ok'|'not_found'|'error', jobs, consecutiveFailures, broken, errorCode?} }`. Server-written only (ADR-031); `broken` after 3 `not_found` runs in a row
+- `jobs/{jobId}` — `{ dedupeKey, keys[], title, company, companyId?, location, city, country: 'GB'|'other'|'unknown', remote: 'remote'|'hybrid'|'onsite'|'unknown', url, sources[{id, url, externalId, seenAt}], postedAt?, firstSeenAt, descriptionRef, descriptionKind: 'full'|'snippet', salary?, stage: 's0'..'s3', verdict?, fitScore?, luckScore?, reason?, matchedFactIds[], gaps[{type, text}], criteriaVersion?, promptVersion?, status: 'new'|'saved'|'applied'|'skipped'|'interview'|'offer'|'rejected', feedback?: {agree: bool, note?} }`. M3 writes the ingest fields and leaves the job at `s0`; M4 adds the verdict fields and `criteriaVersion` when it judges the job (`JobSchema` in `packages/shared`)
+- `jobs/{jobId}/description/raw` — `{ text, kind: 'full'|'snippet', sourceId, fetchedAt }`, untrusted text kept separate to keep list reads cheap. Purged after 60 days for `skip` jobs.
 - `cvs/{cvId}` — `{ jobId, profileVersion, content (structured), storagePaths {docx, pdf}, notes, createdAt }`
-- `runs/{runId}` — `{ trigger: 'schedule'|'manual', startedAt, finishedAt, status, perSource{}, perStage{}, costPence, errors[] }`
+- `runs/{runId}` — `{ trigger: 'schedule'|'manual', startedAt, finishedAt?, status: 'running'|'succeeded'|'partial'|'failed', perSource{ [sourceId]: {status, fetched, invalid, new, duplicate, merged, errors, requests, durationMs, errorCode?} }, perStage{ s0: {in, new, merged, duplicate, conflicts} }, costPence, errors[{sourceId?, code}] }` (codes only, never messages)
+- `sources/{sourceId}` — rolling health for the System screen: `{ status: 'ok'|'degraded'|'failing'|'disabled'|'skipped', lastRunAt, lastOkAt?, consecutiveFailures, lastErrorCode?, lastCounts, quota?: {day, dayCount, week, weekCount, month, monthCount}, queryCursor? }`. Server-written only (ADR-029)
 - `usage/{yyyy-mm}` — `{ spendPence, capPence, reservations{id: {pence, at}}, calls{model: n}, tokens{model: {input, output, cacheRead, cacheWrite}}, byPurpose{} }`, month in Europe/London. `llm.call()` reserves a call's worst case and settles its actual cost in transactions (ADR-016)
 - `events/{eventId}` — append-only user actions (applied, skipped, feedback, criteria change) for analytics
-- `locks/scan` — single-flight scan lock (kept out of `runs` so run queries never return it)
+- `locks/scan` — single-flight scan lock `{ runId?, startedAt?, lastFinishedAt? }` (kept out of `runs` so run queries never return it). Stale after 12 min; a manual scan within 5 min of the last one is skipped (ADR-029)
 
-**Dedupe key:** `hash(normCompany + '|' + normTitle + '|' + normCity)`; also match on any known `externalId` (e.g. LinkedIn job ID) or canonical URL. Normalisation strips seniority noise words only for matching, never for display.
+**Dedupe** (ADR-030, pure code in `packages/shared`): each job stores `keys[]` — `d:` + a 64-bit hash of `normCompany|normTitle|normCity`, every source key (`greenhouse:{id}`, `linkedin:{id}`, …) and keys derived from job URLs it links to. Jobs sharing any key are one job. Normalisation is for matching only, never display: level words are normalised (Jr → junior), never stripped, so Senior and Junior roles stay apart; bracketed or trailing location, work-mode, salary, contract and gender tags are dropped.
 
 ## Functions
 | Function | Trigger | Does |
 |---|---|---|
-| `scheduledScan` | Cloud Scheduler 07:30 + 17:30 Mon–Fri Europe/London | Runs all sources → dedupe → funnel; single-flight lock in `locks/scan` |
-| `scanNow` | Callable (owner only) | Same, manual |
+| `scheduledScan` | Cloud Scheduler 07:30 + 17:30 Mon–Fri Europe/London | Runs all sources → dedupe → funnel; single-flight lock in `locks/scan` (M4) |
+| `scanNow` | Callable (owner, App Check) | Same, manual. M3 ships it ingest-only: sources → normalise → dedupe → new jobs at `s0`, run and source health; M4 adds the funnel (ADR-029). Mounts only the Reed and Adzuna keys |
 | `ingestEmailJobs` | HTTPS, HMAC-signed, from Apps Script | Parses alert payloads → jobs |
 | `getDigest` | HTTPS, HMAC-signed, from Apps Script | Returns digest HTML for latest morning run, or an explicit in-progress/failed notice |
 | `lookup` | Callable | URL/text → match or run funnel |
@@ -86,7 +88,7 @@ All docs carry `createdAt`, `updatedAt`, `schemaVersion`.
 | `generateCv` | Callable | Tailored CV + cover note |
 | `weeklyBackup` | Scheduled Sun 03:00 | JSON export of all collections to Storage (keep 8) |
 
-Timeouts: scan functions 540 s, memory 1 GiB, max instances 1. All functions run in `europe-west2` as the `hireframe-fns` service account and are bundled with esbuild for deploy (ADR-017). `parseCv` allows 540 s, `addFact` and `resetProfile` 120 s. Only the model callables mount the Anthropic key.
+Timeouts: scan functions 540 s (no request starts after 360 s), memory 1 GiB, max instances 1. All functions run in `europe-west2` as the `hireframe-fns` service account and are bundled with esbuild for deploy (ADR-017). `parseCv` allows 540 s, `addFact` and `resetProfile` 120 s. Only the model callables mount the Anthropic key.
 
 ## Gmail bridge (Apps Script)
 - Gmail filters label alert emails `hireframe/alerts` (LinkedIn, Wellfound, WaaS, WTTJ, Reed, etc.).

@@ -98,3 +98,48 @@ export function criteriaSeedDocuments(now: Date) {
     current: { fields: toRestFields({ version: 1, updatedAt: now, schemaVersion: 1 }) },
   };
 }
+
+/**
+ * One fake job "from a LinkedIn alert" (alerts arrive in M6), so the first local Scan now shows
+ * the PRD R5 merge: the fake Greenhouse, Adzuna and HN postings of the same role join it instead
+ * of creating a second job. Its keys are what the shared dedupe computes (dev-tools.test.ts).
+ */
+export const DEV_LINKEDIN_JOB_ID = 'dev-linkedin-alert-job';
+export const DEV_LINKEDIN_JOB_KEYS = ['d:0e0d03aa2aa807d0', 'linkedin:4012345678'] as const;
+
+export function linkedInJobDocuments(now: Date) {
+  const url = 'https://www.linkedin.com/jobs/view/product-analyst-at-acme-analytics-4012345678';
+  return {
+    job: {
+      fields: toRestFields({
+        dedupeKey: DEV_LINKEDIN_JOB_KEYS[0],
+        keys: [...DEV_LINKEDIN_JOB_KEYS],
+        title: 'Product Analyst',
+        company: 'Acme Analytics Ltd',
+        location: 'London, England, United Kingdom',
+        city: 'london',
+        country: 'GB',
+        remote: 'unknown',
+        url,
+        sources: [{ id: 'linkedin-alert', url, externalId: '4012345678', seenAt: now }],
+        firstSeenAt: now,
+        descriptionRef: `jobs/${DEV_LINKEDIN_JOB_ID}/description/raw`,
+        descriptionKind: 'snippet',
+        stage: 's0',
+        status: 'new',
+        createdAt: now,
+        updatedAt: now,
+        schemaVersion: 1,
+      }),
+    },
+    description: {
+      fields: toRestFields({
+        text: 'Acme Analytics is hiring a Product Analyst.',
+        kind: 'snippet',
+        sourceId: 'linkedin-alert',
+        fetchedAt: now,
+        schemaVersion: 1,
+      }),
+    },
+  };
+}

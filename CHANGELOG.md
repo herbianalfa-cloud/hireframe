@@ -3,15 +3,78 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Added
+- **M3 Sources:**
+  - **Seven source modules:**
+    - Greenhouse, Lever (global and EU), Ashby and Workable job boards for watchlist companies;
+    - Reed and Adzuna searches built from your lane titles;
+    - the latest HN "Who is hiring?" thread, filtered to UK, London and remote-UK/Europe postings.
+
+    Every response is zod-checked, and each posting is validated on its own, so one odd posting never loses a board.
+  - **One HTTP client for every source** (ADR-029): `HireframeBot` User-Agent, at least 1 s between requests per host (robots `Crawl-delay` honoured), robots.txt for web pages and unkeyed endpoints, a timeout per request and a run deadline, at most 3 attempts with backoff on 429/5xx. Logs carry a host and a label, never a URL.
+  - **Reed and Adzuna follow their developer terms** (ADR-025): the keys live in Secret Manager and are mounted only on `scanNow`. Persisted call quotas keep Adzuna under 25/min, 250/day, 1,000/week and 2,500/month; Reed has a conservative budget until its terms are cited.
+  - **Normalise and dedupe (S0)** (ADR-030), pure code in `packages/shared`:
+    - jobs share `keys[]` (a company/title/city hash, source keys and keys from linked job URLs);
+    - level words are normalised, never stripped, so Senior and Junior roles at one company stay apart;
+    - location, work-mode, salary, contract and gender noise is ignored for matching.
+
+    Fixtures cover the PRD R5 case: a LinkedIn alert and the Greenhouse listing of the same role become one job with both sources.
+  - **`scanNow`**, ingest-only until M4 (ADR-029):
+    - fetches every source in parallel, writes new jobs at stage `s0` and adds new sources to known jobs. An unchanged job costs no write;
+    - records run, source and company health. A failing source never fails the run (PRD R4);
+    - a lock in `locks/scan` and a 5-minute cooldown, so a double tap never scans twice;
+    - `config/app.disabledSources` turns a source off without a deploy;
+    - a host with more ATS boards than fit in the fetch budget rotates them across scans, least recently scanned first (Workable, spaced 5 s apart, takes 43 a scan).
+
+    No schedule until M4.
+  - **System screen** (pulled forward from M5): Scan now, a card per source (status, counts, why it isn't OK, Adzuna calls today with "Jobs by Adzuna"), broken job boards, the job count and the last five runs.
+  - **Watchlist seed:** 204 London/UK companies, 94 with a verified job board. Detection matches names exactly, never confirms an empty board, marks rate-limited probes `unchecked`, and `--recheck` re-detects only those rows. Workable is spaced 5 s apart.
+  - **Company watchlist** (ADR-031): `node scripts/detect-ats.ts` finds each candidate's job board through the official board APIs only (or a careers URL you paste). It never fetches careers pages. It writes a review CSV, and `--write` turns your reviewed CSV into `packages/shared/src/watchlist-seed.ts`. `scanNow` creates missing seed companies and never overwrites existing ones.
+  - **ADRs 025–031:**
+    - robots.txt vs keyed APIs;
+    - YC/Work at a Startup and Escape the City: their terms forbid automated access, so email alerts only;
+    - Workable's public endpoint;
+    - the ingest pipeline, dedupe and watchlist sourcing.
+  - **Rules:** `sources/{id}` is owner-read, Admin-only write. Rules tests and emulator tests cover the scan (no job writes on a second run, the R5 merge, lock takeover, cooldown).
+  - **Local dev:** fake job APIs, a fake watchlist and one seeded LinkedIn-alert job, so the first local scan shows the merge. `LIVE=1` uses the real APIs.
+
+### Changed
+- **M3 review fixes (PR #8):**
+  - CI audits production dependencies at high and the full tree at critical; braces (via firebase-tools, dev only) has no patched version (ADR-013 addendum).
+  - A scan killed at the timeout is marked failed by the next scan, and the System screen shows it as "Timed out" at once.
+  - Reed and Adzuna calls count against the quota even if the run fails later.
+  - A failed write batch is retried write by write, so one bad write never loses the others; failed company updates are counted instead of failing the run.
+  - **Paused hosts:** a site that answers with a long Retry-After (Workable's was about 23 hours) gets no more requests until then, in this scan or later ones. It's logged once per host, and the System card shows "Paused until <time>".
+  - Workable is called on `apply.workable.com` directly, so its robots.txt and 5 s spacing apply (ADR-027 amendment).
+  - Stored jobs read during dedupe are zod-checked; job keys are capped without dropping a posting's own source key.
+  - Production functions bundles no longer contain the emulator's fixtures (ADR-017 addendum).
+  - Scan tuning numbers moved into `functions/src/config.ts`.
+  - SECURITY: the "Delete all my data" wipe of jobs, runs, sources and companies (and Adzuna data removal) is deferred to M8.
+- CLAUDE.md hard rule: robots.txt applies to web pages and unkeyed public endpoints; keyed official APIs follow their developer terms (ADR-025). SECURITY is updated to match.
+- ROADMAP:
+  - M3 adds Workable and the Sources panel;
+  - M4 adds the funnel to `scanNow`, the schedule, the `s0` backlog and Reed full text;
+  - M5 adds Adzuna (and, if required, Reed) attribution;
+  - M6 adds alert dedupe through `keys[]` and watchlist auto-growth.
+- RUNBOOK Part D (M3 manual steps); `scanNow` joins the invoker list in step 28.
+- Shared callable options moved to `functions/src/callable.ts`.
+- CHANGELOG: the v0.2.2 and v0.2.3 entries now sit under their release headings (both were tagged while still listed as Unreleased).
+
+## [0.2.3] - 2026-10-01
 ### Fixed
 - **Evidence on Profile fact cards looked empty.** The quote was stored and rendered, but it sits in a collapsed disclosure whose summary had no marker, so "Evidence" read as a heading with nothing under it. It now has a chevron that turns when open. A component test covers CV and manual facts.
+
+### Added
+- **Upload rows show the original file name** (truncated, full name in a tooltip). `parseCv` takes a required `fileName` (1–200 characters, validated with zod) and saves it on the upload document. It is never logged (a test checks). Uploads made before this have no name and show none. The immutable-fields rules test now covers `fileName`.
+
+## [0.2.2] - 2026-10-01
+### Fixed
 - **Re-uploading the same CV is stable** (ADR-022). Uploading the .docx and then the .pdf gave "Added 64, unchanged 77, flagged 53", because the model words facts differently on every read.
   - The merge now matches on the fact's evidence quote (normalised for PDF/DOCX extraction noise) before falling back to text similarity. An archived fact is never re-added under new wording.
   - parseCv stores a SHA-256 of each upload and doesn't read the same file twice: no model call, nothing changes.
   - Tests reproduce the bug with two differently worded fake reads of the same CV.
 
 ### Added
-- **Upload rows show the original file name** (truncated, full name in a tooltip). `parseCv` takes a required `fileName` (1–200 characters, validated with zod) and saves it on the upload document. It is never logged (a test checks). Uploads made before this have no name and show none. The immutable-fields rules test now covers `fileName`.
 - **Remove upload** on each upload row (ADR-023). It archives the facts that upload added and that were never edited, drops its pending proposed changes, keeps (and counts) facts you edited, and marks the upload Removed. It uses versioned client writes, with one new rule: the owner may set `removedAt` once on a finished upload.
 - **Reset profile** in a Profile Danger zone (ADR-023). You type RESET, and the owner-only `resetProfile` callable hard-deletes every fact, version, upload and uploaded file; criteria and spend are kept. It refuses while a CV is being read.
 - **Evidence link** on facts (ADR-024): an optional https-only `evidenceUrl`, editable and versioned. A model can never set one. Rules and rules tests are updated.

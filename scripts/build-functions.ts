@@ -41,6 +41,11 @@ await build({
   sourcemap: 'linked',
   legalComments: 'linked',
   logLevel: 'warning',
+  // `npm run dev` sets HIREFRAME_DEV_BUNDLE=1 so the emulator bundle includes its fakes
+  // (callable.ts `loadDevFakes`); every other build replaces it with false and drops them.
+  define: {
+    'process.env.HIREFRAME_DEV_BUNDLE': process.env.HIREFRAME_DEV_BUNDLE === '1' ? 'true' : 'false',
+  },
   // Bundled CommonJS dependencies call require(); give the ES module one.
   banner: {
     js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
