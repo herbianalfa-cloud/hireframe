@@ -415,12 +415,12 @@ describe('Workable rotation across scans', () => {
       fetched.push(run);
     }
     const [first = [], second = []] = fetched;
-    expect(first).toHaveLength(43);
-    expect(second).toHaveLength(43);
+    expect(first).toHaveLength(36);
+    expect(second).toHaveLength(36);
     const skippedFirst = seed.map((c) => c.id).filter((id) => !first.includes(id));
-    expect(skippedFirst).toHaveLength(7);
-    // The 7 boards the first scan left out lead the second scan.
-    expect(second.slice(0, 7).sort()).toEqual(skippedFirst);
+    expect(skippedFirst).toHaveLength(14);
+    // The 14 boards the first scan left out lead the second scan.
+    expect(second.slice(0, 14).sort()).toEqual(skippedFirst);
     expect(new Set([...first, ...second]).size).toBe(50);
   });
 });

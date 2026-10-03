@@ -1,4 +1,5 @@
-import { FUNCTIONS_REGION, type ModelPrice } from '@hireframe/shared';
+import { FUNCTIONS_REGION, type CallableName, type ModelPrice } from '@hireframe/shared';
+import { z } from 'zod';
 
 /**
  * Functions configuration (CLAUDE.md: config lives here or in Firestore `config/*`).
@@ -23,7 +24,7 @@ export const DEFAULT_MONTHLY_CAP_PENCE = 1500;
 /** Deliberately high, so costs in pence are overstated rather than understated. */
 export const DEFAULT_FX_USD_TO_GBP = 0.85;
 
-export type LlmPurpose = 'parseCv' | 'addFact';
+export type LlmPurpose = 'parseCv' | 'addFact' | 'triage' | 'deepRead';
 
 export interface ModelConfig {
   id: string;
@@ -40,8 +41,11 @@ export interface ModelConfig {
 }
 
 /**
- * One model per purpose (ADR-016): Sonnet-class for the CV parse, Haiku-class for addFact.
- * Each budget plus `LLM.callableMarginMs` fits inside its callable's timeout (config.test.ts).
+ * One model per purpose (ADR-016, ADR-035): Sonnet-class for the CV parse and the S3 deep read,
+ * Haiku-class for addFact and S2 triage. Each budget plus `LLM.callableMarginMs` fits inside its
+ * callable's timeout, and the funnel's last call ends before the scan callable does
+ * (config.test.ts). `deepRead` keeps max_tokens low because every in-flight call reserves its
+ * worst case against the run's lease (ADR-032).
  */
 export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
   parseCv: {
@@ -52,7 +56,23 @@ export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
     budgetMs: 480_000,
   },
   addFact: { id: 'claude-haiku-4-5', maxTokens: 4_000, timeoutMs: 45_000, budgetMs: 90_000 },
+  triage: { id: 'claude-haiku-4-5', maxTokens: 1_000, timeoutMs: 25_000, budgetMs: 45_000 },
+  deepRead: {
+    id: 'claude-sonnet-5-5',
+    effort: 'low',
+    maxTokens: 4_000,
+    timeoutMs: 40_000,
+    budgetMs: 60_000,
+  },
 };
+
+/** The callable whose timeout bounds each purpose's calls. */
+export const PURPOSE_CALLABLE = {
+  parseCv: 'parseCv',
+  addFact: 'addFact',
+  triage: 'scanNow',
+  deepRead: 'scanNow',
+} as const satisfies Record<LlmPurpose, CallableName>;
 
 export const LLM = {
   /** Hard limit for a token count, SDK retries included. */
@@ -69,7 +89,10 @@ export const LLM = {
  */
 export const FAKE_MODEL_PREFIX = 'fake:';
 
-/** USD per million tokens (Anthropic list prices). Unknown models are charged at the top rate. */
+/**
+ * USD per million tokens, from platform.claude.com/docs/en/about-claude/pricing (checked
+ * 2026-10-03, ADR-032). Unknown models are charged at the top rate.
+ */
 export const PRICES_USD_PER_MTOK: Readonly<Record<string, ModelPrice>> = {
   'claude-sonnet-5-5': {
     inputUsdPerMTok: 2,
@@ -120,8 +143,8 @@ export const SCAN = {
   retryAfterCapMs: 30_000,
   /** Largest response body read (a big Greenhouse board with content or an HN thread). */
   maxBodyBytes: 20 * 1024 * 1024,
-  /** No request starts after this much of the run; the rest is dedupe and writes. */
-  fetchBudgetMs: 360_000,
+  /** No request starts after this much of the run; the rest is dedupe, writes and the funnel. */
+  fetchBudgetMs: 300_000,
   /** A lock older than this belongs to a scan that died (callable timeout is 9 min). */
   lockStaleMs: 12 * 60_000,
   /** A manual scan this soon after the last one is skipped (double taps, ADR-029). */
@@ -204,3 +227,80 @@ export const SOURCE_QUERIES = {
   adzuna: { resultsPerPage: 50, country: 'gb' },
   hn: { maxComments: 1_500 },
 } as const;
+
+// ---- Funnel (M4, ADR-032) ----
+
+export const FUNNEL = {
+  /** Weekday runs at 07:30 and 17:30: at most 23 weekdays a month. */
+  scheduledRunsPerMonth: 46,
+  /** Share of the monthly cap the scheduled runs may use; the rest is for manual work. */
+  scheduledShare: 0.75,
+  /** S2 may use at most this share of a run's lease, so it can't starve S3. */
+  s2Share: 0.4,
+  /** From this share of the monthly cap a run is flagged `spend_80` (PRD R11). */
+  warnAtFraction: 0.8,
+  /** From this share of the monthly cap S3 pauses; S2 continues until the cap (PRD R11). */
+  deepPauseAtFraction: 0.9,
+  s1MaxJobs: 2_000,
+  s2MaxJobs: 300,
+  s3MaxJobs: 25,
+  s2Concurrency: 4,
+  s3Concurrency: 2,
+  /** Request starts per minute, under Anthropic's rate limits for the account's tier. */
+  triageRpm: 45,
+  deepReadRpm: 20,
+  /** Reed details calls for full text, per run (they count against Reed's quotas too). */
+  reedHydratePerRun: 20,
+  /** From the run's start: no new S2 call after this, nor a new S3 call after the next. */
+  s2StopMs: 400_000,
+  s3StopMs: 450_000,
+  /** Description and company reads per `getAll`. */
+  readChunk: 100,
+  /** Jobs a re-score looks at, at most (first seen in the last 14 days). */
+  rescoreMaxJobs: 2_000,
+} as const;
+
+/** Per-run lease when `config/app.funnel.runBudgetPence` isn't set: 24p at a £15 cap. */
+export function defaultRunBudgetPence(monthlyCapPence: number): number {
+  return Math.floor((monthlyCapPence * FUNNEL.scheduledShare) / FUNNEL.scheduledRunsPerMonth);
+}
+
+/**
+ * Optional `config/app.funnel` overrides, changed in the console without a deploy. Parsed on its
+ * own (AppConfigSchema keeps it as unknown), so a typo can't fail the owner check: an invalid
+ * object is logged and ignored.
+ */
+export const FunnelOverridesSchema = z
+  .object({
+    runBudgetPence: z.number().min(0).max(1_000),
+    s1MaxJobs: z.int().min(0).max(5_000),
+    s2MaxJobs: z.int().min(0).max(300),
+    s3MaxJobs: z.int().min(0).max(60),
+    triageRpm: z.int().min(1).max(1_000),
+    deepReadRpm: z.int().min(1).max(1_000),
+    reedHydratePerRun: z.int().min(0).max(30),
+  })
+  .partial();
+export type FunnelOverrides = z.infer<typeof FunnelOverridesSchema>;
+
+export interface FunnelLimits {
+  runBudgetPence: number;
+  s1MaxJobs: number;
+  s2MaxJobs: number;
+  s3MaxJobs: number;
+  triageRpm: number;
+  deepReadRpm: number;
+  reedHydratePerRun: number;
+}
+
+export function funnelLimits(monthlyCapPence: number, overrides: FunnelOverrides): FunnelLimits {
+  return {
+    runBudgetPence: overrides.runBudgetPence ?? defaultRunBudgetPence(monthlyCapPence),
+    s1MaxJobs: overrides.s1MaxJobs ?? FUNNEL.s1MaxJobs,
+    s2MaxJobs: overrides.s2MaxJobs ?? FUNNEL.s2MaxJobs,
+    s3MaxJobs: overrides.s3MaxJobs ?? FUNNEL.s3MaxJobs,
+    triageRpm: overrides.triageRpm ?? FUNNEL.triageRpm,
+    deepReadRpm: overrides.deepReadRpm ?? FUNNEL.deepReadRpm,
+    reedHydratePerRun: overrides.reedHydratePerRun ?? FUNNEL.reedHydratePerRun,
+  };
+}
