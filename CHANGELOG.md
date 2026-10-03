@@ -4,6 +4,32 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
 ### Added
+- **M4 Funnel:**
+  - **S1–S3 on every scan** (FUNNEL.md, ADR-032–037). `scanNow` and the new `scheduledScan` (07:30 and 17:30 on weekdays, Europe/London) fetch, dedupe, then judge:
+    - **S1**, free rules with a rule ID on every skip: excluded titles, companies and keywords; non-UK office jobs; freshness; SC/DV clearance and driving licence; right-to-work wording that excludes your work rights; required experience above the cap. Unknown titles always pass.
+    - **S2**, Haiku 4.5 triage: lane, seniority, explicit blockers, a score for queue order.
+    - **S3**, Sonnet 5.5 deep read: requirements matched to profile facts (cited by ID; an unsupported "met" counts as missing), gaps, talking points.
+    - **Fit, luck and the verdict are computed in code** from the deep read, with thresholds and lane points from criteria; the model's own scores only flag drift above 2.
+  - **Spend control** (ADR-032): each run reserves a lease on `usage/{month}` (default 75% of the monthly cap over 46 scheduled runs, 24p at £15) and settles it once. S2 may use 40% of the lease. Per-run caps S1 ≤ 2,000, S2 ≤ 300, S3 ≤ 25. At 80% of the monthly cap a run is flagged; from 90% deep reads pause. Rate pacing stays under Anthropic's limits. Overrides in `config/app.funnel`, no deploy needed.
+  - **Queues and backlog:** S2 takes the newest jobs first, S3 the best triage scores; leftovers wait for the next run, and a queued job that goes stale is skipped for free. The first run works through the M3 `s0` backlog.
+  - **Reed full text:** jobs about to get a deep read swap their Reed snippet for the full description (≤ 20 calls a run, inside Reed's quotas). Adzuna-only jobs are flagged as snippets.
+  - **Prompt caching** on the S3 system prompt (profile facts, lanes, wildcards, company preferences); S2's prompt is below Haiku's 4,096-token minimum.
+  - **Injection safety:** every job-derived field sits inside a `<job_posting>` tag it can't close; no tools; fixed schemas; writes limited to verdict fields on that job; five injection cases in the golden set.
+  - **`rescore`** callable and a **Re-score last 14 days** button on Criteria: S1 runs again, verdicts are recomputed in code wherever the prompts haven't changed (free for threshold, lane-point and rule changes), and only jobs whose prompt inputs changed go back to the model. Old verdicts stay until replaced.
+  - **Work rights** on Profile (no restrictions, time-limited with an optional end date, needs sponsorship), saved to `profile/main`. Reset profile deletes it.
+  - **Lane points** in criteria (wildcard 2, so wildcard verdicts are reachable), editable on Criteria.
+  - **System screen:** each run shows its trigger, S1/S2/S3 counts, queued and review counts, cost, spend warnings and why it stopped early.
+  - **Evals:** `evals/golden.jsonl` (40 fake postings, labelled by the owner), `npm run eval` (replays recorded answers, so CI needs no key; `LIVE=1` refreshes them), and `node scripts/eval-labels.ts export|import` for labelling in a spreadsheet.
+  - **ADRs 032–037.**
+
+### Changed
+- The scan fetch budget drops from 360 s to 300 s to leave room for the funnel; Workable rotates 36 boards a scan instead of 43.
+- `scanNow` mounts the Anthropic key.
+- Run records gain per-stage counts, the lease and flags; jobs gain the verdict fields, `next`, `sortAt` and fingerprints.
+- `npm run dev` seeds the fake CV's facts and a work-rights setting, so Scan now runs the whole funnel on the fake model.
+
+## [0.3.0] - 2026-10-03
+### Added
 - **M3 Sources:**
   - **Seven source modules:**
     - Greenhouse, Lever (global and EU), Ashby and Workable job boards for watchlist companies;

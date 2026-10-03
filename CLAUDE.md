@@ -30,7 +30,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run check` — lint + typecheck + unit tests + PII scan
 - `npm run format` / `npm run format:check` — Prettier (code and config; Markdown excluded)
 - `npm run scan:pii` — fail on emails/phone numbers in tracked files
-- `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria and one LinkedIn-alert job; fake LLM and fake job APIs unless `LIVE=1`)
+- `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria, the fake CV's facts with work rights, and one LinkedIn-alert job; fake LLM and fake job APIs unless `LIVE=1`)
 - `npm run test:rules` — Firestore + Storage security rules tests and emulator integration tests (`tests/emulator/`) (needs Java 21)
 - `npm run build` — build all workspaces (functions: esbuild bundle in `functions/deploy/`)
 - `npm run check:bundle` — web bundle budget after `build`: no chunk over 500 kB, initial JS under the gzip budget
@@ -38,5 +38,6 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `node scripts/make-cv-fixtures.ts` — write fake CVs (PDF/DOCX) to `tmp/fixtures/` for local uploads
 - `node scripts/detect-ats.ts <candidates.csv>` / `--recheck <review.csv>` / `--write <review.csv>` — find watchlist companies' job boards via the official board APIs only, re-detect just the `unchecked` rows in place, then write the reviewed seed (ADR-031)
 - `npm run deploy` — deploy (CI only on `v*` tags; refuses to run locally)
-- `npm run eval` — funnel eval against the golden set *(from M4)*
+- `npm run eval` — funnel eval against the golden set: replays `evals/recordings.jsonl` (no API key; CI). `LIVE=1 npm run eval` calls the API and refreshes the recordings (local only); `-- --update-baseline` stores a passing agreement as the new floor
+- `node scripts/eval-labels.ts export` / `import <file.csv>` — label the golden set blind in a spreadsheet (`tmp/golden-labels.csv`)
 
