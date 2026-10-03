@@ -1,8 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Job, Usage } from '@hireframe/shared';
+import {
+  costPence,
+  worstCasePence,
+  type Job,
+  type ModelPrice,
+  type TokenCounts,
+  type Usage,
+} from '@hireframe/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { FUNNEL, funnelLimits, type FunnelLimits } from '../config.js';
+import { FUNNEL, funnelLimits, MODELS, PRICES_USD_PER_MTOK, type FunnelLimits } from '../config.js';
 import { fakeTransport } from '../llm/fake-transport.js';
 import type { LlmRequest, LlmResponse, LlmTransport } from '../llm/transport.js';
 import { emptyUsage } from '../llm/usage-store.js';
@@ -452,5 +459,426 @@ describe('re-score', () => {
     store.jobs.set('apply', applied);
     await run(deps(store, { criteria: testCriteria({ version: 4 }) }), daysAgo(14));
     expect(store.get('apply').status).toBe('applied');
+  });
+});
+
+/**
+ * The first production run (v0.4.1): the API reports dated snapshot IDs, calls cost what the
+ * eval's did, and the lease is the production 24p. Before F0 and F2, S2 stopped at 30 calls on a
+ * doubled price and S3 stopped at 5 on its own worst case.
+ */
+function priceOf(model: string): ModelPrice {
+  const price = PRICES_USD_PER_MTOK[model];
+  if (!price) throw new Error(`no price for ${model}`);
+  return price;
+}
+
+/** The input bound `llm.call()` reserves for a counted prompt (call.ts `inputTokenBound`). */
+const boundOf = (counted: number) => Math.ceil(counted * 1.1) + 500;
+
+describe('throughput at the production lease', () => {
+  const FX = 0.85;
+  const HAIKU = priceOf('claude-haiku-4-5');
+  const SONNET = priceOf('claude-sonnet-5-5');
+
+  function production() {
+    const inner = fakeTransport();
+    const sends: { purpose: string; at: number }[] = [];
+    // used + reserved-and-unsettled, checked as each call goes out (its reservation is held by then)
+    const overLease: number[] = [];
+    const started = { triage: 0, deepRead: 0 };
+    const reserved = {
+      triage: worstCasePence(boundOf(1_500), MODELS.triage.maxTokens, HAIKU, FX),
+      deepRead: worstCasePence(boundOf(9_000), MODELS.deepRead.maxTokens, SONNET, FX, {
+        cacheWrite: true,
+      }),
+    };
+    const transport: LlmTransport = {
+      // Eval-sized prompts: triage about 1.5k tokens, the deep read about 9k with its system cached.
+      countTokens: (request) => Promise.resolve(request.purpose === 'triage' ? 1_500 : 9_000),
+      async send(request) {
+        sends.push({ purpose: request.purpose, at: clock });
+        const purpose = request.purpose === 'triage' ? 'triage' : 'deepRead';
+        started[purpose] += 1;
+        const called = logs.filter((line) => line.event === 'llm.called');
+        const open = (kind: 'triage' | 'deepRead') =>
+          started[kind] - called.filter((line) => line.purpose === kind).length;
+        const settled = called.reduce((sum, line) => sum + Number(line.costPence), 0);
+        const held = open('triage') * reserved.triage + open('deepRead') * reserved.deepRead;
+        if (settled + held > 24 + 1e-9) overLease.push(settled + held);
+        // A real call takes time, so other calls are in flight meanwhile.
+        await new Promise((resolve) => setImmediate(resolve));
+        const reply = await inner.send(request);
+        return request.purpose === 'triage'
+          ? {
+              ...reply,
+              model: 'claude-haiku-4-5-20251001',
+              tokens: { input: 1_476, output: 61, cacheRead: 0, cacheWrite: 0 },
+            }
+          : {
+              ...reply,
+              model: 'claude-sonnet-5-5',
+              tokens: { input: 1_500, output: 700, cacheRead: 8_000, cacheWrite: 0 },
+            };
+      },
+    };
+    const store = memoryFunnelStore();
+    for (let i = 0; i < 400; i++) {
+      store.add(
+        `j${String(i).padStart(3, '0')}`,
+        testJob({ title: 'Product Analyst', postedAt: daysAgo(2) }),
+      );
+    }
+    return { store, transport, sends, overLease };
+  }
+
+  it('keeps S2 going past 30 and stops only on its share; S3 reads at least 8', async () => {
+    const { store, transport, sends, overLease } = production();
+    const leases = memoryLeaseStore();
+    const result = await run(deps(store, { transport, leases }));
+
+    expect(result.budget.leasePence).toBe(24);
+    expect(result.budget.stops?.s2).toBe('run_budget');
+    expect(result.perStage.s2.in).toBeGreaterThanOrEqual(55);
+    expect(result.perStage.s2.costPence).toBeLessThanOrEqual(24 * FUNNEL.s2Share);
+    expect(result.perStage.s3.in).toBeGreaterThanOrEqual(8);
+    expect(result.costPence).toBeLessThanOrEqual(24);
+    expect(leases.usage().spendPence).toBeLessThanOrEqual(24);
+
+    // Every S2 call settled at the Haiku price of its tokens, not the top rate.
+    const haikuCost = costPence(
+      { input: 1_476, output: 61, cacheRead: 0, cacheWrite: 0 },
+      HAIKU,
+      FX,
+    );
+    const called = logs.filter((line) => line.event === 'llm.called');
+    const triage = called.filter((line) => line.purpose === 'triage');
+    expect(triage.length).toBe(result.perStage.s2.in);
+    expect(new Set(triage.map((line) => line.costPence))).toEqual(new Set([haikuCost]));
+    expect(haikuCost).toBeLessThan(0.16);
+    expect(logs.some((line) => line.event === 'llm.unknown_model_price')).toBe(false);
+    const deepCost = costPence(
+      { input: 1_500, output: 700, cacheRead: 8_000, cacheWrite: 0 },
+      SONNET,
+      FX,
+    );
+    const deep = called.filter((line) => line.purpose === 'deepRead');
+    expect(new Set(deep.map((line) => line.costPence))).toEqual(new Set([deepCost]));
+
+    // Settled spend plus open reservations never passed the lease when a call went out, and
+    // nothing started after a deadline.
+    expect(overLease).toEqual([]);
+    const startedAt = TEST_NOW.getTime();
+    for (const send of sends) {
+      const limit = send.purpose === 'triage' ? FUNNEL.s2StopMs : FUNNEL.s3StopMs;
+      expect(send.at - startedAt).toBeLessThan(limit);
+    }
+  });
+
+  it('records separate stop reasons per stage', async () => {
+    const { store, transport } = production();
+    const result = await run(deps(store, { transport }));
+    expect(result.budget.stops?.s2).toBe('run_budget');
+    expect(result.budget.stops?.s3).toBeDefined();
+    expect(result.budget.stoppedBy).toBe(result.budget.stops?.s3);
+  });
+
+  it('leaves no stop reason for a stage that finished its queue', async () => {
+    const store = memoryFunnelStore();
+    store.add('only', testJob());
+    const result = await run(deps(store));
+    expect(result.budget.stops).toBeUndefined();
+  });
+});
+
+/**
+ * Back-pressure paths (ADR-039), driven with a transport whose sends and token counts wait until
+ * the test releases them, and a lease sized in multiples of one triage reservation.
+ */
+describe('back-pressure', () => {
+  const FX = 0.85;
+  const HAIKU = priceOf('claude-haiku-4-5');
+  const SONNET = priceOf('claude-sonnet-5-5');
+  const R2 = worstCasePence(boundOf(1_500), MODELS.triage.maxTokens, HAIKU, FX);
+  const R3 = worstCasePence(boundOf(9_000), MODELS.deepRead.maxTokens, SONNET, FX, {
+    cacheWrite: true,
+  });
+  const TRIAGE: TokenCounts = { input: 1_476, output: 61, cacheRead: 0, cacheWrite: 0 };
+  const DEEP: TokenCounts = { input: 1_500, output: 700, cacheRead: 8_000, cacheWrite: 0 };
+  const C2 = costPence(TRIAGE, HAIKU, FX);
+
+  /** Uncached Haiku input tokens that cost `pence`. */
+  const inputFor = (pence: number) =>
+    Math.round((pence / costPence({ ...TRIAGE, input: 1_000_000, output: 0 }, HAIKU, FX)) * 1e6);
+  /** A lease whose S2 share holds `triageCalls` triage reservations (and a little more). */
+  const s2Lease = (triageCalls: number) => (triageCalls * R2) / FUNNEL.s2Share;
+
+  function deferred() {
+    let resolve: () => void = () => undefined;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+  async function ticks(n = 20) {
+    for (let i = 0; i < n; i++) await tick();
+  }
+  async function until(condition: () => boolean) {
+    for (let i = 0; i < 1_000; i++) {
+      if (condition()) return;
+      await tick();
+    }
+    throw new Error('timed out waiting for the funnel');
+  }
+
+  interface Control {
+    /** Send indices (in start order) that wait for `releaseSend`. */
+    holdSends?: number[];
+    /** Token-count indices that wait for `releaseCount`. */
+    holdCounts?: number[];
+    /** Input tokens a triage send reports, by send index. */
+    triageInput?: Record<number, number>;
+    deepTokens?: TokenCounts;
+    onSend?: (purpose: string, index: number) => void;
+  }
+
+  function controlled(options: Control = {}) {
+    const inner = fakeTransport();
+    const gates = new Map<string, ReturnType<typeof deferred>>();
+    const gate = (key: string) => {
+      const found = gates.get(key) ?? deferred();
+      gates.set(key, found);
+      return found;
+    };
+    let counted = 0;
+    let sends = 0;
+    let open = 0;
+    let peak = 0;
+    const transport: LlmTransport = {
+      async countTokens(request) {
+        const index = counted++;
+        if (options.holdCounts?.includes(index)) await gate(`count:${String(index)}`).promise;
+        return request.purpose === 'triage' ? 1_500 : 9_000;
+      },
+      async send(request) {
+        const index = sends++;
+        open += 1;
+        peak = Math.max(peak, open);
+        options.onSend?.(request.purpose, index);
+        try {
+          if (options.holdSends?.includes(index)) await gate(`send:${String(index)}`).promise;
+          else await tick();
+          const reply = await inner.send(request);
+          return request.purpose === 'triage'
+            ? {
+                ...reply,
+                model: 'claude-haiku-4-5-20251001',
+                tokens: { ...TRIAGE, input: options.triageInput?.[index] ?? TRIAGE.input },
+              }
+            : { ...reply, model: 'claude-sonnet-5-5', tokens: options.deepTokens ?? DEEP };
+        } finally {
+          open -= 1;
+        }
+      },
+    };
+    return {
+      transport,
+      sends: () => sends,
+      counts: () => counted,
+      peak: () => peak,
+      releaseSend: (index: number) => {
+        gate(`send:${String(index)}`).resolve();
+      },
+      releaseCount: (index: number) => {
+        gate(`count:${String(index)}`).resolve();
+      },
+    };
+  }
+
+  const called = () => logs.filter((line) => line.event === 'llm.called').length;
+  /** `llm.call()` logs each reservation the lease refused. */
+  const refusals = () => logs.filter((line) => line.event === 'llm.spend_cap').length;
+
+  function skippable(store: MemoryFunnelStore, ids: string[]) {
+    // A triage skip ends the job at S2, so these tests never reach S3.
+    for (const id of ids) store.add(id, testJob({ title: 'Warehouse Operative' }));
+  }
+  const judged = (store: MemoryFunnelStore, id: string) => store.get(id).stage === 's2';
+
+  it('waits for an in-flight call, then sends the refused job', async () => {
+    const store = memoryFunnelStore();
+    skippable(store, ['a', 'b']);
+    // The S2 share holds one reservation at a time.
+    const t = controlled({ holdSends: [0], triageInput: { 0: inputFor(0.2 * R2) } });
+    const running = run(
+      deps(store, { transport: t.transport, limits: { runBudgetPence: s2Lease(1.5) } }),
+    );
+
+    await until(() => t.sends() === 1);
+    await ticks();
+    expect(t.sends()).toBe(1);
+    t.releaseSend(0);
+    const result = await running;
+
+    expect(t.sends()).toBe(2);
+    expect(t.peak()).toBe(1);
+    expect(refusals()).toBe(1);
+    expect(judged(store, 'a') && judged(store, 'b')).toBe(true);
+    expect(result.perStage.s2.in).toBe(2);
+    expect(result.budget.stops).toBeUndefined();
+  });
+
+  it('leaves a job queued when it is refused twice with other calls in flight, and carries on', async () => {
+    const store = memoryFunnelStore();
+    skippable(store, ['a', 'b', 'c']);
+    // Room for two in flight; the first to settle costs 0.6 of a reservation, so a third no longer fits.
+    const t = controlled({
+      holdSends: [0, 1],
+      triageInput: { 0: inputFor(0.6 * R2), 1: inputFor(0.1 * R2) },
+    });
+    const running = run(
+      deps(store, { transport: t.transport, limits: { runBudgetPence: s2Lease(2.5) } }),
+    );
+
+    await until(() => t.sends() === 2);
+    await ticks();
+    expect(t.sends()).toBe(2);
+    t.releaseSend(0);
+    await until(() => called() === 1);
+    await ticks();
+    t.releaseSend(1);
+    const result = await running;
+
+    expect(t.sends()).toBe(2);
+    const left = ['a', 'b', 'c'].filter((id) => !judged(store, id));
+    expect(left).toHaveLength(1);
+    expect(store.get(left[0] ?? '').next).toBe('s2');
+    expect(result.perStage.s2.in).toBe(2);
+    expect(result.perStage.s2.queued).toBe(1);
+    expect(refusals()).toBe(2);
+    expect(result.budget.stops).toBeUndefined();
+  });
+
+  it('stops the stage when a refused job still cannot fit with nothing in flight', async () => {
+    const store = memoryFunnelStore();
+    skippable(store, ['a', 'b']);
+    const t = controlled({ holdSends: [0], triageInput: { 0: inputFor(0.6 * R2) } });
+    const running = run(
+      deps(store, { transport: t.transport, limits: { runBudgetPence: s2Lease(1.5) } }),
+    );
+
+    await until(() => t.sends() === 1);
+    await ticks();
+    t.releaseSend(0);
+    const result = await running;
+
+    expect(t.sends()).toBe(1);
+    expect(result.budget.stops?.s2).toBe('run_budget');
+    expect(refusals()).toBe(2);
+    expect(result.perStage.s2.in).toBe(1);
+    expect(result.perStage.s2.queued).toBe(1);
+  });
+
+  it('starts no deep read after the deadline passes while it waited for room', async () => {
+    const store = memoryFunnelStore();
+    store.add('a', testJob({ title: 'Product Analyst' }));
+    store.add('b', testJob({ title: 'Product Analyst' }));
+    // One deep read fits at a time. Its send takes until the S3 deadline has passed.
+    const t = controlled({
+      holdSends: [2],
+      onSend: (purpose) => {
+        if (purpose === 'deepRead') clock = TEST_NOW.getTime() + FUNNEL.s3StopMs + 1_000;
+      },
+    });
+    const running = run(deps(store, { transport: t.transport, limits: { runBudgetPence: 8 } }));
+
+    await until(() => t.sends() === 3);
+    await ticks();
+    t.releaseSend(2);
+    const result = await running;
+
+    expect(t.sends()).toBe(3);
+    expect(result.budget.stops?.s3).toBe('deadline');
+    expect(result.perStage.s3.in).toBe(1);
+    expect(result.perStage.s3.queued).toBe(1);
+  });
+
+  describe('S3 slots and Reed details calls', () => {
+    function snippetJobs(store: MemoryFunnelStore, ids: string[]) {
+      for (const id of ids) {
+        store.add(id, testJob({ title: 'Product Analyst', descriptionKind: 'snippet' }));
+      }
+    }
+    function hydratorSpy() {
+      const asked: string[] = [];
+      const hydrator: Hydrator = {
+        fullText: (entry) => {
+          asked.push(entry.id);
+          return Promise.resolve('The full description.');
+        },
+        counts: () => ({ attempted: asked.length, ok: asked.length, failed: 0 }),
+        finish: () => Promise.resolve(),
+      };
+      return { asked, hydrator };
+    }
+
+    it('spends no Reed details call on a job that cannot be sent', async () => {
+      const store = memoryFunnelStore();
+      snippetJobs(store, ['a', 'b', 'c']);
+      const { asked, hydrator } = hydratorSpy();
+      // Two deep reads run at once and each costs its full reservation; a third cannot fit.
+      const worst: TokenCounts = {
+        input: 0,
+        output: MODELS.deepRead.maxTokens,
+        cacheRead: 0,
+        cacheWrite: boundOf(9_000),
+      };
+      const t = controlled({ deepTokens: worst });
+      const lease = 3 * C2 + 2.5 * R3 + 0.01;
+      const result = await run(
+        deps(store, { transport: t.transport, hydrator, limits: { runBudgetPence: lease } }),
+      );
+
+      expect(result.perStage.s3.in).toBe(2);
+      expect(result.budget.stops?.s3).toBe('run_budget');
+      expect(asked).toHaveLength(2);
+      expect(result.perStage.s3.queued).toBe(1);
+    });
+
+    it('gives the slot back when a refused job is left queued', async () => {
+      const store = memoryFunnelStore();
+      snippetJobs(store, ['a', 'b', 'c', 'd']);
+      const { hydrator } = hydratorSpy();
+      // Sends: 0-3 triage, 4 and 5 held deep reads. Token counts: 0-3 triage, 4 and 5 the first
+      // two deep reads, 6 the retry of the job that was refused while the first was in flight.
+      const t = controlled({ holdSends: [4, 5], holdCounts: [6] });
+      const lease = 4 * C2 + 1.5 * R3 + 0.01;
+      const running = run(
+        deps(store, {
+          transport: t.transport,
+          hydrator,
+          limits: { runBudgetPence: lease, s3MaxJobs: 3 },
+        }),
+      );
+
+      await until(() => t.sends() === 5);
+      await ticks();
+      t.releaseSend(4);
+      await until(() => t.sends() === 6);
+      await ticks();
+      // The refused job retries only now, with the third deep read in flight: refused again.
+      t.releaseCount(6);
+      await ticks();
+      t.releaseSend(5);
+      const result = await running;
+
+      // Three deep reads in total: the one left queued gave its slot to the fourth job.
+      expect(t.sends()).toBe(7);
+      expect(result.perStage.s3.in).toBe(3);
+      expect(result.perStage.s3.queued).toBe(1);
+      expect(result.budget.stops).toBeUndefined();
+    });
   });
 });

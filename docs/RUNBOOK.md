@@ -281,11 +281,13 @@ Before the `v0.4.0` deploy. Design: ADR-032 (run budget), ADR-033 (S1 and work r
 66. **Wait for the new indexes.** Firebase console → **Firestore → Indexes**: all three new indexes on `jobs` must say **Enabled** (a few minutes) before the first scan.
 67. **Let the browser call `rescore`** (new callable):
     `gcloud functions add-invoker-policy-binding rescore --region=europe-west2 --member=allUsers --project=hireframe-f6b03`
-68. **Let the scheduler start `scheduledScan`.**
-    1. In the Google Cloud console, go to **Cloud Scheduler** (region europe-west2) and open the job whose name contains `scheduledScan`.
-    2. Under **Auth**, copy the service account email.
-    3. In Cloud Shell, run `gcloud functions add-invoker-policy-binding scheduledScan --region=europe-west2 --member=serviceAccount:<that email> --project=hireframe-f6b03`.
-    4. Back in Cloud Scheduler, click **Force run**. Within 10 minutes the app's **System** screen shows a run marked "Scheduled". If the job's last result says `PERMISSION_DENIED`, the binding is missing (see Recovery).
+68. **Let the scheduler start `scheduledScan`.** In Cloud Shell, bind the runtime account explicitly (it must be the only invoker, see Recovery):
+    ```bash
+    PROJECT_ID=hireframe-f6b03
+    FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+    gcloud functions add-invoker-policy-binding scheduledScan --region=europe-west2 --member=serviceAccount:$FNS --project=$PROJECT_ID
+    ```
+    Then in the Google Cloud console open **Cloud Scheduler** (region europe-west2), open the job whose name contains `scheduledScan`, check that **Auth** shows `hireframe-fns`, and click **Force run**. Within 10 minutes the app's **System** screen shows a run marked "Scheduled". If the job's last result says `PERMISSION_DENIED`, the binding is missing (see Recovery).
 69. In the app: **Profile → Work rights**. Pick yours (and the end date, if time-limited) and save. Until you do, right-to-work wording is flagged, never skipped.
 70. On your phone: **System → Scan now**. It takes 3–8 minutes; check the stage counts and cost. In Firestore, `usage/{yyyy-mm}.reservations` is empty afterwards.
 71. Next weekday after 07:30, check that a "Scheduled" run is there.
@@ -309,9 +311,23 @@ Before the `v0.4.0` deploy. Design: ADR-032 (run budget), ADR-033 (S1 and work r
 - **Scan now says "A scan is already running"** long after the last one: a scan that died leaves `locks/scan` for 12 minutes, then the next scan takes over.
 - **Deploy fails with 403 on a Reed or Adzuna secret:** Part D step 39 hasn't run.
 - **`scheduledScan` never runs, or Cloud Scheduler shows `PERMISSION_DENIED`:** the scheduler's service account can't invoke the function. Do Part E step 68. If the deploy failed creating the schedule, do Part E step 54 and re-run the deploy.
+- **A new scheduled function has no schedule after its first deploy** (the deploy said "Failed to set invoker function <fn>", and a re-run says "Skipped (No changes detected)"). The Firebase CLI sets the function's invoker before it creates the Cloud Scheduler job. The deploy account can't set IAM, so the job is never created, and later deploys skip the unchanged function. In Cloud Shell:
+  ```bash
+  PROJECT_ID=hireframe-f6b03; REGION=europe-west2; FN=scheduledScan
+  FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+  gcloud config set project $PROJECT_ID
+  gcloud functions add-invoker-policy-binding $FN --region=$REGION --member=serviceAccount:$FNS
+  URI=$(gcloud functions describe $FN --region=$REGION --gen2 --format='value(serviceConfig.uri)')
+  gcloud scheduler jobs create http firebase-schedule-$FN-$REGION --location=$REGION --schedule='30 7,17 * * 1-5' --time-zone='Europe/London' --uri="$URI" --http-method=POST --oidc-service-account-email=$FNS --attempt-deadline=540s --max-retry-attempts=0
+  gcloud scheduler jobs run firebase-schedule-$FN-$REGION --location=$REGION
+  ```
+  - Use exactly this job name, so later deploys update the job.
+  - The schedule must match `SCHEDULE` in `functions/src/config.ts`.
+  - The invoker must be **only** `hireframe-fns`. Any other member makes every later deploy that changes the function fail before it updates the schedule. Remove extras with `gcloud functions remove-invoker-policy-binding`.
+  - Within 10 minutes, **System** shows a "Scheduled" run.
 - **A scan fails with `FAILED_PRECONDITION` and "requires an index":** the funnel's indexes are still building or weren't deployed. Wait until **Firestore → Indexes** shows them Enabled (Part E step 66), then scan again.
 - **Jobs stuck "for review":** the model's output was unusable after a retry (`jobs.review.code`: `refusal`, `max_tokens` or `schema`). Re-score picks them up again; if one keeps failing, open an issue with the job ID (never paste the posting into chat).
-- **Runs keep stopping early with "run budget used":** the backlog is larger than one run's lease. It catches up over a few runs. To go faster, raise `config/app.monthlyCapPence` or set `config/app.funnel.runBudgetPence` (Part E step 72).
+- **Runs keep stopping early with "run budget used":** System shows a reason per stage (Triage, Deep reads). A stage stops on the budget only when its next call can't fit even with nothing in flight, so the backlog is larger than one run's lease. It catches up over a few runs. To go faster, raise `config/app.monthlyCapPence` or set `config/app.funnel.runBudgetPence` (Part E step 72).
 - **CI fails with "recordings stale":** a prompt, schema or golden case changed. Run `LIVE=1 npm run eval` locally and commit `evals/recordings.jsonl` (`evals/README.md`).
 - **"The monthly AI spend cap has been reached":** check `usage/{yyyy-mm}` in Firestore. Raise `config/app.monthlyCapPence` deliberately, or wait for next month. Stale `reservations` entries expire on their own after 15 minutes.
 

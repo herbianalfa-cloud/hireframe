@@ -396,3 +396,32 @@ Context: PRD R4 needs scans at 07:30 and 17:30 on weekdays, and R3 needs "Re-sco
   - the scheduler's service account needs `run.invoker` on `scheduledScan`. The deploy account can't set IAM, so these are one-time manual steps (RUNBOOK Part E).
 
 Consequences: re-scores of threshold-only changes are instant and free. A re-score with changed prompt inputs spends up to one run budget and may leave jobs queued for the next scheduled run.
+
+**Addendum (v0.4.1): the schedule's invoker.** The first deploy of `scheduledScan` ended with no schedule:
+- The Firebase CLI sets a new function's invoker *before* it creates the Cloud Scheduler job. The deploy account can't set IAM, so "Failed to set invoker" ended the deploy before the job existed, and the next deploy said "Skipped (No changes detected)".
+- **Recovery** creates the job by hand under the exact name the CLI uses (`firebase-schedule-scheduledScan-europe-west2`), so later deploys update it (RUNBOOK Recovery).
+- **The invoker must be exactly `hireframe-fns`.** Every deploy that changes the function rewrites the invoker unless the members are exactly that account; any extra member makes the deploy fail before it updates the schedule. Part E step 68 now binds `hireframe-fns` explicitly instead of copying whatever email the scheduler shows.
+- v0.4.1 is the first deploy that changes the bundle, so RUNBOOK checks the job and the invoker before the tag.
+
+## ADR-039 Funnel throughput: dated model IDs, back-pressure, cache-write worst case
+Context: the first production run (v0.4.0) passed 422 jobs in S1, then S2 judged 30 and stopped, and S3 judged 5 of 8 at 14p of a 24p lease. The run took 135 s against a 400 s S2 deadline, and S2 had no errors (`s2.in` 30 = passed 8 + skipped 22, review 0). Two causes:
+- **Dated model IDs were priced at the top rate.** `llm.call()` reserves at the requested model's price (`claude-haiku-4-5`) but settles at the price of the model the API reports, which for Haiku is the dated snapshot `claude-haiku-4-5-20251001`. That isn't a key in `PRICES_USD_PER_MTOK`, so `priceFor` fell back to `TOP_PRICE` (Sonnet 5.5's $2/$10) and every Haiku call settled at about 0.30p instead of 0.15p (1,476 in + 61 out at $2/$10 × 0.85 = 0.3028p). S2 hit its 40% share (9.6p) after 30 calls. Tests and fakes returned the alias, so none saw it. The deep read is priced correctly: the API reports `claude-sonnet-5-5`.
+- **A refusal stopped the stage for good.** S3 reserves about 5.5p worst case per call against about 1.0p actual. With 2 in flight, a reservation is refused once used + 11p > 24p, and ADR-032's stop-on-refusal ended S3 at 14.3p with 3 candidates queued and 9.7p unspent.
+
+Decision (amends ADR-016's price lookup and ADR-032's stop-on-refusal; the lease size is unchanged, so the monthly worst case of 46 × 24p plus the 25% manual share is unchanged):
+- **F0. `priceFor` strips a trailing `-YYYYMMDD`** before the lookup and only then falls back to `TOP_PRICE`. The fallback is a `log.error` once per model per process, so a new ID can't hide.
+- **F2. Back-pressure instead of stopping** (S2 and S3). Before a call the stage waits for in-flight calls to settle until the largest worst case reserved so far in that stage fits. It stops (`run_budget`) only when the call can't fit with nothing in flight, or at the deadline. A refusal while calls are in flight waits for one to settle and retries that job once; a second refusal with calls still in flight leaves that job queued and the stage keeps going. `llm.call()`'s reserve-or-refuse check and the lease are unchanged.
+- **F4. Cached prompts reserve input at max(input, 5-minute cache write).** A cache write costs more than uncached input, so the old bound could be exceeded on the first call of a run.
+- **F5. `budget.stops: {s2?, s3?}`** records each stage's own stop reason; `stoppedBy` stays as the first of them. System shows both.
+
+Expected per run at 24p: S2 about 55–60 calls (against 30), S3 about 8–10 deep reads when that many candidates exist (against 5).
+
+**`usage/{month}` is overstated, and isn't hand-corrected.** Every Haiku call since v0.2.0's `addFact` (and S2 triage since v0.4.0) settled at twice its cost, in `spendPence`, `byPurpose`, each run's `costPence` and the eval's reported cost. Reservations were always right, and the error is fail-safe (overstated, never understated). October's triage excess is about 4.6p (30 calls), plus about 0.1–0.2p per Add-fact note. A hand edit risks more than it saves: a `usage/{yyyy-mm}` document that fails its schema blocks every model call (ADR-016). Closed months don't matter and October corrects itself going forward. To compute the exact figure if ever needed, take `tokens['claude-haiku-4-5-20251001']` in the month's document and price it at Haiku's rates, against the top rate it was charged at.
+
+Considered and dropped on this run's evidence:
+- **F1, draining during the fetch:** the time box isn't the cause.
+- **F3, a rate-limit pause:** there were no 429s. If either shows up, the per-stage stop reasons will name it (`deadline`, `model_errors`).
+
+Parked (ROADMAP): `deepRead.maxTokens` 2,500 at the next forced re-record (keep 4,000 if real outputs exceed about 1,250 tokens), and Message Batches (ADR-035).
+
+Consequences: S2 settles at about 0.15p a call and the spend meter is accurate for Haiku again. A truly new model still logs an error and is over-, never under-charged. The worst-case reservation per call is unchanged apart from F4, which can only raise it.

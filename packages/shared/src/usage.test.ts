@@ -44,6 +44,18 @@ describe('costPence', () => {
     // 10k input ($0.02) + 32k output ($0.32) = $0.34 → 27.2p
     expect(worstCasePence(10_000, 32_000, PRICE, FX)).toBeCloseTo(27.2, 6);
   });
+
+  it('reserves input at the cache-write rate when the prompt is cached', () => {
+    // 10k input at $2.50 ($0.025) + 32k output ($0.32) = $0.345 → 27.6p
+    expect(worstCasePence(10_000, 32_000, PRICE, FX, { cacheWrite: true })).toBeCloseTo(27.6, 6);
+  });
+
+  it('never reserves cached input below the uncached rate', () => {
+    const cheapWrite = { ...PRICE, cacheWriteUsdPerMTok: 1 };
+    expect(worstCasePence(10_000, 0, cheapWrite, FX, { cacheWrite: true })).toBe(
+      worstCasePence(10_000, 0, cheapWrite, FX),
+    );
+  });
 });
 
 describe('monthKey', () => {

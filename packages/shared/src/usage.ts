@@ -45,16 +45,24 @@ export function costPence(tokens: TokenCounts, price: ModelPrice, fxUsdToGbp: nu
   return usdToPence(usd, fxUsdToGbp);
 }
 
-/** Most a call can cost: every input token at the uncached rate plus `maxTokens` of output. */
+/**
+ * Most a call can cost: every input token at the uncached rate plus `maxTokens` of output. With
+ * `cacheWrite` (a cached system prompt) input is reserved at the dearer of the uncached and the
+ * 5-minute cache-write rate, since a cache write costs more than plain input.
+ */
 export function worstCasePence(
   inputTokens: number,
   maxTokens: number,
   price: ModelPrice,
   fxUsdToGbp: number,
+  options: { cacheWrite?: boolean } = {},
 ): number {
+  const inputRate = options.cacheWrite
+    ? Math.max(price.inputUsdPerMTok, price.cacheWriteUsdPerMTok)
+    : price.inputUsdPerMTok;
   return costPence(
     { input: inputTokens, output: maxTokens, cacheRead: 0, cacheWrite: 0 },
-    price,
+    { ...price, inputUsdPerMTok: inputRate },
     fxUsdToGbp,
   );
 }

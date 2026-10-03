@@ -1,5 +1,5 @@
 import type { Run, SourceHealth, SourceRunCounts } from '@hireframe/shared';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -225,6 +225,43 @@ describe('System screen', () => {
     expect(runs.textContent).toContain('Stopped early: run budget used');
   });
 
+  it('shows a separate stop reason for each AI stage, and none for deep reads paused by the cap', () => {
+    givenRuns([
+      {
+        id: 'run-5',
+        run: {
+          ...RUN,
+          budget: {
+            leasePence: 24,
+            usedPence: 24,
+            stoppedBy: 'run_budget',
+            stops: { s2: 'run_budget', s3: 'deadline' },
+          },
+          flags: [],
+        },
+      },
+      {
+        id: 'run-6',
+        run: {
+          ...RUN,
+          budget: {
+            leasePence: 24,
+            usedPence: 9,
+            stoppedBy: 'deep_pause',
+            stops: { s3: 'deep_pause' },
+          },
+          flags: ['deep_pause'],
+        },
+      },
+    ]);
+    render(<SystemPage />);
+    const runs = screen.getByRole('region', { name: 'Recent runs' });
+    expect(runs.textContent).toContain('Triage stopped early: run budget used');
+    expect(runs.textContent).toContain('Deep reads stopped early: out of time');
+    expect(runs.textContent).not.toContain('Deep reads stopped early: deep reads paused');
+    expect(runs.textContent).not.toContain('Stopped early:');
+  });
+
   it('shows what a re-score changed', () => {
     givenRuns([
       {
@@ -285,28 +322,33 @@ describe('System screen', () => {
           finish = resolve;
         }),
     );
+    vi.mocked(countJobs).mockResolvedValueOnce(57).mockResolvedValue(59);
     render(<SystemPage />);
+    expect(await screen.findByText('Jobs stored: 57')).toBeDefined();
     await user.click(screen.getByRole('button', { name: 'Scan now' }));
     const busy = screen.getByRole('button', { name: 'Scanning…' });
     expect((busy as HTMLButtonElement).disabled).toBe(true);
     await user.click(busy);
     expect(scanNow).toHaveBeenCalledTimes(1);
 
-    finish({
-      status: 'completed',
-      runId: 'run-2',
-      runStatus: 'succeeded',
-      perSource: {},
-      s0: { in: 5, new: 2, merged: 1, duplicate: 2, conflicts: 0 },
+    // The scan resolves inside act, so the refetch it triggers is flushed before we assert.
+    await act(async () => {
+      finish({
+        status: 'completed',
+        runId: 'run-2',
+        runStatus: 'succeeded',
+        perSource: {},
+        s0: { in: 5, new: 2, merged: 1, duplicate: 2, conflicts: 0 },
+      });
+      await Promise.resolve();
     });
     expect(
       await screen.findByText(
         'Scan finished: 2 new jobs, 1 merged into known jobs, 2 already known.',
       ),
     ).toBeDefined();
-    await waitFor(() => {
-      expect(countJobs).toHaveBeenCalledTimes(2);
-    });
+    expect(await screen.findByText('Jobs stored: 59')).toBeDefined();
+    expect(countJobs).toHaveBeenCalledTimes(2);
   });
 
   it('shows why a scan could not run', async () => {

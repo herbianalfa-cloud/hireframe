@@ -3,6 +3,22 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+
+## [0.4.1]
+### Fixed
+- **Funnel throughput** (ADR-039). The first production run judged only 30 jobs in S2 and 5 of 8 in S3:
+  - Dated model IDs such as `claude-haiku-4-5-20251001` were priced at the top rate, so every Haiku call settled at about 0.30p instead of 0.15p. `priceFor` now strips a trailing `-YYYYMMDD`; a truly unknown model still gets the top rate and logs an error once per process.
+  - S2 and S3 no longer stop on the first refused reservation. They wait for in-flight calls to settle and stop only when the next call can't fit with nothing in flight, or at the deadline. Expect about 55–60 S2 calls and 8–10 S3 calls per 24p run when the queues are that long.
+  - A cached prompt reserves its input at the cache-write rate, so the worst-case bound can't be exceeded.
+  - A deep read that back-pressure leaves queued no longer uses an `s3MaxJobs` slot, and a job that can't be sent no longer spends a Reed details call first.
+- The System scan-once test no longer flakes on a loaded runner.
+
+### Added
+- Each run records why Triage and Deep reads each stopped (`budget.stops`), and System shows both.
+- RUNBOOK Recovery: a new scheduled function with no schedule after its first deploy, and Part E step 68 binds `hireframe-fns` explicitly (ADR-037 addendum).
+
+### Known
+- **Monthly spend is overstated.** Every Haiku call (S2 triage since v0.4.0, Add fact since v0.2.0) was charged at twice its cost in `usage/{month}`, in `byPurpose`, in each run's `costPence` and in the eval's reported cost. Reservations were always right, and the error is in the safe direction. It isn't hand-corrected (ADR-039); October corrects itself going forward. To compute it exactly, price `tokens['claude-haiku-4-5-20251001']` at Haiku's rates and compare with the top rate it was charged at. The replayed eval now reports 20.9p instead of 25.4p for the same recordings; agreement and `evals/baseline.json` are unchanged.
 ### Added
 - **M4 Funnel:**
   - **S1–S3 on every scan** (FUNNEL.md, ADR-032–037). `scanNow` and the new `scheduledScan` (07:30 and 17:30 on weekdays, Europe/London) fetch, dedupe, then judge:

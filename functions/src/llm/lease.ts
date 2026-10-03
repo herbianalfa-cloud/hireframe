@@ -17,6 +17,17 @@ export interface RunLease {
   /** The `UsageStore` `llm.call()` uses for one stage's calls. */
   usage(stage: LeaseStage): UsageStore;
   usedPence(stage?: LeaseStage): number;
+  /** Calls reserved and not yet settled, in `stage` or in total. */
+  inFlight(stage?: LeaseStage): number;
+  /** The largest reservation granted to `stage` so far this run (0 before the first). */
+  maxReserved(stage: LeaseStage): number;
+  /** Resolves on the next settle, or at once when nothing is in flight. */
+  nextSettle(): Promise<void>;
+  /**
+   * Back-pressure (ADR-039): waits until the stage's expected worst case (`maxReserved`) fits,
+   * settling in-flight calls to make room. False when it can't fit with nothing in flight.
+   */
+  waitForRoom(stage: LeaseStage): Promise<boolean>;
   settlement(): LeaseSettlement;
 }
 
@@ -46,6 +57,18 @@ export function createRunLease(options: RunLeaseOptions): RunLease {
       .filter((entry) => stage === undefined || entry.stage === stage)
       .reduce((sum, entry) => sum + entry.pence, 0);
   const usedTotal = () => used.s2 + used.s3;
+  const maxReserved: Record<LeaseStage, number> = { s2: 0, s3: 0 };
+  let settleWaiters: (() => void)[] = [];
+
+  const fits = (stage: LeaseStage, pence: number) =>
+    usedTotal() + inFlightPence() + pence <= options.grantedPence + EPSILON &&
+    (stage !== 's2' ||
+      used.s2 + inFlightPence('s2') + pence <= options.grantedPence * options.s2Share + EPSILON);
+
+  function nextSettle(): Promise<void> {
+    if (inFlight.size === 0) return Promise.resolve();
+    return new Promise((resolve) => settleWaiters.push(resolve));
+  }
 
   function usage(stage: LeaseStage): UsageStore {
     return {
@@ -53,15 +76,11 @@ export function createRunLease(options: RunLeaseOptions): RunLease {
         if (stage === 's3' && !options.deepAllowed) {
           return Promise.reject(new RunBudgetExceededError('deep_pause'));
         }
-        const total = usedTotal() + inFlightPence() + input.pence;
-        const s2Fits =
-          stage !== 's2' ||
-          used.s2 + inFlightPence('s2') + input.pence <=
-            options.grantedPence * options.s2Share + EPSILON;
-        if (total > options.grantedPence + EPSILON || !s2Fits) {
+        if (!fits(stage, input.pence)) {
           return Promise.reject(new RunBudgetExceededError('run_budget'));
         }
         inFlight.set(input.id, { stage, pence: input.pence });
+        maxReserved[stage] = Math.max(maxReserved[stage], input.pence);
         return Promise.resolve();
       },
       settle(input) {
@@ -76,6 +95,9 @@ export function createRunLease(options: RunLeaseOptions): RunLease {
           cacheWrite: was.cacheWrite + input.tokens.cacheWrite,
         };
         byPurpose[input.purpose] = round((byPurpose[input.purpose] ?? 0) + input.costPence);
+        const waiters = settleWaiters;
+        settleWaiters = [];
+        for (const wake of waiters) wake();
         return Promise.resolve();
       },
     };
@@ -85,6 +107,17 @@ export function createRunLease(options: RunLeaseOptions): RunLease {
     grantedPence: options.grantedPence,
     usage,
     usedPence: (stage) => round(stage ? used[stage] : usedTotal()),
+    inFlight: (stage) =>
+      [...inFlight.values()].filter((entry) => stage === undefined || entry.stage === stage).length,
+    maxReserved: (stage) => maxReserved[stage],
+    nextSettle,
+    async waitForRoom(stage) {
+      while (!fits(stage, maxReserved[stage])) {
+        if (inFlight.size === 0) return false;
+        await nextSettle();
+      }
+      return true;
+    },
     settlement: () => ({
       costPence: round(usedTotal()),
       calls: { ...calls },

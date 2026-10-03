@@ -80,4 +80,89 @@ describe('createRunLease', () => {
       byPurpose: { triage: 0.3 },
     });
   });
+
+  describe('back-pressure', () => {
+    it('tracks the largest reservation and the calls in flight per stage', async () => {
+      const lease = createRunLease({ grantedPence: 10, s2Share: 0.5, deepAllowed: true });
+      expect(lease.maxReserved('s2')).toBe(0);
+      await lease.usage('s2').reserve(reserve('a', 0.4));
+      await lease.usage('s2').reserve(reserve('b', 0.6));
+      await lease.usage('s2').settle(settle('a', 0.1));
+      await lease.usage('s2').reserve(reserve('c', 0.5));
+      expect(lease.maxReserved('s2')).toBe(0.6);
+      expect(lease.maxReserved('s3')).toBe(0);
+      expect(lease.inFlight('s2')).toBe(2);
+      expect(lease.inFlight('s3')).toBe(0);
+      expect(lease.inFlight()).toBe(2);
+    });
+
+    it('does not count a refused reservation as reserved', async () => {
+      const lease = createRunLease({ grantedPence: 1, s2Share: 1, deepAllowed: true });
+      await lease
+        .usage('s3')
+        .reserve(reserve('a', 0.6))
+        .catch(() => undefined);
+      await lease
+        .usage('s3')
+        .reserve(reserve('b', 0.6))
+        .catch(() => undefined);
+      expect(lease.maxReserved('s3')).toBe(0.6);
+      expect(lease.inFlight()).toBe(1);
+    });
+
+    it('lets a stage with no history start', async () => {
+      const lease = createRunLease({ grantedPence: 10, s2Share: 0.4, deepAllowed: true });
+      await expect(lease.waitForRoom('s2')).resolves.toBe(true);
+    });
+
+    it('waits for an in-flight call to settle, then reports room', async () => {
+      const lease = createRunLease({ grantedPence: 1, s2Share: 1, deepAllowed: true });
+      const s2 = lease.usage('s2');
+      await s2.reserve(reserve('a', 0.6));
+      let resolved: boolean | undefined;
+      const waiting = lease.waitForRoom('s2').then((room) => (resolved = room));
+      await Promise.resolve();
+      expect(resolved).toBeUndefined();
+      await s2.settle(settle('a', 0.15));
+      await waiting;
+      expect(resolved).toBe(true);
+    });
+
+    it('reports no room when the next call cannot fit and nothing is in flight', async () => {
+      const lease = createRunLease({ grantedPence: 1, s2Share: 1, deepAllowed: true });
+      const s2 = lease.usage('s2');
+      await s2.reserve(reserve('a', 0.6));
+      await s2.settle(settle('a', 0.6));
+      await expect(lease.waitForRoom('s2')).resolves.toBe(false);
+    });
+
+    it('keeps waiting through several settles until the worst case fits', async () => {
+      const lease = createRunLease({ grantedPence: 1.2, s2Share: 1, deepAllowed: true });
+      const s2 = lease.usage('s2');
+      for (const id of ['a', 'b']) await s2.reserve(reserve(id, 0.5));
+      let resolved: boolean | undefined;
+      const waiting = lease.waitForRoom('s2').then((room) => (resolved = room));
+      await s2.settle(settle('a', 0.1));
+      await Promise.resolve();
+      // 0.5 in flight + 0.1 used + 0.5 next fits in 1.2: room after the first settle.
+      await waiting;
+      expect(resolved).toBe(true);
+    });
+
+    it('resolves nextSettle at once when nothing is in flight', async () => {
+      const lease = createRunLease({ grantedPence: 1, s2Share: 1, deepAllowed: true });
+      await expect(lease.nextSettle()).resolves.toBeUndefined();
+    });
+
+    it('wakes every waiter on a settle', async () => {
+      const lease = createRunLease({ grantedPence: 1, s2Share: 1, deepAllowed: true });
+      const s2 = lease.usage('s2');
+      await s2.reserve(reserve('a', 0.9));
+      const woken: number[] = [];
+      const waiters = [1, 2].map((n) => lease.nextSettle().then(() => woken.push(n)));
+      await s2.settle(settle('a', 0.1));
+      await Promise.all(waiters);
+      expect(woken).toEqual([1, 2]);
+    });
+  });
 });

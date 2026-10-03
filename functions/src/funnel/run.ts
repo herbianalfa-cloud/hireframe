@@ -502,6 +502,55 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     };
   }
 
+  /**
+   * Back-pressure (ADR-039): before a call, waits for in-flight calls to settle until the stage's
+   * largest worst case so far fits; a refusal while others are in flight waits for one to settle
+   * and retries once. A call that can't fit with nothing in flight stops the stage. Returns
+   * undefined when the job was not sent (stage stopped, deadline, or left queued).
+   */
+  async function withRoom<T>(
+    activeLease: RunLease,
+    stage: LeaseStage,
+    errors: ReturnType<typeof stageErrors>,
+    stopMs: number,
+    send: () => Promise<T>,
+  ): Promise<T | undefined> {
+    if (!(await activeLease.waitForRoom(stage))) {
+      errors.stop('run_budget');
+      return undefined;
+    }
+    if (errors.isStopped()) return undefined;
+    if (pastDeadline(stopMs)) {
+      errors.stop('deadline');
+      return undefined;
+    }
+    try {
+      return await send();
+    } catch (error) {
+      const refused = error instanceof RunBudgetExceededError && error.reason === 'run_budget';
+      if (!refused || activeLease.inFlight() === 0) throw error;
+    }
+    await activeLease.nextSettle();
+    if (errors.isStopped()) return undefined;
+    if (pastDeadline(stopMs)) {
+      errors.stop('deadline');
+      return undefined;
+    }
+    try {
+      return await send();
+    } catch (error) {
+      // Still refused with calls in flight: this job waits for the next run, the stage goes on.
+      if (
+        error instanceof RunBudgetExceededError &&
+        error.reason === 'run_budget' &&
+        activeLease.inFlight() > 0
+      ) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
   async function runS2(activeLease: RunLease): Promise<void> {
     const began = deps.clock();
     const pacer = createPacer(deps.limits.triageRpm, deps.clock, deps.sleep);
@@ -523,12 +572,15 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       await pacer.wait();
       if (errors.isStopped()) return;
       try {
-        const result = await llmCall(llmDeps(activeLease, 's2'), {
-          purpose: 'triage',
-          system: systems.s2,
-          user: s2User(entry.job, texts.get(entry.id) ?? ''),
-          schema: TriageOutputSchema,
-        });
+        const result = await withRoom(activeLease, 's2', errors, FUNNEL.s2StopMs, () =>
+          llmCall(llmDeps(activeLease, 's2'), {
+            purpose: 'triage',
+            system: systems.s2,
+            user: s2User(entry.job, texts.get(entry.id) ?? ''),
+            schema: TriageOutputSchema,
+          }),
+        );
+        if (!result) return;
         errors.ok();
         s2.in += 1;
         const triage = result.data;
@@ -593,6 +645,16 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         return;
       }
       started += 1;
+      // Room first: a job that can't be sent keeps its slot and spends no Reed details call.
+      if (!(await activeLease.waitForRoom('s3'))) {
+        started -= 1;
+        errors.stop('run_budget');
+        return;
+      }
+      if (errors.isStopped()) {
+        started -= 1;
+        return;
+      }
       let text = texts.get(entry.id) ?? '';
       const extraFlags: JobFlag[] = (job.flags ?? []).filter(
         (flag) => !DEEP_FLAGS.includes(flag) && flag !== 'score_drift',
@@ -610,20 +672,28 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       if (errors.isStopped()) return;
       try {
         const company = job.companyId ? companyCache.get(job.companyId) : undefined;
-        const result = await llmCall(llmDeps(activeLease, 's3'), {
-          purpose: 'deepRead',
-          system: systems.s3,
-          user: s3User(job, text, {
-            lane: job.triage.lane,
-            now: deps.now(),
-            descriptionKind: snippet ? 'snippet' : 'full',
-            ...(job.postedAt ? { postedAt: job.postedAt } : {}),
-            ...(company?.size ? { companySize: company.size } : {}),
-            ...(company?.stage ? { companyStage: company.stage } : {}),
+        const { triage } = job;
+        const result = await withRoom(activeLease, 's3', errors, FUNNEL.s3StopMs, () =>
+          llmCall(llmDeps(activeLease, 's3'), {
+            purpose: 'deepRead',
+            system: systems.s3,
+            user: s3User(job, text, {
+              lane: triage.lane,
+              now: deps.now(),
+              descriptionKind: snippet ? 'snippet' : 'full',
+              ...(job.postedAt ? { postedAt: job.postedAt } : {}),
+              ...(company?.size ? { companySize: company.size } : {}),
+              ...(company?.stage ? { companyStage: company.stage } : {}),
+            }),
+            schema: DeepReadOutputSchema,
+            cacheSystem: true,
           }),
-          schema: DeepReadOutputSchema,
-          cacheSystem: true,
-        });
+        );
+        if (!result) {
+          // Left queued: the slot goes back (the hydration, if any, is already spent).
+          started -= 1;
+          return;
+        }
         errors.ok();
         s3.in += 1;
         const { deep, downgraded, unknownRefs } = resolveDeepRead(result.data, toId);
@@ -674,6 +744,14 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         leasePence: lease?.grantedPence ?? 0,
         usedPence: used,
         ...(stoppedBy ? { stoppedBy } : {}),
+        ...(stops.s2 || stops.s3
+          ? {
+              stops: {
+                ...(stops.s2 ? { s2: stops.s2 } : {}),
+                ...(stops.s3 ? { s3: stops.s3 } : {}),
+              },
+            }
+          : {}),
       },
       flags: [...flags],
       costPence: used,

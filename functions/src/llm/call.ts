@@ -61,11 +61,22 @@ function inputTokenBound(counted: number): number {
   return Math.ceil(counted * 1.1) + 500;
 }
 
-function priceFor(model: string): ModelPrice {
+/** Models already reported as unpriced in this process: one error each, so a new ID can't hide. */
+const reportedUnpriced = new Set<string>();
+
+/**
+ * The price of the model that answered. The API reports dated snapshots
+ * (`claude-haiku-4-5-20251001`) for aliases (`claude-haiku-4-5`), so a trailing `-YYYYMMDD` is
+ * stripped before the lookup; only a model still unknown after that is charged the top rate.
+ */
+export function priceFor(model: string): ModelPrice {
   const real = model.startsWith(FAKE_MODEL_PREFIX) ? model.slice(FAKE_MODEL_PREFIX.length) : model;
-  const price = PRICES_USD_PER_MTOK[real];
+  const price = PRICES_USD_PER_MTOK[real] ?? PRICES_USD_PER_MTOK[real.replace(/-\d{8}$/, '')];
   if (price) return price;
-  log.warn('llm.unknown_model_price', { model });
+  if (!reportedUnpriced.has(model)) {
+    reportedUnpriced.add(model);
+    log.error('llm.unknown_model_price', { model });
+  }
   return TOP_PRICE;
 }
 
@@ -107,6 +118,7 @@ export async function llmCall<T>(
       model.maxTokens,
       priceFor(model.id),
       deps.fxUsdToGbp,
+      { cacheWrite: input.cacheSystem === true },
     );
     const month = monthKey(now());
     const id = newId();
