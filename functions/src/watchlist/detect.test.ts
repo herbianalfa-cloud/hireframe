@@ -7,6 +7,7 @@ import {
   boardPageUrl,
   classify,
   detectCandidate,
+  mergeRechecked,
   namesMatch,
   parseCsv,
   REVIEW_HEADER,
@@ -363,5 +364,59 @@ describe('detectCandidate', () => {
       'www.workable.com',
     ]);
     expect(requested.some((url) => url.includes('acme-analytics'))).toBe(false);
+  });
+});
+
+describe('mergeRechecked (--recheck)', () => {
+  it('replaces only re-detected rows and keeps decisions and extra columns elsewhere', () => {
+    const header = [...REVIEW_HEADER, 'decisionReason'];
+    const reviewed = reviewRow({
+      candidate: ACME,
+      status: 'confirmed',
+      hit: {
+        type: 'greenhouse',
+        token: 'acmeanalytics',
+        boardName: 'Acme Analytics',
+        jobs: 3,
+        ukJobs: 2,
+      },
+      others: [],
+    });
+    const pending = reviewRow({
+      candidate: { name: 'Bramble', domain: 'bramble.example.com', hq: 'Leeds' },
+      status: 'unchecked',
+      others: [],
+      failed: ['workable:bramble'],
+    });
+    const rows = parseCsv(
+      toCsv(header, [
+        [...reviewed.slice(0, -1), 'drop', 'owner said so'],
+        [...pending, 'unchecked: retry pending'],
+      ]),
+    );
+    const recheckedBramble = {
+      candidate: { name: 'Bramble', domain: 'bramble.example.com', hq: 'Leeds' },
+      status: 'confirmed' as const,
+      hit: {
+        type: 'workable' as const,
+        token: 'bramble',
+        boardName: 'Bramble',
+        jobs: 4,
+        ukJobs: 4,
+      },
+      others: [],
+    };
+    const merged = mergeRechecked(rows, [recheckedBramble]);
+    expect(merged.header).toEqual([...REVIEW_HEADER, 'decisionreason']);
+    expect(merged.rows[0]).toEqual(rows[0]); // untouched, the owner's drop kept
+    expect(merged.rows[1]).toMatchObject({
+      name: 'Bramble',
+      status: 'confirmed',
+      ats: 'workable',
+      token: 'bramble',
+      failed_probes: '',
+      decision: 'keep',
+      decisionreason: 'rechecked: confirmed',
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { CompanySeedSchema } from '@hireframe/shared';
 
@@ -6,6 +6,7 @@ import { hostPolicy, SCAN } from '../config.js';
 import { createHttpClient } from '../http/client.js';
 import {
   detectCandidate,
+  mergeRechecked,
   parseCsv,
   REVIEW_HEADER,
   reviewRow,
@@ -40,9 +41,8 @@ function candidatesFrom(path: string): Candidate[] {
     });
 }
 
-async function detect(path: string): Promise<void> {
-  const candidates = candidatesFrom(path);
-  const http = createHttpClient({
+function client() {
+  return createHttpClient({
     fetch,
     now: Date.now,
     sleep: (ms) =>
@@ -64,9 +64,11 @@ async function detect(path: string): Promise<void> {
       }
     },
   });
-  console.log(`detect-ats: ${String(candidates.length)} candidates, 1 request/s per job board…`);
+}
+
+async function detectAll(candidates: readonly Candidate[], http: ReturnType<typeof client>) {
   const detections: Detection[] = [];
-  // A few companies at a time: each host is still spaced to 1 request per second.
+  // A few companies at a time: each host is still spaced to its interval.
   const queue = [...candidates];
   await Promise.all(
     Array.from({ length: 4 }, async () => {
@@ -79,6 +81,48 @@ async function detect(path: string): Promise<void> {
       }
     }),
   );
+  return detections;
+}
+
+/** Re-detects only the `unchecked` rows of a review file and merges them in place. */
+async function recheck(path: string): Promise<void> {
+  const rows = parseCsv(readFileSync(path, 'utf8'));
+  const candidates: Candidate[] = rows
+    .filter((row) => row.status === 'unchecked')
+    .map((row) => ({
+      name: row.name ?? '',
+      domain: row.domain ?? '',
+      hq: nonEmpty(row.hq) ?? 'London',
+    }));
+  if (candidates.length === 0) {
+    console.log('detect-ats: no unchecked rows.');
+    return;
+  }
+  console.log(`detect-ats: rechecking ${String(candidates.length)} unchecked rows…`);
+  const http = client();
+  const detections = await detectAll(candidates, http);
+  const merged = mergeRechecked(rows, detections);
+  copyFileSync(path, `${path}.bak`);
+  writeFileSync(
+    path,
+    toCsv(
+      merged.header,
+      merged.rows.map((row) => merged.header.map((key) => row[key] ?? '')),
+    ),
+  );
+  const count = (status: string) => detections.filter((d) => d.status === status).length;
+  console.log(
+    `detect-ats: ${String(count('confirmed'))} confirmed, ${String(count('review'))} to review, ` +
+      `${String(count('not-found'))} not found, ${String(count('unchecked'))} still unchecked → merged into ${path} ` +
+      `(previous copy: ${path}.bak). ${String(http.requests())} requests.`,
+  );
+}
+
+async function detect(path: string): Promise<void> {
+  const candidates = candidatesFrom(path);
+  const http = client();
+  console.log(`detect-ats: ${String(candidates.length)} candidates, 1 request/s per job board…`);
+  const detections = await detectAll(candidates, http);
   const order = new Map(candidates.map((candidate, index) => [candidate.name, index]));
   detections.sort(
     (a, b) => (order.get(a.candidate.name) ?? 0) - (order.get(b.candidate.name) ?? 0),
@@ -118,9 +162,12 @@ function write(path: string): void {
 export async function main(args: readonly string[]): Promise<void> {
   const [first, second] = args;
   if (first === '--write' && second) write(second);
+  else if (first === '--recheck' && second) await recheck(second);
   else if (first && first !== '--write') await detect(first);
   else {
-    console.error('Usage: node scripts/detect-ats.ts <candidates.csv> | --write <review.csv>');
+    console.error(
+      'Usage: node scripts/detect-ats.ts <candidates.csv> | --recheck <review.csv> | --write <review.csv>',
+    );
     process.exitCode = 1;
   }
 }

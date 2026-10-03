@@ -36,7 +36,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run check:bundle` — web bundle budget after `build`: no chunk over 500 kB, initial JS under the gzip budget
 - `node scripts/smoke-functions-bundle.ts` — after `build`: the functions bundle imports and every function is in europe-west2
 - `node scripts/make-cv-fixtures.ts` — write fake CVs (PDF/DOCX) to `tmp/fixtures/` for local uploads
-- `node scripts/detect-ats.ts <candidates.csv>` / `--write <review.csv>` — find watchlist companies' job boards via the official board APIs only, then write the reviewed seed (ADR-031)
+- `node scripts/detect-ats.ts <candidates.csv>` / `--recheck <review.csv>` / `--write <review.csv>` — find watchlist companies' job boards via the official board APIs only, re-detect just the `unchecked` rows in place, then write the reviewed seed (ADR-031)
 - `npm run deploy` — deploy (CI only on `v*` tags; refuses to run locally)
 - `npm run eval` — funnel eval against the golden set *(from M4)*
 

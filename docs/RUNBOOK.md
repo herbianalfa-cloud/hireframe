@@ -230,7 +230,7 @@ Before the `v0.3.0` deploy. Design: ADR-025 (robots.txt and keyed APIs), ADR-029
     - `confirmed`: exactly one board with open jobs, and its own name matches the company exactly. `decision` is already `keep`.
     - `review`: a board was found, but its name can't be confirmed, or there's more than one. Click `board_url`, check it's the right company and that it hires in the UK, then type `keep` (use this board), `keep-none` (keep the company, no board) or `drop`.
     - `not-found`: no board. Type `keep-none` to keep the company for matching aggregator jobs, or leave it blank to leave it out.
-    - `unchecked`: a probe failed (usually Workable rate-limiting, see `failed_probes`), so "no board" isn't known. Run step 42 again later, or decide the row yourself.
+    - `unchecked`: a probe failed (usually Workable rate-limiting, see `failed_probes`), so "no board" isn't known. Later, run `node scripts/detect-ats.ts --recheck tmp/watchlist-review.csv`: it re-detects only the unchecked rows and merges them in, keeping your decisions and any columns you added (the previous file is saved as `.bak`). Or decide the row yourself.
 44. Run `node scripts/detect-ats.ts --write tmp/watchlist-review.csv`. It writes `packages/shared/src/watchlist-seed.ts`, or lists the rows that still need a decision. Commit the seed.
 
 **D. Try it locally**

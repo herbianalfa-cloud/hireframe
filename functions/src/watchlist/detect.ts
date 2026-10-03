@@ -255,6 +255,39 @@ export function reviewRow(detection: Detection): string[] {
 }
 
 /**
+ * Merges re-detected rows into a review file (`--recheck`): each re-detected company's row gets
+ * the new detection fields and a fresh decision; every other row, and any extra columns the
+ * owner added (e.g. `decisionReason`), stay exactly as they were. Order is kept.
+ */
+export function mergeRechecked(
+  rows: readonly Record<string, string>[],
+  detections: readonly Detection[],
+): { header: string[]; rows: Record<string, string>[] } {
+  const fresh = new Map(
+    detections.map((detection) => [
+      detection.candidate.name,
+      Object.fromEntries(
+        REVIEW_HEADER.map((key, index) => [key, reviewRow(detection)[index] ?? '']),
+      ),
+    ]),
+  );
+  const header = [
+    ...REVIEW_HEADER,
+    ...Object.keys(rows[0] ?? {}).filter(
+      (key) => !(REVIEW_HEADER as readonly string[]).includes(key),
+    ),
+  ];
+  const merged = rows.map((row) => {
+    const update = fresh.get(row.name ?? '');
+    if (!update) return { ...row };
+    const extra =
+      'decisionreason' in row ? { decisionreason: `rechecked: ${update.status ?? ''}` } : {};
+    return { ...row, ...update, ...extra };
+  });
+  return { header, rows: merged };
+}
+
+/**
  * Reviewed rows → seed entries. `keep` keeps the detected board; `keep-none` keeps the company
  * without one (aggregator matching only); `drop` removes it. A found board with no decision
  * is an error: every `review` row needs the owner's call.
