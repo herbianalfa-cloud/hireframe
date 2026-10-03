@@ -272,8 +272,14 @@ function runSummary(view: RunView, stalled: boolean): string {
 /** Spend warnings and why the AI stages stopped early (PRD R11, ADR-032). */
 function RunNotes({ view }: { view: RunView }) {
   const { flags = [], budget } = view.run;
-  const stoppedBy = budget?.stoppedBy;
-  if (flags.length === 0 && !stoppedBy) return null;
+  const stops = budget?.stops;
+  // Runs before v0.4.1 recorded only the first reason.
+  const stoppedBy = stops ? undefined : budget?.stoppedBy;
+  const stageStops = [
+    { stage: 'Triage', reason: stops?.s2 },
+    { stage: 'Deep reads', reason: stops?.s3 === 'deep_pause' ? undefined : stops?.s3 },
+  ].filter((entry) => entry.reason !== undefined);
+  if (flags.length === 0 && !stoppedBy && stageStops.length === 0) return null;
   return (
     <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
       {flags.includes('spend_80') ? (
@@ -291,6 +297,13 @@ function RunNotes({ view }: { view: RunView }) {
       {stoppedBy && stoppedBy !== 'deep_pause' ? (
         <span>Stopped early: {STOP_TEXT[stoppedBy]}.</span>
       ) : null}
+      {stageStops.map(({ stage, reason }) =>
+        reason ? (
+          <span key={stage}>
+            {stage} stopped early: {STOP_TEXT[reason]}.
+          </span>
+        ) : null,
+      )}
     </p>
   );
 }
