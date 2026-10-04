@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   londonDayStart,
   londonWeekStart,
+  spendMeter,
   todayKpis,
   verdictAgreement,
   type AgreementJob,
@@ -112,25 +113,32 @@ describe('verdictAgreement (ADR-038)', () => {
 });
 
 describe('todayKpis', () => {
-  it('counts open verdicts, today’s judgements and this week’s applications', () => {
-    const kpis = todayKpis(
-      [
-        { verdict: 'apply', status: 'new', judgedAt: new Date('2026-10-14T07:40:00Z') },
-        { verdict: 'apply', status: 'saved', judgedAt: daysAgo(3) },
-        { verdict: 'near_miss', status: 'new', judgedAt: new Date('2026-10-14T07:41:00Z') },
-        { verdict: 'skip', status: 'new', judgedAt: new Date('2026-10-14T07:42:00Z') },
-        { verdict: 'apply', status: 'applied', appliedAt: new Date('2026-10-13T09:00:00Z') },
-        { verdict: 'apply', status: 'applied', appliedAt: new Date('2026-10-09T09:00:00Z') },
-      ],
-      NOW,
-      5,
-    );
-    expect(kpis).toEqual({
-      toApply: 2,
-      toReview: 1,
-      judgedToday: 2,
-      appliedThisWeek: 1,
+  const counts = { toApply: 4, toReview: 2, judgedToday: 6, appliedThisWeek: 3 };
+
+  it('adds how far the week is from its target', () => {
+    expect(todayKpis(counts, 5)).toEqual({
+      ...counts,
       weeklyTarget: 5,
+      weeklyRemaining: 2,
+      weeklyMet: false,
     });
+  });
+
+  it('never goes below zero once the target is met', () => {
+    expect(todayKpis(counts, 3)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
+    expect(todayKpis(counts, 2)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
+  });
+});
+
+describe('spendMeter', () => {
+  it('is ok below 80%, warns from 80%, and is capped at the cap', () => {
+    expect(spendMeter(1199, 1500)).toMatchObject({ level: 'ok' });
+    expect(spendMeter(1200, 1500)).toMatchObject({ level: 'warn', fraction: 0.8 });
+    expect(spendMeter(1500, 1500)).toMatchObject({ level: 'capped', fraction: 1 });
+    expect(spendMeter(1600, 1500)).toMatchObject({ level: 'capped', fraction: 1 });
+  });
+
+  it('treats a zero cap as spent', () => {
+    expect(spendMeter(0, 0)).toMatchObject({ level: 'capped', fraction: 1 });
   });
 });

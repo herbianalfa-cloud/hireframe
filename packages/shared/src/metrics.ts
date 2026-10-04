@@ -1,4 +1,3 @@
-import type { Verdict } from './funnel.js';
 import type { Job } from './jobs.js';
 
 /**
@@ -131,42 +130,49 @@ export function verdictAgreement(
 
 // ---- Today ----
 
-export type KpiJob = Pick<Job, 'verdict' | 'status' | 'judgedAt' | 'appliedAt'>;
-
-export interface TodayKpis {
+/** What the Today tiles count; the web service fills it with server-side counts. */
+export interface TodayCounts {
   /** Apply verdicts still waiting for a decision (status new or saved). */
   toApply: number;
-  /** Near misses and wildcards still waiting for a decision. */
+  /** Near misses and wildcards still waiting for a decision (status new or saved). */
   toReview: number;
   /** Non-skip verdicts judged since London midnight. */
   judgedToday: number;
+  /** Jobs marked applied since Monday 00:00 London. */
   appliedThisWeek: number;
-  weeklyTarget: number;
 }
 
-const OPEN_STATUSES: readonly Job['status'][] = ['new', 'saved'];
+export interface TodayKpis extends TodayCounts {
+  weeklyTarget: number;
+  /** Applications still needed this week to reach the target (never below 0). */
+  weeklyRemaining: number;
+  weeklyMet: boolean;
+}
 
-export function todayKpis(jobs: readonly KpiJob[], now: Date, weeklyTarget: number): TodayKpis {
-  const dayStart = londonDayStart(now).getTime();
-  const weekStart = londonWeekStart(now).getTime();
-  const kpis: TodayKpis = {
-    toApply: 0,
-    toReview: 0,
-    judgedToday: 0,
-    appliedThisWeek: 0,
+export function todayKpis(counts: TodayCounts, weeklyTarget: number): TodayKpis {
+  return {
+    ...counts,
     weeklyTarget,
+    weeklyRemaining: Math.max(0, weeklyTarget - counts.appliedThisWeek),
+    weeklyMet: counts.appliedThisWeek >= weeklyTarget,
   };
-  for (const job of jobs) {
-    const verdict: Verdict | undefined = job.verdict;
-    const open = OPEN_STATUSES.includes(job.status);
-    if (verdict === 'apply' && open) kpis.toApply++;
-    if ((verdict === 'near_miss' || verdict === 'wildcard') && open) kpis.toReview++;
-    if (verdict && verdict !== 'skip' && job.judgedAt && job.judgedAt.getTime() >= dayStart) {
-      kpis.judgedToday++;
-    }
-    if (job.status === 'applied' && job.appliedAt && job.appliedAt.getTime() >= weekStart) {
-      kpis.appliedThisWeek++;
-    }
-  }
-  return kpis;
+}
+
+// ---- Spend meter ----
+
+/** The meter turns amber at this share of the monthly cap (PRD R11). */
+export const SPEND_WARN_FRACTION = 0.8;
+
+export interface SpendMeter {
+  spendPence: number;
+  capPence: number;
+  /** Spend over cap, 0–1 (1 when the cap is 0). */
+  fraction: number;
+  level: 'ok' | 'warn' | 'capped';
+}
+
+export function spendMeter(spendPence: number, capPence: number): SpendMeter {
+  const fraction = capPence <= 0 ? 1 : Math.min(1, spendPence / capPence);
+  const level = spendPence >= capPence ? 'capped' : fraction >= SPEND_WARN_FRACTION ? 'warn' : 'ok';
+  return { spendPence, capPence, fraction, level };
 }
