@@ -23,6 +23,7 @@ import {
 
 import { getFirebase } from './firebase';
 import {
+  buildJobFeedbackRemovalWrite,
   buildJobFeedbackWrite,
   buildJobStatusWrite,
   type FeedbackInput,
@@ -199,6 +200,11 @@ export async function setJobStatus(view: JobView, to: ClientJobStatus): Promise<
 /** 👍/👎 on the verdict. The rules reject it if a re-score changed the verdict meanwhile. */
 export async function rateJob(view: JobView, input: FeedbackInput): Promise<void> {
   await commitAction(view.id, buildJobFeedbackWrite(view.id, view.raw, input, serverTimestamp()));
+}
+
+/** Press the selected 👍/👎 again: remove the rating. */
+export async function unrateJob(view: JobView): Promise<void> {
+  await commitAction(view.id, buildJobFeedbackRemovalWrite(view.id, view.raw, serverTimestamp()));
 }
 
 export function jobActionErrorMessage(error: unknown): string {

@@ -45,3 +45,11 @@ export function withFeedback(view: JobView, input: FeedbackInput, now: Date): Jo
     raw: { ...view.raw, feedback, updatedAt: now },
   };
 }
+
+export function withoutFeedback(view: JobView, now: Date): JobView {
+  return {
+    id: view.id,
+    job: { ...without(view.job, ['feedback']), updatedAt: now },
+    raw: { ...without(view.raw, ['feedback']), updatedAt: now },
+  };
+}

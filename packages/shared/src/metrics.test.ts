@@ -105,6 +105,26 @@ describe('verdictAgreement (ADR-038)', () => {
     expect(verdictAgreement([job], NOW)).toMatchObject({ ratedDisagree: 1, appliedAgree: 0 });
   });
 
+  it('stops counting a removed rating, so the job falls back to applying', () => {
+    const removed: AgreementJob = applied('apply', 1);
+    // Same job, before and after removing a 👎: the rating counts, then it doesn't.
+    const withRating: AgreementJob = {
+      ...removed,
+      feedback: { agree: false, verdict: 'apply', at: daysAgo(1) },
+    };
+    expect(verdictAgreement([withRating], NOW)).toMatchObject({
+      ratedDisagree: 1,
+      appliedAgree: 0,
+    });
+    expect(verdictAgreement([removed], NOW)).toMatchObject({
+      ratedAgree: 0,
+      ratedDisagree: 0,
+      appliedAgree: 1,
+    });
+    // A job whose rating was removed and was never applied counts for nothing.
+    expect(verdictAgreement([{ verdict: 'apply', status: 'new' }], NOW).total).toBe(0);
+  });
+
   it('ignores anything older than the window', () => {
     expect(verdictAgreement([rated(true, 15), applied('apply', 20)], NOW).total).toBe(0);
     expect(verdictAgreement([rated(true, 13)], NOW).total).toBe(1);

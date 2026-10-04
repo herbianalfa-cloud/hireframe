@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { makeView } from '@/features/jobs/fixtures';
 
-import { withFeedback, withStatus } from './job-optimistic';
+import { withFeedback, withoutFeedback, withStatus } from './job-optimistic';
 
 const AT = new Date('2026-10-15T08:00:00Z');
 
@@ -57,5 +57,16 @@ describe('withFeedback', () => {
     const wrong = withFeedback(makeView('a'), { agree: false, expected: 'skip' }, AT);
     const right = withFeedback(wrong, { agree: true, expected: 'skip' }, AT);
     expect(right.job.feedback).toEqual({ agree: true, verdict: 'apply', at: AT });
+  });
+});
+
+describe('withoutFeedback', () => {
+  it('drops the rating from the job and its raw data, and stays valid', () => {
+    const rated = withFeedback(makeView('a'), { agree: true }, AT);
+    const next = withoutFeedback(rated, AT);
+    expect('feedback' in next.job).toBe(false);
+    expect('feedback' in next.raw).toBe(false);
+    expect(next.job.updatedAt).toBe(AT);
+    expect(JobSchema.safeParse(next.job).success).toBe(true);
   });
 });

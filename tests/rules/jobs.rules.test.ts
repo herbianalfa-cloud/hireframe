@@ -30,6 +30,7 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  buildJobFeedbackRemovalWrite,
   buildJobFeedbackWrite,
   buildJobStatusWrite,
   type JobActionWrite,
@@ -294,6 +295,144 @@ describe('feedback', () => {
   });
 });
 
+describe('removing a rating (un-rate)', () => {
+  const rating = { agree: false, verdict: 'apply', expected: 'near_miss', at: CREATED };
+  const rated = (): DocumentData => seededJob({ feedback: rating });
+  const ref = () => doc(dbFor('owner'), PATHS.job(JOB_ID));
+
+  beforeEach(async () => {
+    await seed(rated());
+  });
+
+  it('lets the owner remove the whole rating, recording what was removed', async () => {
+    const write = buildJobFeedbackRemovalWrite(JOB_ID, rated(), NOW);
+    await assertSucceeds(commit(dbFor('owner'), write));
+    const job = await readJob();
+    expect('feedback' in job).toBe(false);
+    expect(job.verdict).toBe('apply');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const event = (await getDoc(doc(ctx.firestore(), `events/${EVENT_ID}`))).data();
+      expect(event).toMatchObject({
+        type: 'job_feedback_removed',
+        jobId: JOB_ID,
+        agree: false,
+        verdict: 'apply',
+      });
+    });
+  });
+
+  it('works for a 👍 and on a saved or applied job, and the job can be rated again', async () => {
+    for (const status of ['new', 'saved', 'applied'] as const) {
+      const raw = seededJob({
+        status,
+        feedback: { agree: true, verdict: 'apply', at: CREATED },
+        ...(status === 'applied' ? { appliedAt: CREATED, appliedVerdict: 'apply' } : {}),
+      });
+      await seed(raw);
+      await assertSucceeds(commit(dbFor('owner'), buildJobFeedbackRemovalWrite(JOB_ID, raw, NOW)));
+      const after = await readJob();
+      await assertSucceeds(
+        commit(
+          dbFor('owner'),
+          buildJobFeedbackWrite(JOB_ID, after, { agree: false }, NOW),
+          'event-2',
+        ),
+      );
+    }
+  });
+
+  it('still lets the owner remove a rating made on a verdict a re-score has since changed', async () => {
+    const raw = seededJob({ verdict: 'near_miss', feedback: rating });
+    await seed(raw);
+    await assertSucceeds(commit(dbFor('owner'), buildJobFeedbackRemovalWrite(JOB_ID, raw, NOW)));
+  });
+
+  it('denies removing a rating that is not there', async () => {
+    await seed();
+    await assertFails(updateDoc(ref(), { feedback: deleteField(), updatedAt: NOW }));
+  });
+
+  it('denies removing without the server time, or with anything else in the same write', async () => {
+    await assertFails(updateDoc(ref(), { feedback: deleteField() }));
+    await assertFails(updateDoc(ref(), { feedback: deleteField(), updatedAt: CREATED }));
+    await assertFails(
+      updateDoc(ref(), { feedback: deleteField(), updatedAt: NOW, status: 'saved' }),
+    );
+    await assertFails(
+      updateDoc(ref(), { feedback: deleteField(), updatedAt: NOW, reason: 'Rewritten.' }),
+    );
+    await assertFails(
+      updateDoc(ref(), { feedback: deleteField(), updatedAt: NOW, verdict: 'skip' }),
+    );
+    await assertFails(
+      updateDoc(ref(), { feedback: deleteField(), updatedAt: NOW, appliedAt: NOW }),
+    );
+  });
+
+  it('denies removing a part of the rating, or replacing it with something that is not one', async () => {
+    await assertFails(updateDoc(ref(), { 'feedback.expected': deleteField(), updatedAt: NOW }));
+    await assertFails(updateDoc(ref(), { 'feedback.verdict': deleteField(), updatedAt: NOW }));
+    await assertFails(updateDoc(ref(), { feedback: null, updatedAt: NOW }));
+    await assertFails(updateDoc(ref(), { feedback: {}, updatedAt: NOW }));
+  });
+
+  it('denies a removal event that misstates the rating it removes', async () => {
+    const write = buildJobFeedbackRemovalWrite(JOB_ID, rated(), NOW);
+    const owner = dbFor('owner');
+    await assertFails(commit(owner, { ...write, event: { ...write.event, agree: true } }));
+    await assertFails(commit(owner, { ...write, event: { ...write.event, verdict: 'skip' } }));
+    await assertFails(commit(owner, { ...write, event: { ...write.event, extra: 1 } }));
+    await assertFails(commit(owner, { ...write, event: withoutKeys(write.event, ['verdict']) }));
+    await assertFails(commit(owner, { ...write, event: withoutKeys(write.event, ['agree']) }));
+    await assertFails(
+      commit(owner, { ...write, event: { ...write.event, expected: 'near_miss' } }),
+    );
+    await assertFails(commit(owner, { ...write, event: { ...write.event, at: CREATED } }));
+    await assertFails(commit(owner, { ...write, event: { ...write.event, jobId: 'missing' } }));
+  });
+
+  it('denies a removal event with no removal, or riding on another change', async () => {
+    const owner = dbFor('owner');
+    const write = buildJobFeedbackRemovalWrite(JOB_ID, rated(), NOW);
+    // Alone: the rating is still on the job.
+    await assertFails(setDoc(doc(owner, `events/${EVENT_ID}`), write.event));
+    // With an unrelated valid status change: the rating is still there afterwards.
+    const status = buildJobStatusWrite(JOB_ID, rated(), 'saved', NOW);
+    await assertFails(
+      writeBatch(owner)
+        .update(doc(owner, PATHS.job(JOB_ID)), status.update)
+        .set(doc(owner, `events/${EVENT_ID}`), write.event)
+        .commit(),
+    );
+    // With a new rating instead of a removal.
+    const replace = buildJobFeedbackWrite(JOB_ID, rated(), { agree: true }, NOW);
+    await assertFails(
+      writeBatch(owner)
+        .update(doc(owner, PATHS.job(JOB_ID)), replace.update)
+        .set(doc(owner, `events/${EVENT_ID}`), write.event)
+        .commit(),
+    );
+  });
+
+  it('denies a removal event on a job that had no rating', async () => {
+    await seed();
+    const owner = dbFor('owner');
+    const event = buildJobFeedbackRemovalWrite(JOB_ID, rated(), NOW).event;
+    await assertFails(
+      writeBatch(owner)
+        .update(doc(owner, PATHS.job(JOB_ID)), { updatedAt: NOW, status: 'saved' })
+        .set(doc(owner, `events/${EVENT_ID}`), event)
+        .commit(),
+    );
+  });
+
+  it('denies everyone but the owner', async () => {
+    const write = buildJobFeedbackRemovalWrite(JOB_ID, rated(), NOW);
+    await assertFails(commit(dbFor('stranger'), write));
+    await assertFails(commit(dbFor('anon'), write));
+  });
+});
+
 describe('everything else stays server-written', () => {
   beforeEach(async () => {
     await seed();
@@ -369,6 +508,22 @@ describe('every legitimate batched write from job-writes.ts passes', () => {
       await seed();
       await assertSucceeds(
         commit(dbFor('owner'), buildJobFeedbackWrite(JOB_ID, seededJob(), input, NOW)),
+      );
+    }
+  });
+
+  it('covers removing a rating of every kind', async () => {
+    for (const input of feedbackInputs) {
+      const raw = seededJob();
+      await seed(raw);
+      const rate = buildJobFeedbackWrite(JOB_ID, raw, input, NOW);
+      await assertSucceeds(commit(dbFor('owner'), rate));
+      await assertSucceeds(
+        commit(
+          dbFor('owner'),
+          buildJobFeedbackRemovalWrite(JOB_ID, await readJob(), NOW),
+          'event-2',
+        ),
       );
     }
   });
