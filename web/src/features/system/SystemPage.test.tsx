@@ -15,8 +15,10 @@ import {
   type SourceView,
 } from '@/services/system';
 
-import { scanResultText } from './labels';
+import { scanResultText, systemAlerts } from './labels';
 import { SystemPage } from './SystemPage';
+import { loadAgreement, watchSpend } from '@/services/dashboard';
+import { spendMeter } from '@hireframe/shared';
 
 vi.mock('@/services/system', () => ({
   watchSources: vi.fn(),
@@ -26,6 +28,8 @@ vi.mock('@/services/system', () => ({
   scanNow: vi.fn(),
   scanErrorMessage: vi.fn(() => 'A scan is already running.'),
 }));
+
+vi.mock('@/services/dashboard', () => ({ watchSpend: vi.fn(), loadAgreement: vi.fn() }));
 
 const AT = new Date('2026-10-01T08:00:00Z');
 const counts: SourceRunCounts = {
@@ -117,6 +121,23 @@ beforeEach(() => {
   givenRuns([{ id: 'run-1', run: RUN }]);
   givenBrokenBoards([]);
   vi.mocked(countJobs).mockResolvedValue(57);
+  vi.mocked(watchSpend).mockImplementation((_now, callback) => {
+    callback({
+      status: 'ready',
+      data: { meter: spendMeter(800, 1500), untouched: false },
+      invalid: 0,
+    });
+    return () => undefined;
+  });
+  vi.mocked(loadAgreement).mockResolvedValue({
+    ratedAgree: 3,
+    ratedDisagree: 1,
+    appliedAgree: 1,
+    agree: 4,
+    disagree: 1,
+    total: 5,
+    rate: 0.8,
+  });
 });
 
 describe('System screen', () => {
@@ -364,6 +385,50 @@ describe('System screen', () => {
     givenSources([]);
     render(<SystemPage />);
     expect(screen.getByText('No scans yet. Run Scan now.')).toBeDefined();
+  });
+});
+
+describe('System spend, agreement and alerts (M5)', () => {
+  it('shows the spend meter and the agreement line', async () => {
+    render(<SystemPage />);
+    const spend = screen.getByRole('region', { name: 'AI spend this month' });
+    expect(spend.textContent).toContain('£8.00');
+    expect(spend.textContent).toContain('of £15.00');
+    expect(within(spend).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('800');
+    expect(
+      (await within(spend).findByText(/Verdict agreement, last 14 days: 80%/)).textContent,
+    ).toContain('3 rated right, 1 rated wrong, 1 applied on Apply');
+  });
+
+  it('lists what needs attention: a failing source, a failed run and the 80% flag', () => {
+    givenSources([{ id: 'reed', health: health({ status: 'failing', lastErrorCode: 'timeout' }) }]);
+    givenRuns([{ id: 'run-1', run: { ...RUN, status: 'failed', flags: ['spend_80'] } }]);
+    render(<SystemPage />);
+    const alerts = screen.getByRole('region', { name: 'Needs attention' });
+    expect(alerts.textContent).toContain('Reed is failing: the site timed out.');
+    expect(alerts.textContent).toContain('The latest run failed.');
+    expect(alerts.textContent).toContain('80% of the monthly AI cap is used.');
+  });
+
+  it('shows no alerts section when everything is fine', () => {
+    givenSources([{ id: 'greenhouse', health: health() }]);
+    givenRuns([{ id: 'run-1', run: { ...RUN, status: 'succeeded' } }]);
+    render(<SystemPage />);
+    expect(screen.queryByRole('region', { name: 'Needs attention' })).toBeNull();
+  });
+
+  it('systemAlerts flags a stalled run, a paused deep read and an empty history', () => {
+    const now = new Date(AT.getTime() + 3_600_000);
+    const stalled = systemAlerts({
+      sources: [],
+      runs: [{ id: 'r', run: { ...RUN, status: 'running', flags: ['deep_pause'] } }],
+      now,
+    });
+    expect(stalled.map((a) => a.text)).toEqual([
+      'The latest run was stopped before it finished.',
+      'Deep reads are paused near the monthly cap.',
+    ]);
+    expect(systemAlerts({ sources: [], runs: [], now })).toEqual([]);
   });
 });
 
