@@ -3,6 +3,14 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Added
+- **M5 data and services** (ADR-038), no screens yet:
+  - The owner can set a job's status (`new`, `saved`, `applied`, `skipped`), stamp it applied (server time and the verdict it was applied on) and rate a verdict 👍/👎 with a note and an expected verdict. The rules allow exactly those fields; ratings name the verdict they judged, so one made after a re-score is rejected.
+  - Create-only `events` record each action in the same batch.
+  - Shared metrics: verdict agreement over 14 days, London day and week boundaries, the Today tile counts and the spend meter. `DEFAULT_MONTHLY_CAP_PENCE` moved to `packages/shared`.
+  - Six `jobs` indexes for the dashboard queries (they build after deploy).
+  - Web services for jobs, job actions and the dashboard; `npm run dev` seeds twelve fake judged jobs, this month's usage, one rating and one applied job.
+  - `check:bundle` prints each initial file's gzip size.
 
 ## [0.4.1]
 ### Fixed
