@@ -1,4 +1,4 @@
-import { CRITERIA_SEED_V1, todayKpis, type Verdict } from '@hireframe/shared';
+import { CRITERIA_SEED_V1, type Verdict } from '@hireframe/shared';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
@@ -38,62 +38,67 @@ function Count({ value }: { value: number }) {
 }
 
 function Tiles({ state, weeklyTarget }: { state: KpiState; weeklyTarget: number }) {
-  const kpis = state.status === 'ready' ? todayKpis(state.kpis, weeklyTarget) : null;
+  const counts = state.status === 'ready' ? state.counts : null;
   const pending = (
     <div role="status" aria-label="Loading numbers">
       <Skeleton className="h-12" />
     </div>
   );
-  const unavailable = <p className="font-mono text-2xl text-muted-foreground">–</p>;
-  const placeholder = state.status === 'loading' ? pending : unavailable;
+  /** One tile's body: a skeleton while loading, a dash and a note if its own read failed. */
+  const body = (value: number | null | undefined, render: (value: number) => ReactNode) => {
+    if (!counts) return pending;
+    if (value === null || value === undefined) {
+      return (
+        <div role="alert">
+          <p className="font-mono text-2xl text-muted-foreground">–</p>
+          <p className="mt-1 text-xs text-danger">Couldn&apos;t load this number.</p>
+        </div>
+      );
+    }
+    return render(value);
+  };
   return (
-    <>
-      {state.status === 'error' ? (
-        <p role="alert" className="mb-3 text-sm text-danger">
-          Couldn&apos;t load the numbers. Reload to try again.
-        </p>
-      ) : null}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile label="To apply">
-          {kpis ? (
-            <>
-              <Count value={kpis.toApply} />
-              <p className="mt-1 text-xs text-muted-foreground">{kpis.judgedToday} judged today</p>
-            </>
-          ) : (
-            placeholder
-          )}
-        </Tile>
-        <Tile label="To review">
-          {kpis ? (
-            <>
-              <Count value={kpis.toReview} />
-              <p className="mt-1 text-xs text-muted-foreground">near misses and wildcards</p>
-            </>
-          ) : (
-            placeholder
-          )}
-        </Tile>
-        <Tile label="Applied this week">
-          {kpis ? (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <Tile label="To apply">
+        {body(counts?.toApply, (value) => (
+          <>
+            <Count value={value} />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {counts?.judgedToday === null || counts?.judgedToday === undefined
+                ? 'judged today: unavailable'
+                : `${String(counts.judgedToday)} judged today`}
+            </p>
+          </>
+        ))}
+      </Tile>
+      <Tile label="To review">
+        {body(counts?.toReview, (value) => (
+          <>
+            <Count value={value} />
+            <p className="mt-1 text-xs text-muted-foreground">near misses and wildcards</p>
+          </>
+        ))}
+      </Tile>
+      <Tile label="Applied this week">
+        {body(counts?.appliedThisWeek, (value) => {
+          const remaining = Math.max(0, weeklyTarget - value);
+          return (
             <>
               <p className="font-mono text-2xl tabular-nums">
-                {kpis.appliedThisWeek}
-                <span className="text-sm text-muted-foreground"> / {kpis.weeklyTarget}</span>
+                {value}
+                <span className="text-sm text-muted-foreground"> / {weeklyTarget}</span>
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {kpis.weeklyMet ? 'Target met' : `${String(kpis.weeklyRemaining)} to go`}
+                {remaining === 0 ? 'Target met' : `${String(remaining)} to go`}
               </p>
             </>
-          ) : (
-            placeholder
-          )}
-        </Tile>
-        <Tile label="AI spend this month">
-          <SpendMeter />
-        </Tile>
-      </div>
-    </>
+          );
+        })}
+      </Tile>
+      <Tile label="AI spend this month">
+        <SpendMeter />
+      </Tile>
+    </div>
   );
 }
 

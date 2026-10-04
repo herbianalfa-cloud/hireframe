@@ -1,11 +1,17 @@
-import { spendMeter, type TodayKpis } from '@hireframe/shared';
+import { spendMeter } from '@hireframe/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeView } from '@/features/jobs/fixtures';
-import { loadAgreement, loadTodayKpis, watchSpend, watchTodayList } from '@/services/dashboard';
+import {
+  loadAgreement,
+  loadTodayCounts,
+  watchSpend,
+  watchTodayList,
+  type TodayCountResults,
+} from '@/services/dashboard';
 import { setJobStatus, watchJob, type JobView } from '@/services/jobs';
 import type { LiveState } from '@/services/profile';
 
@@ -14,7 +20,7 @@ import { TodayPage } from './TodayPage';
 vi.mock('@/services/dashboard', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   watchTodayList: vi.fn(),
-  loadTodayKpis: vi.fn(),
+  loadTodayCounts: vi.fn(),
   watchSpend: vi.fn(),
   loadAgreement: vi.fn(),
 }));
@@ -32,14 +38,11 @@ vi.mock('@/features/criteria/hooks', () => ({
   useCurrentCriteria: () => ({ status: 'ready', criteria: { weekly_target: 10 } }),
 }));
 
-const KPIS: TodayKpis = {
+const COUNTS: TodayCountResults = {
   toApply: 3,
   toReview: 5,
   judgedToday: 12,
   appliedThisWeek: 4,
-  weeklyTarget: 1,
-  weeklyRemaining: 0,
-  weeklyMet: true, // recomputed by the page from the criteria target
 };
 
 type Lists = Record<string, LiveState<JobView[]>>;
@@ -49,13 +52,14 @@ const ready = (...views: JobView[]): LiveState<JobView[]> => ({
   invalid: 0,
 });
 
-function setup(lists: Lists, options: { search?: string; kpis?: 'ok' | 'fail' } = {}) {
+function setup(lists: Lists, options: { search?: string; kpis?: 'ok' | 'one-fails' } = {}) {
   vi.mocked(watchTodayList).mockImplementation((list, callback) => {
     callback(lists[list] ?? ready());
     return () => undefined;
   });
-  if (options.kpis === 'fail') vi.mocked(loadTodayKpis).mockRejectedValue(new Error('offline'));
-  else vi.mocked(loadTodayKpis).mockResolvedValue(KPIS);
+  vi.mocked(loadTodayCounts).mockResolvedValue(
+    options.kpis === 'one-fails' ? { ...COUNTS, toReview: null } : COUNTS,
+  );
   vi.mocked(watchSpend).mockImplementation((_now, callback) => {
     callback({
       status: 'ready',
@@ -89,7 +93,7 @@ function setup(lists: Lists, options: { search?: string; kpis?: 'ok' | 'fail' } 
 
 beforeEach(() => {
   vi.mocked(watchTodayList).mockReset();
-  vi.mocked(loadTodayKpis).mockReset();
+  vi.mocked(loadTodayCounts).mockReset();
   vi.mocked(watchSpend).mockReset();
   vi.mocked(setJobStatus).mockReset().mockResolvedValue();
   vi.mocked(watchJob).mockReset();
@@ -145,11 +149,13 @@ describe('TodayPage', () => {
     );
   });
 
-  it('says so when the numbers cannot load, and still shows the lists', async () => {
-    setup({ apply: ready(makeView('a1', { title: 'Apply role' })) }, { kpis: 'fail' });
-    expect((await screen.findByText(/Couldn.t load the numbers/)).getAttribute('role')).toBe(
-      'alert',
-    );
+  it('fails one tile on its own and keeps the other numbers and the lists', async () => {
+    setup({ apply: ready(makeView('a1', { title: 'Apply role' })) }, { kpis: 'one-fails' });
+    expect(
+      (await screen.findByText(/Couldn.t load this number/)).closest('[role="alert"]'),
+    ).not.toBeNull();
+    expect(screen.getAllByText(/Couldn.t load this number/)).toHaveLength(1);
+    expect(screen.getByText('12 judged today')).toBeDefined();
     expect(screen.getByText('Apply role')).toBeDefined();
   });
 
@@ -183,11 +189,11 @@ describe('TodayPage', () => {
   it('refreshes the numbers after a keyboard action', async () => {
     setup({ apply: ready(makeView('a1')) });
     await screen.findByText('12 judged today');
-    expect(loadTodayKpis).toHaveBeenCalledTimes(1);
+    expect(loadTodayCounts).toHaveBeenCalledTimes(1);
     screen.getByText('Data Analyst').closest('button')?.focus();
     await userEvent.keyboard('a');
     await waitFor(() => {
-      expect(loadTodayKpis).toHaveBeenCalledTimes(2);
+      expect(loadTodayCounts).toHaveBeenCalledTimes(2);
     });
   });
 

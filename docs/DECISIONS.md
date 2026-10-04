@@ -450,3 +450,13 @@ Considered and dropped on this run's evidence:
 Parked (ROADMAP): `deepRead.maxTokens` 2,500 at the next forced re-record (keep 4,000 if real outputs exceed about 1,250 tokens), and Message Batches (ADR-035).
 
 Consequences: S2 settles at about 0.15p a call and the spend meter is accurate for Haiku again. A truly new model still logs an error and is over-, never under-charged. The worst-case reservation per call is unchanged apart from F4, which can only raise it.
+
+## ADR-040 Firestore queries are specs, checked against the index file
+
+**Context:** v0.5.0 shipped two count queries that scan ascending against descending indexes. The emulator doesn't enforce indexes, so every test passed and production failed with `failed-precondition`.
+
+**Decision:** The dashboard and Jobs queries are built from plain `QuerySpec` data (`web/src/services/query-spec.ts`), and `indexServes` (`indexes.ts`) checks a spec against `firestore.indexes.json`: equality fields in any order, then the ordered fields in the same sequence and direction, with a range field ordered first (ascending if not stated). The check is deliberately strict: it doesn't count on index merging for ordered queries, so combinations that would only work on a merge get a declared composite (three for "needs review" with verdict and/or status). Range counts carry an explicit descending `orderBy` instead of new ascending indexes.
+
+**Also:** each Today count settles on its own (`Promise.allSettled`), so one failing read affects one tile.
+
+Consequences: a new query that needs an index fails a unit test, not production. The check is a model of Firestore's rules, so it can be stricter than Firestore, never knowingly looser.

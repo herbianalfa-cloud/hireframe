@@ -16,14 +16,11 @@ import {
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   startAfter,
-  where,
   writeBatch,
   type DocumentData,
-  type QueryConstraint,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 
@@ -35,6 +32,7 @@ import {
   type JobActionWrite,
 } from './job-writes';
 import { errorCode, logError } from './log';
+import { specConstraints, type QuerySpec } from './query-spec';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
@@ -81,14 +79,19 @@ export function parseJobs(docs: readonly QueryDocumentSnapshot[]): {
   return { jobs, invalid };
 }
 
-/** The query constraints for a filter set: newest judged first. */
-export function jobFilterConstraints(filters: JobFilters): QueryConstraint[] {
-  const constraints: QueryConstraint[] = [];
-  if (filters.verdict) constraints.push(where('verdict', '==', filters.verdict));
-  if (filters.status) constraints.push(where('status', '==', filters.status));
-  if (filters.needsReview) constraints.push(where('review.stage', 'in', ['s2', 's3']));
-  constraints.push(orderBy('judgedAt', 'desc'));
-  return constraints;
+/** The query for a filter set: newest judged first. */
+export function jobFilterSpec(filters: JobFilters): QuerySpec {
+  return {
+    collection: COLLECTIONS.jobs,
+    filters: [
+      ...(filters.verdict ? [{ field: 'verdict', op: '==' as const, value: filters.verdict }] : []),
+      ...(filters.status ? [{ field: 'status', op: '==' as const, value: filters.status }] : []),
+      ...(filters.needsReview
+        ? [{ field: 'review.stage', op: 'in' as const, value: ['s2', 's3'] }]
+        : []),
+    ],
+    orderBy: [{ field: 'judgedAt', direction: 'desc' }],
+  };
 }
 
 export interface JobsPage {
@@ -105,7 +108,7 @@ export async function loadJobsPage(
 ): Promise<JobsPage> {
   const { db } = await getFirebase();
   const constraints = [
-    ...jobFilterConstraints(filters),
+    ...specConstraints(jobFilterSpec(filters)),
     ...(cursor ? [startAfter(cursor)] : []),
     limit(JOBS_PAGE_SIZE),
   ];
