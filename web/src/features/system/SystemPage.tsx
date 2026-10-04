@@ -100,7 +100,7 @@ function ScanNowCard({ onFinished }: { onFinished: () => void }) {
         <div>
           <h2 className="text-sm font-medium">Scan now</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Fetches every source and adds new jobs. Verdicts arrive with the funnel (M4).
+            Fetches every source, adds new jobs and judges them through the funnel.
           </p>
         </div>
         <Button
