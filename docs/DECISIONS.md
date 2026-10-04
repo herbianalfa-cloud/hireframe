@@ -250,6 +250,11 @@ Context: CLAUDE.md said "Respect robots.txt and ToS". The M3 checks (2026-10-01)
 
 Consequences: CLAUDE.md's hard rule and the SECURITY threat row now say this. Adzuna attribution (and Reed's, if its terms require it) is an M5 task, because M3 shows counts, not listings. If either provider objects or changes its terms, the source is switched off with `config/app.disabledSources`.
 
+**Addendum (M5): attribution on listings.**
+- **Adzuna.** Every job whose `sources` include `adzuna` shows "Jobs by Adzuna" next to its listing, in Today, Jobs and Job detail: the logo (at least 116×23 px, self-hosted in `web/public/attribution/`, official artwork from adzuna.co.uk/press.html) linking to adzuna.co.uk. A job found by several sources shows it because one of them is Adzuna.
+- **Reed.** No attribution clause was found (the terms are accepted at sign-up and aren't published, see the Reed terms bullet above), so a Reed job shows a plain "via Reed" link to its own listing, which also gives the owner the original posting. If Reed's terms ever require more, this is the place to change.
+- Attribution is text and a link only: no hotlinked images, no tracking. The logo is a static asset so the page makes no request to Adzuna until the owner clicks.
+
 ## ADR-026 YC jobs and Work at a Startup: email alerts only
 Context: ARCHITECTURE asked M3 to verify robots.txt and ToS for YC's job pages. `ycombinator.com/robots.txt` allows most paths (it disallows `/companies?*` and some others), and `workatastartup.com/robots.txt` allows everything. The YC Terms of Use (ycombinator.com/legal), which cover the jobs pages and Work at a Startup, say: "you will not engage in or use any data mining, robots, scraping or similar data gathering or extraction methods". Decision: no YC or Work at a Startup source module. Their jobs arrive through Work at a Startup email alerts via the Gmail bridge (M6, RUNBOOK one-time steps 5–6). Consequences: YC-company jobs are covered only when the company uses a watched ATS board, or through alerts. Lookup can't fetch YC pages; the user pastes the text.
 
@@ -402,6 +407,26 @@ Consequences: re-scores of threshold-only changes are instant and free. A re-sco
 - **Recovery** creates the job by hand under the exact name the CLI uses (`firebase-schedule-scheduledScan-europe-west2`), so later deploys update it (RUNBOOK Recovery).
 - **The invoker must be exactly `hireframe-fns`.** Every deploy that changes the function rewrites the invoker unless the members are exactly that account; any extra member makes the deploy fail before it updates the schedule. Part E step 68 now binds `hireframe-fns` explicitly instead of copying whatever email the scheduler shows.
 - v0.4.1 is the first deploy that changes the bundle, so RUNBOOK checks the job and the invoker before the tag.
+
+## ADR-038 Dashboard data, job actions and feedback
+Context: M5 turns M4's verdicts into the product (PRD R7). The owner needs to act on jobs (save, skip, mark applied) and say whether a verdict was right, and the PRD metric "verdict agreement ≥ 85%" needs that to be measurable. The jobs collection is otherwise server-written, so each client write is opened narrowly (ADR-011). Decision:
+- **Client writes on `jobs/{jobId}` are limited to** `status` (between `new`, `saved`, `applied`, `skipped`; `CLIENT_JOB_STATUSES`), `appliedAt` and `appliedVerdict`, `feedback` and `updatedAt`. Nothing the funnel or ingest writes can change from the client, and a job in a server-owned status (`interview`, `offer`, `rejected`, Wave 2) can't be moved from the app. `validJobAction()` in `firestore.rules` enforces it, with tests in `tests/rules/jobs.rules.test.ts` that run the real builders (`web/src/services/job-writes.ts`).
+- **Applied is stamped, not trusted.** Marking applied sets `appliedAt` to the server time and `appliedVerdict` to the job's own stored verdict in the same write (no `appliedVerdict` on a job that has none); leaving applied removes both.
+- **Feedback** is `{agree, note? ≤ 280, verdict, expected?, at}`. `verdict` must equal the job's stored verdict, so a rating written after a re-score changed the verdict is rejected (the UI asks to retry) rather than recorded against the wrong judgement. `expected` is only for a 👎 and must differ from `verdict`. A new rating replaces the old one. Notes live on the job, never in events.
+- **`events/{id}` is create-only**, written in the same batch as the job change: `job_status {from, to, verdict?}` or `job_feedback {agree, verdict, expected?}`, with the server time. The rules tie each event to the job as the batch leaves it (`get`/`getAfter`), so an event can't describe a change that didn't happen. Events are never updated or deleted, so metrics can be recomputed.
+- **Agreement** (`verdictAgreement`, packages/shared/src/metrics.ts) over the last 14 days (`AGREEMENT_DAYS`):
+  - an explicit 👍/👎 counts for or against the verdict it judged;
+  - without one, Mark applied on an **Apply** verdict counts as agree;
+  - skips and jobs with no action don't count;
+  - there is **no implicit disagree**. This biases the rate upward (applying is a quiet 👍, ignoring is not a 👎), so the line shows the split (rated agree and disagree, applied) and the target stays 85% (`AGREEMENT_TARGET`).
+- **Dashboard KPIs** (`todayKpis`): *to apply* (Apply verdicts with status `new` or `saved`), *to review* (near misses and wildcards, same statuses), *judged today* (non-skip verdicts since 00:00 Europe/London) and *applied this week* (since Monday 00:00 Europe/London) against `weekly_target`. The web service reads them as server-side counts (`getCountFromServer`), one read each, so the tiles stay exact beyond a page. Day and week boundaries are London calendar boundaries (`londonDayStart`, `londonWeekStart`), correct across the clock changes.
+- **Spend meter** (`spendMeter`): spend over the month's `capPence` from `usage/{yyyy-mm}`; amber from 80% (`SPEND_WARN_FRACTION`, PRD R11), capped at the cap. A month with no usage document shows nothing spent against the default cap (`DEFAULT_MONTHLY_CAP_PENCE`, now in `packages/shared`).
+- **Indexes** (six on `jobs`): `(verdict, status, judgedAt↓)`, `(verdict, judgedAt↓)`, `(status, judgedAt↓)`, `(status, appliedAt↓)`, `(review.stage, judgedAt↓)`, `(feedback.agree, feedback.at↓)`. Reads that the screens page through use `limit` and a cursor.
+- **R7 measure ("loads usable in < 2 s on 4G")**: `hf:usable` is a `performance.measure` from navigation start to the first render of Today with tiles and the Apply list filled from Firestore, on Chrome Fast 4G, CPU 4× slowdown, signed in. Pass = the median of 3 **repeat visits** ≤ 2,000 ms; the median of 3 cold visits is recorded (target ≤ 3,000 ms) and doesn't gate. Levers if it fails, in order: start the Today queries during the owner check, Firestore persistent local cache, smaller initial chunks.
+- **Keyboard shortcuts** are scoped to the focused list (WCAG 2.1.4): `j`/`k`/`a` act only while focus is inside it, never globally.
+- **Parked:** 👎 → anonymised golden-set candidates (ROADMAP); a ⌘K palette.
+
+Consequences: the owner's actions and ratings are recorded safely and can't touch verdicts. Agreement is a lower-effort proxy until enough explicit ratings exist. Re-scoring while a rating dialog is open fails the write instead of recording a stale rating.
 
 ## ADR-039 Funnel throughput: dated model IDs, back-pressure, cache-write worst case
 Context: the first production run (v0.4.0) passed 422 jobs in S1, then S2 judged 30 and stopped, and S3 judged 5 of 8 at 14p of a 24p lease. The run took 135 s against a 400 s S2 deadline, and S2 had no errors (`s2.in` 30 = passed 8 + skipped 22, review 0). Two causes:

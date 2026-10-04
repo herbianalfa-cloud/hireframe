@@ -8,6 +8,7 @@ rules_version = '2';
 //   M2.1 lets the owner mark an upload removed (ADR-023). M3 adds read-only `sources` (ADR-029).
 //   M4 lets the owner set their work rights on `profile/main` (ADR-033) and lane points on
 //   criteria versions (ADR-034).
+//   M5 lets the owner act on jobs (status, applied stamps, 👍/👎) and append `events` (ADR-038).
 //   Everything else, including every write by the Admin SDK paths, stays client-deny.
 //   Unknown paths fall through to the default deny.
 service cloud.firestore {
@@ -184,6 +185,89 @@ service cloud.firestore {
         && validCriteriaContent(data);
     }
 
+    // ---- Jobs and events (M5, ADR-038) ----
+
+    function jobPath(jobId) {
+      return /databases/$(database)/documents/jobs/$(jobId);
+    }
+
+    // The owner may change only `status`, `appliedAt`, `appliedVerdict`, `feedback` and
+    // `updatedAt`. Funnel and ingest fields are server-written. A status change is between the
+    // four client statuses; applied stamps `appliedAt` with the server time and the job's own
+    // verdict, and leaving applied clears both. A rating names the verdict it judged, so one
+    // written after a re-score changed the verdict is rejected.
+    function validJobAction() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let changed = after.diff(before).affectedKeys();
+      return changed.hasOnly(['status', 'appliedAt', 'appliedVerdict', 'feedback', 'updatedAt'])
+        && changed.hasAny(['status', 'feedback'])
+        && after.updatedAt == request.time
+        && (!changed.hasAny(['status', 'appliedAt', 'appliedVerdict'])
+            || validStatusChange(before, after))
+        && (!changed.hasAny(['feedback']) || validFeedback(before, after.feedback));
+    }
+
+    function validStatusChange(before, after) {
+      let clientStatuses = ['new', 'saved', 'applied', 'skipped'];
+      return before.status in clientStatuses
+        && after.status in clientStatuses
+        && after.status != before.status
+        && (after.status == 'applied'
+            ? after.appliedAt == request.time
+              && (before.get('verdict', null) == null
+                  ? !('appliedVerdict' in after)
+                  : after.get('appliedVerdict', null) == before.verdict)
+            : !('appliedAt' in after) && !('appliedVerdict' in after));
+    }
+
+    function validFeedback(before, feedback) {
+      return feedback is map
+        && feedback.keys().hasAll(['agree', 'verdict', 'at'])
+        && feedback.keys().hasOnly(['agree', 'note', 'verdict', 'expected', 'at'])
+        && feedback.agree is bool
+        && before.get('verdict', null) != null
+        && feedback.verdict == before.verdict
+        && feedback.at == request.time
+        && (!('note' in feedback)
+            || (feedback.note is string && feedback.note.size() >= 1 && feedback.note.size() <= 280))
+        && (!('expected' in feedback)
+            || (feedback.expected in ['apply', 'near_miss', 'wildcard', 'skip']
+                && feedback.expected != feedback.verdict
+                && feedback.agree == false));
+    }
+
+    // Events are created in the same batch as the job change they record, and never edited.
+    function validEventCreate() {
+      let data = request.resource.data;
+      let verdicts = ['apply', 'near_miss', 'wildcard', 'skip'];
+      return data.get('jobId', null) is string
+        && data.jobId.size() >= 1 && data.jobId.size() <= 200
+        && data.at == request.time
+        && data.schemaVersion == 1
+        && existsAfter(jobPath(data.jobId))
+        && (data.get('type', null) == 'job_status'
+            ? data.keys().hasAll(['type', 'jobId', 'from', 'to', 'at', 'schemaVersion'])
+              && data.keys().hasOnly(['type', 'jobId', 'from', 'to', 'verdict', 'at',
+                                      'schemaVersion'])
+              && data.from in ['new', 'saved', 'applied', 'skipped', 'interview', 'offer',
+                               'rejected']
+              && data.to in ['new', 'saved', 'applied', 'skipped']
+              && get(jobPath(data.jobId)).data.status == data.from
+              && getAfter(jobPath(data.jobId)).data.status == data.to
+              && (!('verdict' in data) || data.verdict in verdicts)
+            : data.get('type', null) == 'job_feedback'
+              ? data.keys().hasAll(['type', 'jobId', 'agree', 'verdict', 'at', 'schemaVersion'])
+                && data.keys().hasOnly(['type', 'jobId', 'agree', 'verdict', 'expected', 'at',
+                                        'schemaVersion'])
+                && data.agree is bool
+                && data.verdict in verdicts
+                && (!('expected' in data) || (data.expected in verdicts && !data.agree))
+                && getAfter(jobPath(data.jobId)).data.feedback.agree == data.agree
+                && getAfter(jobPath(data.jobId)).data.feedback.verdict == data.verdict
+              : false);
+    }
+
     match /config/{docId} {
       allow read: if isOwner();
       allow write: if false; // Admin SDK / console only.
@@ -234,6 +318,7 @@ service cloud.firestore {
 
     match /jobs/{jobId} {
       allow read: if isOwner();
+      allow update: if isOwner() && validJobAction();
 
       match /description/{descId} {
         allow read: if isOwner();
@@ -254,6 +339,7 @@ service cloud.firestore {
 
     match /events/{eventId} {
       allow read: if isOwner();
+      allow create: if isOwner() && validEventCreate();
     }
 
     match /locks/{lockId} {

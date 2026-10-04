@@ -4,25 +4,134 @@
       "collectionGroup": "jobs",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "stage", "order": "ASCENDING" },
-        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "stage",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "firstSeenAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "jobs",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "next", "order": "ASCENDING" },
-        { "fieldPath": "sortAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "next",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "sortAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "jobs",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "next", "order": "ASCENDING" },
-        { "fieldPath": "triage.triageScore", "order": "DESCENDING" },
-        { "fieldPath": "sortAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "next",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "triage.triageScore",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "sortAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "verdict",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "judgedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "verdict",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "judgedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "judgedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "appliedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "review.stage",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "judgedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "feedback.agree",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "feedback.at",
+          "order": "DESCENDING"
+        }
       ]
     }
   ],

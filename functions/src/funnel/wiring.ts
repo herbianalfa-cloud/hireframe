@@ -1,9 +1,8 @@
-import type { AppConfig } from '@hireframe/shared';
+import { DEFAULT_MONTHLY_CAP_PENCE, type AppConfig } from '@hireframe/shared';
 import type { Firestore } from 'firebase-admin/firestore';
 
 import {
   DEFAULT_FX_USD_TO_GBP,
-  DEFAULT_MONTHLY_CAP_PENCE,
   FUNNEL,
   funnelLimits,
   FunnelOverridesSchema,

@@ -18,9 +18,6 @@ export const RUNTIME_SERVICE_ACCOUNT = 'hireframe-fns@hireframe-f6b03.iam.gservi
 /** Secret Manager secret name read through `defineSecret` (docs/RUNBOOK.md Part C). */
 export const ANTHROPIC_SECRET_NAME = 'ANTHROPIC_API_KEY';
 
-/** PRD R11 default monthly cap (£15). */
-export const DEFAULT_MONTHLY_CAP_PENCE = 1500;
-
 /** Deliberately high, so costs in pence are overstated rather than understated. */
 export const DEFAULT_FX_USD_TO_GBP = 0.85;
 

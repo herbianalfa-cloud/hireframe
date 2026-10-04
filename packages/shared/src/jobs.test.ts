@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { isRunStalled, JobKeysProjectionSchema, STALE_RUN_MS } from './jobs.js';
+import {
+  CLIENT_JOB_STATUSES,
+  isRunStalled,
+  JOB_STATUSES,
+  JobFeedbackSchema,
+  JobKeysProjectionSchema,
+  STALE_RUN_MS,
+} from './jobs.js';
 
 describe('isRunStalled', () => {
   const startedAt = new Date('2026-10-03T08:00:00Z');
@@ -20,5 +27,24 @@ describe('JobKeysProjectionSchema', () => {
     expect(JobKeysProjectionSchema.safeParse(good).success).toBe(true);
     expect(JobKeysProjectionSchema.safeParse({ ...good, keys: [] }).success).toBe(false);
     expect(JobKeysProjectionSchema.safeParse({ ...good, firstSeenAt: 'x' }).success).toBe(false);
+  });
+});
+
+describe('JobFeedbackSchema', () => {
+  const feedback = { agree: false, verdict: 'apply', at: new Date('2026-10-14T09:00:00Z') };
+
+  it('takes an optional note up to 280 characters and an expected verdict', () => {
+    expect(JobFeedbackSchema.safeParse(feedback).success).toBe(true);
+    expect(
+      JobFeedbackSchema.safeParse({ ...feedback, note: 'x'.repeat(280), expected: 'near_miss' })
+        .success,
+    ).toBe(true);
+    expect(JobFeedbackSchema.safeParse({ ...feedback, note: 'x'.repeat(281) }).success).toBe(false);
+    expect(JobFeedbackSchema.safeParse({ ...feedback, verdict: 'maybe' }).success).toBe(false);
+  });
+
+  it('keeps the client statuses a subset of the job statuses', () => {
+    for (const status of CLIENT_JOB_STATUSES) expect(JOB_STATUSES).toContain(status);
+    expect(CLIENT_JOB_STATUSES).toEqual(['new', 'saved', 'applied', 'skipped']);
   });
 });

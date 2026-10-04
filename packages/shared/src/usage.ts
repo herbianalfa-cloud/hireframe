@@ -22,6 +22,9 @@ export interface TokenCounts {
   cacheWrite: number;
 }
 
+/** PRD R11 default monthly cap (£15); `config/app.monthlyCapPence` overrides it. */
+export const DEFAULT_MONTHLY_CAP_PENCE = 1500;
+
 export const RESERVATION_TTL_MS = 15 * 60 * 1000;
 
 const PENCE_DECIMALS = 10_000;

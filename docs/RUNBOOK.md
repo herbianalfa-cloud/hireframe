@@ -10,7 +10,7 @@
 7. Secrets go into Secret Manager via `firebase functions:secrets:set`. Never paste them into chat or code.
 
 ## Firebase setup
-Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2); Part D adds the job sources (M3); Part E adds the funnel and the schedule (M4). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
+Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2); Part D adds the job sources (M3); Part E adds the funnel and the schedule (M4); Part F adds the dashboard data (M5). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
 
 ### Part A: before the first deploy
 1. **Create Firestore.**
@@ -292,6 +292,12 @@ Before the `v0.4.0` deploy. Design: ADR-032 (run budget), ADR-033 (S1 and work r
 70. On your phone: **System → Scan now**. It takes 3–8 minutes; check the stage counts and cost. In Firestore, `usage/{yyyy-mm}.reservations` is empty afterwards.
 71. Next weekday after 07:30, check that a "Scheduled" run is there.
 72. *(Optional)* To tune limits without a deploy, add a map `funnel` to `config/app` with any of `runBudgetPence`, `s1MaxJobs`, `s2MaxJobs`, `s3MaxJobs`, `triageRpm`, `deepReadRpm`, `reedHydratePerRun` (numbers). Raising `monthlyCapPence` raises the per-run budget automatically. An invalid map is ignored (and logged), never fatal.
+
+### Part F: Dashboard data (M5, PR 2 session 1)
+Before the `v0.5.0` deploy. Design: ADR-038 (job actions, feedback, agreement), ADR-025 addendum (attribution). This session adds data and services only; the screens come next.
+73. **Run the rules tests.** In the repo folder, run `npm run test:rules` (needs Java 21). All tests pass, including `tests/rules/jobs.rules.test.ts`.
+74. *(Optional)* **Choose the agreement window and target.** The defaults are 14 days and 85% (`AGREEMENT_DAYS`, `AGREEMENT_TARGET` in `packages/shared/src/metrics.ts`). Tell Claude if you want different ones.
+75. **Before the `v0.5.0` deploy**, the six new `jobs` indexes build after deploy; the dashboard queries fail with "requires an index" until each says **Enabled** (Firestore → Indexes). The screens' own steps follow in the next session.
 
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
