@@ -1,3 +1,4 @@
+import { CLIENT_JOB_STATUSES, EventSchema, VERDICTS } from '@hireframe/shared';
 import { deleteField, serverTimestamp, type DocumentData } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
@@ -96,5 +97,42 @@ describe('buildJobFeedbackWrite', () => {
     expect(() =>
       buildJobFeedbackWrite('job-1', job, { agree: false, expected: 'apply' }, NOW),
     ).toThrow('different');
+  });
+});
+
+describe('built events match EventSchema', () => {
+  // The server timestamp sentinel stands in for `at`; a stored event has a Date there.
+  const parse = (event: DocumentData) => EventSchema.parse({ ...event, at: new Date() });
+
+  it('every status move, with and without a verdict', () => {
+    for (const from of CLIENT_JOB_STATUSES) {
+      for (const to of CLIENT_JOB_STATUSES) {
+        if (from === to) continue;
+        for (const raw of [{ status: from, verdict: 'near_miss' }, { status: from }]) {
+          const { event } = buildJobStatusWrite('job-1', raw, to, NOW);
+          expect(parse(event)).toMatchObject({ type: 'job_status', from, to });
+        }
+      }
+    }
+  });
+
+  it('every rating, for every verdict and expected verdict', () => {
+    for (const verdict of VERDICTS) {
+      const raw = { status: 'new', verdict };
+      for (const input of [
+        { agree: true },
+        { agree: true, note: 'Right.' },
+        { agree: false },
+        ...VERDICTS.filter((expected) => expected !== verdict).map((expected) => ({
+          agree: false,
+          note: 'Off.',
+          expected,
+        })),
+      ]) {
+        const { event } = buildJobFeedbackWrite('job-1', raw, input, NOW);
+        expect(parse(event)).toMatchObject({ type: 'job_feedback', verdict, agree: input.agree });
+        expect('note' in event).toBe(false);
+      }
+    }
   });
 });

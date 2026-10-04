@@ -142,19 +142,23 @@ export interface TodayCounts {
   appliedThisWeek: number;
 }
 
-export interface TodayKpis extends TodayCounts {
+/** Each count, or null when that one read failed (the others still show). */
+export type TodayCountResults = { [K in keyof TodayCounts]: number | null };
+
+export interface TodayKpis extends TodayCountResults {
   weeklyTarget: number;
-  /** Applications still needed this week to reach the target (never below 0). */
-  weeklyRemaining: number;
-  weeklyMet: boolean;
+  /** Applications still needed this week to reach the target (never below 0); null if unknown. */
+  weeklyRemaining: number | null;
+  weeklyMet: boolean | null;
 }
 
-export function todayKpis(counts: TodayCounts, weeklyTarget: number): TodayKpis {
+export function todayKpis(counts: TodayCountResults, weeklyTarget: number): TodayKpis {
+  const applied = counts.appliedThisWeek;
   return {
     ...counts,
     weeklyTarget,
-    weeklyRemaining: Math.max(0, weeklyTarget - counts.appliedThisWeek),
-    weeklyMet: counts.appliedThisWeek >= weeklyTarget,
+    weeklyRemaining: applied === null ? null : Math.max(0, weeklyTarget - applied),
+    weeklyMet: applied === null ? null : applied >= weeklyTarget,
   };
 }
 
