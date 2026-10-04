@@ -145,10 +145,7 @@ export function resolveCapPence(configCap: number | undefined, usageCap: number 
 }
 
 /** Builds the meter from a usage document's data (null when the month has none yet). */
-export function spendViewFrom(
-  usageData: unknown,
-  configCap: number | undefined,
-): SpendView | null {
+export function spendViewFrom(usageData: unknown, configCap: number | undefined): SpendView | null {
   if (usageData === null) {
     return {
       meter: spendMeter(0, resolveCapPence(configCap, undefined)),
@@ -170,7 +167,7 @@ async function readConfiguredCap(db: Firestore): Promise<number | undefined> {
     const cap: unknown = snapshot.data()?.monthlyCapPence;
     return typeof cap === 'number' && Number.isInteger(cap) && cap >= 0 ? cap : undefined;
   } catch (error) {
-    logError('dashboard.config_failed', { code: errorCode(error) });
+    logError('dashboard.config_failed', { code: errorCode(error) ?? 'unknown' });
     return undefined;
   }
 }
