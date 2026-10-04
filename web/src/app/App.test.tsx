@@ -9,6 +9,8 @@ vi.mock('@/features/profile/ProfilePage', () => ({ ProfilePage: () => <h1>Profil
 vi.mock('@/features/criteria/CriteriaPage', () => ({
   CriteriaPage: () => <h1>Criteria screen</h1>,
 }));
+vi.mock('@/features/today/TodayPage', () => ({ TodayPage: () => <h1>Today screen</h1> }));
+vi.mock('@/features/jobs/JobsPage', () => ({ JobsPage: () => <h1>Jobs screen</h1> }));
 vi.mock('@/features/system/SystemPage', () => ({ SystemPage: () => <h1>System screen</h1> }));
 
 function renderAt(path: string) {
@@ -25,6 +27,8 @@ function renderAt(path: string) {
 
 describe('AppRoutes', () => {
   it.each([
+    ['/', 'Today screen'],
+    ['/jobs', 'Jobs screen'],
     ['/profile', 'Profile screen'],
     ['/criteria', 'Criteria screen'],
     ['/system', 'System screen'],
@@ -34,7 +38,7 @@ describe('AppRoutes', () => {
   });
 
   it('keeps the empty state for screens not built yet', () => {
-    renderAt('/jobs');
-    expect(screen.getByText('No jobs yet')).toBeTruthy();
+    renderAt('/lookup');
+    expect(screen.getByText('Look up a job link')).toBeTruthy();
   });
 });

@@ -17,7 +17,7 @@ export interface NavItem {
   empty: { title: string; body: string };
 }
 
-/** Screens from docs/PRD.md R7 / docs/DESIGN.md. Job detail opens from Jobs (M5). */
+/** Screens from docs/PRD.md R7 / docs/DESIGN.md. Job detail opens over Today and Jobs (`?job=`). */
 export const NAV_ITEMS: readonly NavItem[] = [
   {
     path: '/',
