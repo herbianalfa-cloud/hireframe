@@ -239,6 +239,8 @@ export const FUNNEL = {
   /** From this share of the monthly cap S3 pauses; S2 continues until the cap (PRD R11). */
   deepPauseAtFraction: 0.9,
   s1MaxJobs: 2_000,
+  /** Queued jobs past `freshness_days` the expiry sweep reads per stage and run (free). */
+  expireMaxJobs: 2_000,
   s2MaxJobs: 300,
   s3MaxJobs: 25,
   s2Concurrency: 4,

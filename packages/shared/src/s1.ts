@@ -35,10 +35,18 @@ export function sortDate(job: Pick<S1Job, 'postedAt' | 'firstSeenAt'>): Date {
   return job.postedAt ?? job.firstSeenAt;
 }
 
+/** Jobs whose `sortAt` is before this are stale: `now − freshness_days`. */
+export function freshnessCutoff(
+  criteria: Pick<CriteriaContent, 'freshness_days'>,
+  now: Date,
+): Date {
+  return new Date(now.getTime() - criteria.freshness_days * DAY_MS);
+}
+
 /**
  * True when the job is older than `freshness_days`. Without a posting date the first-seen date is
- * used: a job first seen 20 days ago was posted at least 20 days ago. Used by S1 and again when a
- * queued job is taken off the S2/S3 queue.
+ * used: a job first seen 20 days ago was posted at least 20 days ago. Used by S1, by the expiry
+ * sweep and again when a queued job is taken off the S2/S3 queue.
  */
 export function isExpired(
   job: Pick<S1Job, 'postedAt' | 'firstSeenAt'>,

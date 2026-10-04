@@ -209,6 +209,26 @@ describe('the funnel on the emulator', () => {
     expect(b.rescoreQueuedAt).toBeInstanceOf(Date);
   });
 
+  it('expires a stale queued job below the read limit as a freshness skip', async () => {
+    const stale = { stage: 's1' as const, next: 's2' as const, sortAt: daysAgo(20) };
+    await addJob('fresh', { stage: 's1', next: 's2', sortAt: daysAgo(1) });
+    await addJob('stale-a', { ...stale, postedAt: daysAgo(20) });
+    await addJob('stale-b', { ...stale, sortAt: daysAgo(30), postedAt: daysAgo(30) });
+    const result = await runFunnel(deps({ limits: { ...funnelLimits(1_500, {}), s2MaxJobs: 1 } }), {
+      runId: 'r1',
+    });
+    for (const id of ['stale-a', 'stale-b']) {
+      expect(await read(id)).toMatchObject({
+        verdict: 'skip',
+        stage: 's2',
+        skip: { stage: 's2', ruleId: 'freshness' },
+        next: null,
+      });
+    }
+    expect((await read('fresh')).verdict).toBe('apply');
+    expect(result.perStage.s2.expired).toBe(2);
+  });
+
   it('reads queued S3 jobs best triage first', async () => {
     const triage = (score: number) => ({
       lane: 'primary' as const,
