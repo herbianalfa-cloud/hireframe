@@ -6,9 +6,8 @@ import { Timestamp } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
 import { dashboardQuerySpecs } from './dashboard';
-import { indexServes, type CompositeIndex } from './indexes';
 import { jobFilterSpec } from './jobs';
-import type { QuerySpec } from './query-spec';
+import { indexServes, type CompositeIndex, type QuerySpec } from './query-spec';
 
 const indexFile = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../../firestore.indexes.json', import.meta.url)), 'utf8'),

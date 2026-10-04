@@ -1,25 +1,10 @@
-import {
-  orderBy,
-  where,
-  type OrderByDirection,
-  type QueryConstraint,
-  type WhereFilterOp,
-} from 'firebase/firestore';
+import { orderBy, where, type QueryConstraint } from 'firebase/firestore';
 
-/**
- * A Firestore query described as data, so the services build their constraints from it and a
- * test can check each one against `firestore.indexes.json`. The emulator doesn't enforce
- * indexes, so a missing one only shows up in production.
- */
-export interface QuerySpec {
-  collection: string;
-  filters: readonly {
-    field: string;
-    op: Extract<WhereFilterOp, '==' | 'in' | '>='>;
-    value: unknown;
-  }[];
-  orderBy: readonly { field: string; direction: OrderByDirection }[];
-}
+import type { QuerySpec } from '@hireframe/shared';
+
+/** The spec types and the index check live in `@hireframe/shared` (ADR-040 amendment). */
+export { indexServes } from '@hireframe/shared';
+export type { CompositeIndex, QuerySpec } from '@hireframe/shared';
 
 export function specConstraints(spec: QuerySpec): QueryConstraint[] {
   return [

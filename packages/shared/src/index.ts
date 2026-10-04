@@ -17,6 +17,7 @@ export * from './merge.js';
 export * from './metrics.js';
 export { redactPii } from './pii.js';
 export * from './profile.js';
+export * from './query-spec.js';
 export * from './removal.js';
 export * from './s1.js';
 export * from './score.js';
