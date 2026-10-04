@@ -2,6 +2,15 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [0.5.1]
+### Fixed
+- **Today's tiles showed "Couldn't load the numbers" in production.** "Judged today" and "applied this week" scanned ascending, but the indexes are descending, so Firestore rejected both counts (`failed-precondition`). Both now order descending and use the existing indexes. The emulator doesn't enforce indexes, which is why tests passed.
+- **Jobs filtered to "needs review" together with a verdict and/or status** would have failed the same way. Three composite indexes cover those combinations (they build after deploy; wait for **Enabled** under Firestore → Indexes).
+- **One failed count no longer blanks the tiles.** Each tile shows its own number or its own "Couldn't load this number" note.
+
+### Added
+- A unit test that checks every dashboard query and every Jobs filter combination against `firestore.indexes.json`, including sort direction (ADR-040).
+
 ## [0.5.0]
 ### Added
 - **M5 Dashboard** (ADR-038, ADR-025 addendum). The screens that turn M4's verdicts into the product:
