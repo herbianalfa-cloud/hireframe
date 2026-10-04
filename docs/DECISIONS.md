@@ -473,3 +473,11 @@ Actions run through `performJobAction` (`features/jobs/actions.ts`): show the re
 A toast (`lib/toast.ts`, a one-slot store) confirms each action after the server accepts it. The always-mounted live region is in the main bundle; the card is a lazy chunk. Undo is offered for status changes except out of `applied` (going back would stamp a new applied date), and never for a rating: the rules cannot remove one, so a rating is changed by rating again. Ratings show their state as filled (not only `aria-pressed`).
 
 Consequences: an edited job can leave a filtered Jobs list only on the next load, not at once. The toast's Undo is reachable by keyboard from lists but not from inside an open sheet (focus is trapped there; the sheet has its own Unsave, Unskip and Undo applied buttons).
+
+## ADR-042 `@hireframe/shared` is side-effect-free; the shell imports only pure modules
+
+**Context:** The 0.5.3 toast host took the initial JS to 300.3 kB gzip in CI (budget 300 kB, ADR-021). The cause was older: `web/src/services/firebase.ts` imported `FUNCTIONS_REGION` from `callables.ts`, which also builds zod schemas. Zod schema construction is a runtime call, so the bundler had to keep it, and the profile, criteria, funnel, jobs and events schemas landed in a shared chunk that every visit loads.
+
+**Decision:** `FUNCTIONS_REGION` lives in `firestore.ts` (constants only) and `callables.ts` re-exports it. `packages/shared/package.json` declares `"sideEffects": false`, so a module the app doesn't use is left out of the bundle. The budget is unchanged.
+
+Consequences: initial JS fell from 300.0 to 293.6 kB gzip locally (CI measures about 0.3 kB higher than a local run). The schemas load with the screens that use them. A shared module must not rely on side effects at import (registering, patching globals); that would now be dropped.

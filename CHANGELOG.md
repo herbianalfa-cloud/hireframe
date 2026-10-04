@@ -8,6 +8,9 @@ All notable changes. Format: Keep a Changelog, SemVer.
 - **Actions no longer reload the Jobs list.** The row and the sheet update in place; scroll, keyboard focus and loaded pages stay. If the write is refused, the job goes back to how it was and the error shows. "Load more" can no longer append a job twice, and an edit made while it loads is kept.
 - **Rating buttons show the current rating** as filled, and can be changed (👎 reopens the form with the earlier note and expected verdict; pressing the selected 👍 again does nothing).
 
+### Changed
+- **Initial JS is 6.7 kB gzip smaller** (300.0 → 293.6 kB; ADR-042). The shell no longer loads every shared schema: `FUNCTIONS_REGION` moved to a pure module and `@hireframe/shared` is marked side-effect-free. Fixes the `check:bundle` failure on this PR; the budget is unchanged.
+
 ### Added
 - **A toast after each action**: Saved, Marked applied, Skipped, Rated 👍, Rated 👎, with Undo for status changes (not out of applied, not for ratings). A polite live region that never takes focus, above the bottom tabs on a phone; the card is a lazy chunk.
 - `jobs.invalid` now logs the failing field names (never values).
