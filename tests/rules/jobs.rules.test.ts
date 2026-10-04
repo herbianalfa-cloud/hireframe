@@ -13,12 +13,13 @@ import {
   type RulesTestContext,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { DOCS, PATHS } from '@hireframe/shared';
+import { DOCS, JobSchema, PATHS } from '@hireframe/shared';
 import {
   deleteDoc,
   deleteField,
   doc,
   getDoc,
+  onSnapshot,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -33,6 +34,7 @@ import {
   buildJobStatusWrite,
   type JobActionWrite,
 } from '../../web/src/services/job-writes.ts';
+import { timestampsToDates } from '../../web/src/services/timestamps.ts';
 
 const OWNER = 'owner-uid';
 const STRANGER = 'stranger-uid';
@@ -469,3 +471,35 @@ describe('events are create-only', () => {
     await assertFails(setDoc(doc(dbFor('anon'), `events/${EVENT_ID}`), write.event));
   });
 });
+
+describe('a job being written (diagnosis)', () => {
+  it('shows its own pending write with null server timestamps unless they are estimated', async () => {
+    await seed();
+    const db = dbFor('owner');
+    const ref = doc(db, PATHS.job(JOB_ID));
+    const write = buildJobStatusWrite(JOB_ID, seededJob(), 'applied', serverTimestamp());
+    const seen: { pending: boolean; plain: DocumentData; estimated: DocumentData }[] = [];
+    const stop = onSnapshot(ref, (snapshot) => {
+      seen.push({
+        pending: snapshot.metadata.hasPendingWrites,
+        plain: snapshot.data() ?? {},
+        estimated: snapshot.data({ serverTimestamps: 'estimate' }) ?? {},
+      });
+    });
+    await waitFor(() => seen.length > 0);
+    const committed = commit(db, write);
+    await waitFor(() => seen.some((item) => item.pending));
+    await assertSucceeds(committed);
+    stop();
+    const local = seen.find((item) => item.pending);
+    expect(local?.plain.updatedAt).toBeNull();
+    expect(local?.plain.appliedAt).toBeNull();
+    expect(JobSchema.safeParse(timestampsToDates(local?.plain)).success).toBe(false);
+    expect(JobSchema.safeParse(timestampsToDates(local?.estimated)).success).toBe(true);
+  });
+});
+
+async function waitFor(done: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !done(); i++) await new Promise((r) => setTimeout(r, 10));
+  if (!done()) throw new Error('timed out');
+}

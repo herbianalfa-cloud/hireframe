@@ -315,7 +315,7 @@ export async function loadAgreement(now: Date, days = AGREEMENT_DAYS): Promise<A
   // A job both rated and applied appears in both reads; keep it once.
   const byId = new Map<string, unknown>();
   for (const item of [...rated.docs, ...applied.docs]) {
-    byId.set(item.id, timestampsToDates(item.data()));
+    byId.set(item.id, timestampsToDates(item.data({ serverTimestamps: 'estimate' })));
   }
   const rows = [...byId.values()].flatMap((data) => {
     const parsed = AgreementJobSchema.safeParse(data);
