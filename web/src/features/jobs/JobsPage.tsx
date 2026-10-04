@@ -37,15 +37,13 @@ export function JobsPage() {
   const status = !needsReview && isStatus(statusParam) ? statusParam : undefined;
   const jobId = params.get('job');
 
-  const [reloadKey, setReloadKey] = useState(0);
-  const { state, loadMore } = useJobsList(
-    {
-      ...(verdict ? { verdict } : {}),
-      ...(status ? { status } : {}),
-      ...(needsReview ? { needsReview } : {}),
-    },
-    reloadKey,
-  );
+  // Bumped when a write is confirmed, to re-read the agreement line (the list is patched, not reloaded).
+  const [statsKey, setStatsKey] = useState(0);
+  const { state, loadMore, patch } = useJobsList({
+    ...(verdict ? { verdict } : {}),
+    ...(status ? { status } : {}),
+    ...(needsReview ? { needsReview } : {}),
+  });
   const [now] = useState(() => new Date());
 
   const update = useCallback(
@@ -60,8 +58,8 @@ export function JobsPage() {
     },
     [params, setParams],
   );
-  const changed = useCallback(() => {
-    setReloadKey((key) => key + 1);
+  const committed = useCallback(() => {
+    setStatsKey((key) => key + 1);
   }, []);
   const open = useCallback(
     (id: string) => {
@@ -79,7 +77,7 @@ export function JobsPage() {
         Jobs
       </h1>
       <div className="mt-2">
-        <AgreementLine refreshKey={reloadKey} />
+        <AgreementLine refreshKey={statsKey} />
       </div>
       <form
         aria-label="Filters"
@@ -182,7 +180,8 @@ export function JobsPage() {
               label="Jobs"
               now={now}
               onOpen={open}
-              onChanged={changed}
+              onPatch={patch}
+              onCommitted={committed}
               footer={
                 state.more ? (
                   <Button
@@ -205,7 +204,8 @@ export function JobsPage() {
           onClose={() => {
             update({ job: null });
           }}
-          onChanged={changed}
+          onPatch={patch}
+          onCommitted={committed}
         />
       ) : null}
     </section>

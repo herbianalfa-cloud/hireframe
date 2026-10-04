@@ -3,7 +3,7 @@
  * The client waits a margin longer than the server timeout, so a slow call ends with the
  * server's answer (or its timeout), never a client-side give-up while the server still runs.
  */
-export const FUNCTIONS_REGION = 'europe-west2';
+export { FUNCTIONS_REGION } from './firestore.js';
 
 export const CALLABLE_TIMEOUT_SECONDS = {
   parseCv: 540,

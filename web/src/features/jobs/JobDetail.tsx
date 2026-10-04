@@ -8,7 +8,7 @@ import {
   FileText,
   ThumbsDown,
   ThumbsUp,
-  Undo2,
+  type LucideIcon,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
@@ -18,8 +18,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate } from '@/lib/format';
 import { useFacts } from '@/features/profile/hooks';
-import { jobActionErrorMessage, rateJob, setJobStatus, type JobView } from '@/services/jobs';
+import type { JobView } from '@/services/jobs';
 
+import { performJobAction, type JobAction, type JobActionHandlers } from './actions';
 import { SourceAttribution } from './AdzunaAttribution';
 import { FeedbackDialog } from './FeedbackDialog';
 import { useJob, useJobDescription } from './hooks';
@@ -146,13 +147,42 @@ function DescriptionText({ jobId }: { jobId: string }) {
   );
 }
 
+/** One button for a state and its undo: same place and icon, selected while the state holds. */
+function StatusToggle({
+  icon: Icon,
+  on,
+  onLabel,
+  offLabel,
+  disabled,
+  onPress,
+}: {
+  icon: LucideIcon;
+  on: boolean;
+  onLabel: string;
+  offLabel: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Button
+      variant={on ? 'default' : 'secondary'}
+      aria-pressed={on}
+      disabled={disabled}
+      onClick={onPress}
+    >
+      <Icon aria-hidden="true" />
+      {on ? onLabel : offLabel}
+    </Button>
+  );
+}
+
 function Actions({
   view,
-  onChanged,
+  handlers,
   onRateDown,
 }: {
   view: JobView;
-  onChanged: () => void;
+  handlers: JobActionHandlers;
   onRateDown: () => void;
 }) {
   const { job } = view;
@@ -160,21 +190,16 @@ function Actions({
   const [error, setError] = useState<string>();
   const serverOwned = !['new', 'saved', 'applied', 'skipped'].includes(job.status);
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: JobAction) {
     setPending(true);
     setError(undefined);
-    try {
-      await action();
-      onChanged();
-    } catch (caught) {
-      setError(jobActionErrorMessage(caught));
-    } finally {
-      setPending(false);
-    }
+    const result = await performJobAction(view, action, handlers);
+    if (!result.ok && 'message' in result) setError(result.message);
+    setPending(false);
   }
 
   const to = (status: 'new' | 'saved' | 'applied' | 'skipped') => () =>
-    run(() => setJobStatus(view, status));
+    run({ kind: 'status', to: status });
 
   return (
     <div className="mt-6 border-t pt-4">
@@ -185,68 +210,62 @@ function Actions({
             Open posting
           </a>
         </Button>
-        {job.status === 'applied' ? (
-          <Button
-            variant="secondary"
-            disabled={pending || serverOwned}
-            onClick={() => void to('new')()}
-          >
-            <Undo2 aria-hidden="true" />
-            Undo applied
-          </Button>
-        ) : (
-          <Button disabled={pending || serverOwned} onClick={() => void to('applied')()}>
-            <CircleCheck aria-hidden="true" />
-            Mark applied
-          </Button>
-        )}
-        {job.status === 'saved' ? (
-          <Button
-            variant="secondary"
-            disabled={pending || serverOwned}
-            onClick={() => void to('new')()}
-          >
-            <Undo2 aria-hidden="true" />
-            Unsave
-          </Button>
-        ) : job.status === 'new' ? (
-          <Button variant="secondary" disabled={pending} onClick={() => void to('saved')()}>
-            <Bookmark aria-hidden="true" />
-            Save
-          </Button>
-        ) : null}
-        {job.status === 'skipped' ? (
-          <Button variant="secondary" disabled={pending} onClick={() => void to('new')()}>
-            <Undo2 aria-hidden="true" />
-            Unskip
-          </Button>
-        ) : job.status !== 'applied' && !serverOwned ? (
-          <Button variant="secondary" disabled={pending} onClick={() => void to('skipped')()}>
-            <CircleMinus aria-hidden="true" />
-            Skip
-          </Button>
-        ) : null}
+        <StatusToggle
+          icon={CircleCheck}
+          on={job.status === 'applied'}
+          onLabel="Undo applied"
+          offLabel="Mark applied"
+          disabled={pending || serverOwned}
+          onPress={() => void to(job.status === 'applied' ? 'new' : 'applied')()}
+        />
+        <StatusToggle
+          icon={Bookmark}
+          on={job.status === 'saved'}
+          onLabel="Unsave"
+          offLabel="Save"
+          disabled={pending || serverOwned || !['new', 'saved'].includes(job.status)}
+          onPress={() => void to(job.status === 'saved' ? 'new' : 'saved')()}
+        />
+        <StatusToggle
+          icon={CircleMinus}
+          on={job.status === 'skipped'}
+          onLabel="Unskip"
+          offLabel="Skip"
+          // Skipping an applied job would clear its applied stamps.
+          disabled={pending || serverOwned || job.status === 'applied'}
+          onPress={() => void to(job.status === 'skipped' ? 'new' : 'skipped')()}
+        />
       </div>
       {job.verdict ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Was this verdict right?</span>
           <Button
-            variant="secondary"
+            variant={job.feedback?.agree === true ? 'default' : 'secondary'}
             size="icon"
             aria-label="Verdict was right"
             aria-pressed={job.feedback?.agree === true}
             disabled={pending}
-            onClick={() => void run(() => rateJob(view, { agree: true }))}
+            onClick={() => {
+              // Pressing the selected 👍 again takes the rating back.
+              void run(
+                job.feedback?.agree === true
+                  ? { kind: 'unrate' }
+                  : { kind: 'rate', input: { agree: true } },
+              );
+            }}
           >
             <ThumbsUp aria-hidden="true" />
           </Button>
           <Button
-            variant="secondary"
+            variant={job.feedback?.agree === false ? 'default' : 'secondary'}
             size="icon"
             aria-label="Verdict was wrong"
             aria-pressed={job.feedback?.agree === false}
             disabled={pending}
-            onClick={onRateDown}
+            onClick={() => {
+              if (job.feedback?.agree === false) void run({ kind: 'unrate' });
+              else onRateDown();
+            }}
           >
             <ThumbsDown aria-hidden="true" />
           </Button>
@@ -281,7 +300,7 @@ function Actions({
   );
 }
 
-function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) {
+function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandlers }) {
   const { job } = view;
   const facts = useFacts();
   const [rating, setRating] = useState(false);
@@ -403,7 +422,7 @@ function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) 
 
       <Actions
         view={view}
-        onChanged={onChanged}
+        handlers={handlers}
         onRateDown={() => {
           setRating(true);
         }}
@@ -414,7 +433,7 @@ function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) 
           onClose={() => {
             setRating(false);
           }}
-          onSaved={onChanged}
+          handlers={handlers}
         />
       ) : null}
     </>
@@ -428,12 +447,12 @@ function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) 
 export function JobDetail({
   jobId,
   onClose,
-  onChanged,
+  onPatch,
+  onCommitted,
 }: {
   jobId: string;
   onClose: () => void;
-  onChanged: () => void;
-}) {
+} & JobActionHandlers) {
   const state = useJob(jobId);
   return (
     <Dialog
@@ -467,7 +486,7 @@ export function JobDetail({
             </p>
           </>
         ) : (
-          <JobBody view={state.data} onChanged={onChanged} />
+          <JobBody view={state.data} handlers={{ onPatch, onCommitted }} />
         )}
       </DialogContent>
     </Dialog>

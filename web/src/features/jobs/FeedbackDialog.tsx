@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
-import { jobActionErrorMessage, rateJob, type JobView } from '@/services/jobs';
+import type { JobView } from '@/services/jobs';
+
+import { performJobAction, type JobActionHandlers } from './actions';
 
 import { VERDICT_LABELS } from './labels';
 
@@ -13,34 +15,37 @@ import { VERDICT_LABELS } from './labels';
 export function FeedbackDialog({
   view,
   onClose,
-  onSaved,
+  handlers,
 }: {
   view: JobView;
   onClose: () => void;
-  onSaved: () => void;
+  handlers: JobActionHandlers;
 }) {
   const verdict = view.job.verdict;
-  const [note, setNote] = useState('');
-  const [expected, setExpected] = useState<Verdict | ''>('');
+  // Rating again edits the earlier 👎, so start from it (a 👎 on another verdict starts blank).
+  const earlier =
+    view.job.feedback?.agree === false && view.job.feedback.verdict === verdict
+      ? view.job.feedback
+      : undefined;
+  const [note, setNote] = useState(earlier?.note ?? '');
+  const [expected, setExpected] = useState<Verdict | ''>(earlier?.expected ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
 
   async function submit() {
     setPending(true);
     setError(undefined);
-    try {
-      await rateJob(view, {
-        agree: false,
-        note,
-        expected: expected === '' ? undefined : expected,
-      });
-      onSaved();
-      onClose();
-    } catch (caught) {
-      setError(jobActionErrorMessage(caught));
-    } finally {
-      setPending(false);
-    }
+    const result = await performJobAction(
+      view,
+      {
+        kind: 'rate',
+        input: { agree: false, note, expected: expected === '' ? undefined : expected },
+      },
+      handlers,
+    );
+    setPending(false);
+    if (result.ok) onClose();
+    else if ('message' in result) setError(result.message);
   }
 
   return (

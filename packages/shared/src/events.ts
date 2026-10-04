@@ -10,7 +10,7 @@ import { CLIENT_JOB_STATUSES, JOB_STATUSES } from './jobs.js';
  */
 const Base = { at: z.date(), schemaVersion: z.literal(1) };
 
-export const EVENT_TYPES = ['job_status', 'job_feedback'] as const;
+export const EVENT_TYPES = ['job_status', 'job_feedback', 'job_feedback_removed'] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
 export const EventSchema = z.discriminatedUnion('type', [
@@ -29,6 +29,14 @@ export const EventSchema = z.discriminatedUnion('type', [
     agree: z.boolean(),
     verdict: z.enum(VERDICTS),
     expected: z.enum(VERDICTS).exactOptional(),
+    ...Base,
+  }),
+  z.object({
+    type: z.literal('job_feedback_removed'),
+    jobId: z.string().min(1),
+    /** The rating that was removed: its answer and the verdict it judged. */
+    agree: z.boolean(),
+    verdict: z.enum(VERDICTS),
     ...Base,
   }),
 ]);

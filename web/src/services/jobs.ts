@@ -1,10 +1,8 @@
 import {
   COLLECTIONS,
   JobDescriptionSchema,
-  JobSchema,
   PATHS,
   type ClientJobStatus,
-  type Job,
   type JobDescription,
   type JobStatus,
   type Verdict,
@@ -20,17 +18,18 @@ import {
   serverTimestamp,
   startAfter,
   writeBatch,
-  type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 
 import { getFirebase } from './firebase';
 import {
+  buildJobFeedbackRemovalWrite,
   buildJobFeedbackWrite,
   buildJobStatusWrite,
   type FeedbackInput,
   type JobActionWrite,
 } from './job-writes';
+import { readJob, type JobView } from './job-read';
 import { errorCode, logError } from './log';
 import { specConstraints, type QuerySpec } from './query-spec';
 import { listen, type LiveState, type Unsubscribe } from './profile';
@@ -44,12 +43,7 @@ import { timestampsToDates } from './timestamps';
  *   firestore.rules. Job text is untrusted: it is returned as data and never interpreted here.
  */
 
-export interface JobView {
-  id: string;
-  job: Job;
-  /** The document as stored, which the action builders read. */
-  raw: DocumentData;
-}
+export type { JobView };
 
 /** Filters the Jobs screen offers; each combination has an index (firestore.indexes.json). */
 export interface JobFilters {
@@ -68,14 +62,17 @@ export function parseJobs(docs: readonly QueryDocumentSnapshot[]): {
   invalid: number;
 } {
   const jobs: JobView[] = [];
+  const fields = new Set<string>();
   let invalid = 0;
   for (const item of docs) {
-    const raw = item.data();
-    const parsed = JobSchema.safeParse(timestampsToDates(raw));
-    if (parsed.success) jobs.push({ id: item.id, job: parsed.data, raw });
-    else invalid++;
+    const read = readJob(item);
+    if (read.ok) jobs.push(read.view);
+    else {
+      invalid++;
+      read.fields.forEach((field) => fields.add(field));
+    }
   }
-  if (invalid > 0) logError('jobs.invalid', { count: invalid });
+  if (invalid > 0) logError('jobs.invalid', { count: invalid, fields: [...fields].join(',') });
   return { jobs, invalid };
 }
 
@@ -146,16 +143,11 @@ export function watchJob(
             callback({ status: 'ready', data: null, invalid: 0 });
             return;
           }
-          const raw = snapshot.data();
-          const parsed = JobSchema.safeParse(timestampsToDates(raw));
-          if (parsed.success) {
-            callback({
-              status: 'ready',
-              data: { id: snapshot.id, job: parsed.data, raw },
-              invalid: 0,
-            });
+          const read = readJob(snapshot);
+          if (read.ok) {
+            callback({ status: 'ready', data: read.view, invalid: 0 });
           } else {
-            logError('jobs.invalid', { count: 1 });
+            logError('jobs.invalid', { count: 1, fields: read.fields.join(',') });
             callback({ status: 'error', message: "This job's data couldn't be read." });
           }
         },
@@ -208,6 +200,11 @@ export async function setJobStatus(view: JobView, to: ClientJobStatus): Promise<
 /** 👍/👎 on the verdict. The rules reject it if a re-score changed the verdict meanwhile. */
 export async function rateJob(view: JobView, input: FeedbackInput): Promise<void> {
   await commitAction(view.id, buildJobFeedbackWrite(view.id, view.raw, input, serverTimestamp()));
+}
+
+/** Press the selected 👍/👎 again: remove the rating. */
+export async function unrateJob(view: JobView): Promise<void> {
+  await commitAction(view.id, buildJobFeedbackRemovalWrite(view.id, view.raw, serverTimestamp()));
 }
 
 export function jobActionErrorMessage(error: unknown): string {

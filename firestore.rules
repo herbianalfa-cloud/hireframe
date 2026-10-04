@@ -205,7 +205,18 @@ service cloud.firestore {
         && after.updatedAt == request.time
         && (!changed.hasAny(['status', 'appliedAt', 'appliedVerdict'])
             || validStatusChange(before, after))
-        && (!changed.hasAny(['feedback']) || validFeedback(before, after.feedback));
+        && (!changed.hasAny(['feedback'])
+            || ('feedback' in after
+                ? validFeedback(before, after.feedback)
+                : validFeedbackRemoval(before, changed)));
+    }
+
+    // Un-rate (ADR-038): the owner may delete the whole `feedback` field, together with
+    // `updatedAt` and nothing else, and only when there is a rating to remove.
+    function validFeedbackRemoval(before, changed) {
+      return 'feedback' in before
+        && changed.hasAll(['feedback', 'updatedAt'])
+        && changed.hasOnly(['feedback', 'updatedAt']);
     }
 
     function validStatusChange(before, after) {
@@ -274,7 +285,18 @@ service cloud.firestore {
                 && getAfter(jobPath(data.jobId)).data.feedback.verdict == data.verdict
                 && getAfter(jobPath(data.jobId)).data.feedback.get('expected', null)
                    == data.get('expected', null)
-              : false);
+              : data.get('type', null) == 'job_feedback_removed'
+                // The event names the rating the job had and the batch removes.
+                ? data.keys().hasOnly(['type', 'jobId', 'agree', 'verdict', 'at', 'schemaVersion'])
+                  && data.keys().hasAll(['type', 'jobId', 'agree', 'verdict', 'at', 'schemaVersion'])
+                  && data.agree is bool
+                  && data.verdict in verdicts
+                  && getAfter(jobPath(data.jobId)).data.updatedAt == request.time
+                  && !('feedback' in getAfter(jobPath(data.jobId)).data)
+                  && get(jobPath(data.jobId)).data.get('feedback', null) != null
+                  && get(jobPath(data.jobId)).data.feedback.agree == data.agree
+                  && get(jobPath(data.jobId)).data.feedback.verdict == data.verdict
+                : false);
     }
 
     match /config/{docId} {

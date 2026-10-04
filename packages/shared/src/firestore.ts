@@ -16,6 +16,9 @@ export const COLLECTIONS = {
   sources: 'sources',
 } as const;
 
+/** Region of the callable functions (ADR-017). Lives here, a pure module, so the app shell can import it without pulling in the schemas. */
+export const FUNCTIONS_REGION = 'europe-west2';
+
 /** Well-known document paths. */
 export const DOCS = {
   appConfig: `${COLLECTIONS.config}/app`,

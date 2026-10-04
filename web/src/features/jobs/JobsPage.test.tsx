@@ -4,7 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadAgreement } from '@/services/dashboard';
-import { loadJobsPage, watchJob } from '@/services/jobs';
+import { loadJobsPage, setJobStatus, watchJob } from '@/services/jobs';
 
 import { makeView } from './fixtures';
 import { JobsPage } from './JobsPage';
@@ -45,6 +45,7 @@ function setup(search = '') {
 }
 
 beforeEach(() => {
+  vi.mocked(setJobStatus).mockReset().mockResolvedValue();
   vi.mocked(loadJobsPage).mockReset();
   vi.mocked(watchJob).mockReset();
   vi.mocked(loadAgreement).mockReset().mockResolvedValue({
@@ -152,6 +153,86 @@ describe('JobsPage', () => {
     await waitFor(() => {
       expect(probe.location()).toBe('/jobs?verdict=apply');
     });
+  });
+});
+
+describe('actions on the Jobs list', () => {
+  const row = (title: string) => screen.getByRole('button', { name: new RegExp(title) });
+
+  async function loadTwoPages() {
+    const alpha = makeView('a', { title: 'Alpha' });
+    const beta = makeView('b', { title: 'Beta' });
+    vi.mocked(loadJobsPage)
+      .mockResolvedValueOnce({ jobs: [alpha], invalid: 0, cursor: { id: 'c' } as never })
+      .mockResolvedValueOnce({ jobs: [beta], invalid: 0, cursor: null });
+    const probe = setup();
+    await userEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+    await screen.findByText('Beta');
+    return probe;
+  }
+
+  it('updates the row in place: no reload, loaded pages and focus kept', async () => {
+    await loadTwoPages();
+    expect(loadJobsPage).toHaveBeenCalledTimes(2);
+    row('Alpha').focus();
+    await userEvent.keyboard('s');
+    await waitFor(() => {
+      expect(row('Alpha').textContent).toContain('skipped');
+    });
+    expect(loadJobsPage).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Beta')).toBeDefined();
+    expect(document.activeElement).toBe(row('Alpha'));
+    expect(screen.queryByRole('status', { name: 'Loading jobs' })).toBeNull();
+  });
+
+  it('puts the row back and shows the error when the write is refused', async () => {
+    vi.mocked(setJobStatus).mockRejectedValue(new Error('This job changed since you opened it.'));
+    await loadTwoPages();
+    row('Beta').focus();
+    await userEvent.keyboard('a');
+    expect((await screen.findByRole('alert')).textContent).toBe('failed');
+    expect(row('Beta').textContent).not.toContain('applied');
+    expect(screen.getByText('Alpha')).toBeDefined();
+  });
+
+  it('keeps an edit made while Load more is in flight, and never lists a job twice', async () => {
+    const alpha = makeView('a', { title: 'Alpha' });
+    const beta = makeView('b', { title: 'Beta' });
+    let finish: (value: Awaited<ReturnType<typeof loadJobsPage>>) => void = () => undefined;
+    vi.mocked(loadJobsPage)
+      .mockResolvedValueOnce({ jobs: [alpha], invalid: 0, cursor: { id: 'c' } as never })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+    setup();
+    await userEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+    row('Alpha').focus();
+    await userEvent.keyboard('s');
+    await waitFor(() => {
+      expect(row('Alpha').textContent).toContain('skipped');
+    });
+    finish({ jobs: [alpha, beta], invalid: 0, cursor: null });
+    await screen.findByText('Beta');
+    expect(screen.getAllByText('Alpha')).toHaveLength(1);
+    expect(row('Alpha').textContent).toContain('skipped');
+  });
+
+  it('shows an action taken in the detail sheet on its row', async () => {
+    const alpha = makeView('a', { title: 'Alpha' });
+    vi.mocked(loadJobsPage).mockResolvedValue({ jobs: [alpha], invalid: 0, cursor: null });
+    vi.mocked(watchJob).mockImplementation((_id, callback) => {
+      callback({ status: 'ready', data: alpha, invalid: 0 });
+      return () => undefined;
+    });
+    setup('?job=a');
+    await userEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(screen.getAllByText(/saved/i).length).toBeGreaterThan(0);
+    });
+    expect(loadJobsPage).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog')).toBeDefined();
   });
 });
 

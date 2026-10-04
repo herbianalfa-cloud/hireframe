@@ -2,7 +2,11 @@ import { CLIENT_JOB_STATUSES, EventSchema, VERDICTS } from '@hireframe/shared';
 import { deleteField, serverTimestamp, type DocumentData } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
-import { buildJobFeedbackWrite, buildJobStatusWrite } from './job-writes';
+import {
+  buildJobFeedbackRemovalWrite,
+  buildJobFeedbackWrite,
+  buildJobStatusWrite,
+} from './job-writes';
 
 const NOW = serverTimestamp();
 const job: DocumentData = { status: 'new', verdict: 'apply', title: 'Product Analyst' };
@@ -100,6 +104,30 @@ describe('buildJobFeedbackWrite', () => {
   });
 });
 
+describe('buildJobFeedbackRemovalWrite', () => {
+  const rated: DocumentData = {
+    ...job,
+    feedback: { agree: false, verdict: 'apply', note: 'Too senior', expected: 'skip' },
+  };
+
+  it('deletes the whole rating with the server time, and names what went in the event', () => {
+    const { update, event } = buildJobFeedbackRemovalWrite('job-1', rated, NOW);
+    expect(update).toEqual({ feedback: deleteField(), updatedAt: NOW });
+    expect(event).toEqual({
+      type: 'job_feedback_removed',
+      jobId: 'job-1',
+      agree: false,
+      verdict: 'apply',
+      at: NOW,
+      schemaVersion: 1,
+    });
+  });
+
+  it('refuses a job with no rating', () => {
+    expect(() => buildJobFeedbackRemovalWrite('job-1', job, NOW)).toThrow(/no rating/);
+  });
+});
+
 describe('built events match EventSchema', () => {
   // The server timestamp sentinel stands in for `at`; a stored event has a Date there.
   const parse = (event: DocumentData) => EventSchema.parse({ ...event, at: new Date() });
@@ -132,6 +160,16 @@ describe('built events match EventSchema', () => {
         const { event } = buildJobFeedbackWrite('job-1', raw, input, NOW);
         expect(parse(event)).toMatchObject({ type: 'job_feedback', verdict, agree: input.agree });
         expect('note' in event).toBe(false);
+      }
+    }
+  });
+
+  it('every removal, for every kind of rating', () => {
+    for (const verdict of VERDICTS) {
+      for (const agree of [true, false]) {
+        const raw = { status: 'new', verdict, feedback: { agree, verdict } };
+        const { event } = buildJobFeedbackRemovalWrite('job-1', raw, NOW);
+        expect(parse(event)).toMatchObject({ type: 'job_feedback_removed', verdict, agree });
       }
     }
   });

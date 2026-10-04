@@ -2,6 +2,23 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [0.5.3]
+### Fixed
+- **A job no longer vanishes while its own write is pending** (ADR-041). Pressing 👍 or Save made the local snapshot carry `null` for the server-stamped fields (`updatedAt`, `appliedAt`, `feedback.at`), which failed the schema, so Today's lists dropped the job and the sheet said it couldn't be read (`jobs.invalid` logged twice). All job reads now use estimated server timestamps. The agreement read does too.
+- **Actions no longer reload the Jobs list.** The row and the sheet update in place; scroll, keyboard focus and loaded pages stay. If the write is refused, the job goes back to how it was and the error shows. "Load more" can no longer append a job twice, and an edit made while it loads is kept.
+- **Rating buttons show the current rating** as filled, and can be changed (👎 reopens the form with the earlier note and expected verdict; pressing the selected 👍 again does nothing).
+
+- **Take a rating back.** Pressing the selected 👍 or 👎 again removes the rating, with no dialog; the other button still switches it. `firestore.rules` lets the owner delete the whole `feedback` field together with `updatedAt` and nothing else, and a new create-only event `job_feedback_removed` records the rating that went (ADR-038). Agreement stops counting a removed rating.
+- **Save, Skip and Mark applied are single toggle buttons** in the sheet: same place and icon, `aria-pressed`, selected style while on, label flips (Save/Unsave, Skip/Unskip, Mark applied/Undo applied). The separate Unsave, Unskip and Undo buttons are gone. The `a` and `s` keys toggle the same way (`s` on an applied job still does nothing).
+
+### Changed
+- The 👎 form no longer opens with the earlier note: pressing the selected 👎 removes it, so a note is changed by rating 👎 again.
+- **Initial JS is 6.7 kB gzip smaller** (300.0 → 293.6 kB; ADR-042). The shell no longer loads every shared schema: `FUNCTIONS_REGION` moved to a pure module and `@hireframe/shared` is marked side-effect-free. Fixes the `check:bundle` failure on this PR; the budget is unchanged.
+
+### Added
+- `jobs.invalid` now logs the failing field names (never values).
+- Tests: the emulator reproduction of the pending snapshot, `readJob`, the optimistic builders, `performJobAction` (patch, rollback, busy), list focus, in-place Jobs list, rating state.
+
 ## [0.5.2]
 ### Fixed
 - **Events can no longer describe a change that didn't happen** (ADR-038). The rules now require a status event to move between two different statuses with the job's own verdict, and a rating event to match a rating written in the same batch (verdict, answer and expected verdict). Before, a standalone event matching the job's current state was accepted.

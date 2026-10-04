@@ -1,9 +1,9 @@
 import { useCallback, type KeyboardEvent } from 'react';
 
 export interface ListKeyActions {
-  /** `a`: mark the focused job applied. */
+  /** `a`: toggle applied on the focused job. */
   onApplied: (jobId: string) => void;
-  /** `s`: skip the focused job. */
+  /** `s`: toggle skip on the focused job. */
   onSkip: (jobId: string) => void;
   /** `o`: open the focused job's posting. */
   onOpenPosting: (jobId: string) => void;
@@ -13,7 +13,7 @@ const FIELD_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
 /**
  * Keyboard shortcuts for a job list (docs/DESIGN.md), active only while focus is inside it
- * (ADR-038, WCAG 2.1.4): `j`/`k` move between rows, `a` applied, `s` skip, `o` open posting.
+ * (ADR-038, WCAG 2.1.4): `j`/`k` move between rows, `a` toggles applied, `s` toggles skip, `o` open posting.
  * Rows carry `data-job-row` and `data-job-id`. Spread the result on the list element.
  */
 export function useListKeys(actions: ListKeyActions) {

@@ -108,3 +108,36 @@ export function buildJobFeedbackWrite(
     },
   };
 }
+
+/**
+ * Take a rating back. Deletes the whole `feedback` field and records a `job_feedback_removed`
+ * event naming the rating that went, so a metric recomputed from events can cancel it.
+ */
+export function buildJobFeedbackRemovalWrite(
+  jobId: string,
+  raw: DocumentData,
+  serverNow: FieldValue,
+): JobActionWrite {
+  const feedback: unknown = raw.feedback;
+  if (
+    typeof feedback !== 'object' ||
+    feedback === null ||
+    !('agree' in feedback) ||
+    typeof feedback.agree !== 'boolean' ||
+    !('verdict' in feedback) ||
+    !isVerdict(feedback.verdict)
+  ) {
+    throw new Error('This job has no rating to remove.');
+  }
+  return {
+    update: { feedback: deleteField(), updatedAt: serverNow },
+    event: {
+      type: 'job_feedback_removed',
+      jobId,
+      agree: feedback.agree,
+      verdict: feedback.verdict,
+      at: serverNow,
+      schemaVersion: 1,
+    },
+  };
+}
