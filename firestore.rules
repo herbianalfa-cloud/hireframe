@@ -230,7 +230,8 @@ service cloud.firestore {
         && feedback.verdict == before.verdict
         && feedback.at == request.time
         && (!('note' in feedback)
-            || (feedback.note is string && feedback.note.size() >= 1 && feedback.note.size() <= 280))
+            || (feedback.note is string && feedback.note.trim().size() >= 1
+                && feedback.note.size() <= 280))
         && (!('expected' in feedback)
             || (feedback.expected in ['apply', 'near_miss', 'wildcard', 'skip']
                 && feedback.expected != feedback.verdict
@@ -253,9 +254,13 @@ service cloud.firestore {
               && data.from in ['new', 'saved', 'applied', 'skipped', 'interview', 'offer',
                                'rejected']
               && data.to in ['new', 'saved', 'applied', 'skipped']
+              && data.from != data.to
               && get(jobPath(data.jobId)).data.status == data.from
               && getAfter(jobPath(data.jobId)).data.status == data.to
-              && (!('verdict' in data) || data.verdict in verdicts)
+              && getAfter(jobPath(data.jobId)).data.updatedAt == request.time
+              && (get(jobPath(data.jobId)).data.get('verdict', null) == null
+                  ? !('verdict' in data)
+                  : data.get('verdict', null) == get(jobPath(data.jobId)).data.verdict)
             : data.get('type', null) == 'job_feedback'
               ? data.keys().hasAll(['type', 'jobId', 'agree', 'verdict', 'at', 'schemaVersion'])
                 && data.keys().hasOnly(['type', 'jobId', 'agree', 'verdict', 'expected', 'at',
@@ -263,8 +268,12 @@ service cloud.firestore {
                 && data.agree is bool
                 && data.verdict in verdicts
                 && (!('expected' in data) || (data.expected in verdicts && !data.agree))
+                && getAfter(jobPath(data.jobId)).data.updatedAt == request.time
+                && getAfter(jobPath(data.jobId)).data.feedback.at == request.time
                 && getAfter(jobPath(data.jobId)).data.feedback.agree == data.agree
                 && getAfter(jobPath(data.jobId)).data.feedback.verdict == data.verdict
+                && getAfter(jobPath(data.jobId)).data.feedback.get('expected', null)
+                   == data.get('expected', null)
               : false);
     }
 
