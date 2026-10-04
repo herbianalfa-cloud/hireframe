@@ -1,4 +1,11 @@
-import { dedupeKey, JobSchema, normaliseRawJob } from '@hireframe/shared';
+import {
+  dedupeKey,
+  JobDescriptionSchema,
+  JobSchema,
+  normaliseRawJob,
+  UsageSchema,
+  verdictAgreement,
+} from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
 import { LINKEDIN_ALERT_JOB } from '../packages/shared/src/fixtures/jobs.ts';
@@ -8,12 +15,14 @@ import {
   appConfigDocument,
   assertDemoProject,
   criteriaSeedDocuments,
+  devJobDocuments,
   DEV_LINKEDIN_JOB_KEYS,
   DEV_OWNER,
   linkedInJobDocuments,
   ownerAccountBody,
   profileSeedDocuments,
   toRestValue,
+  usageSeedDocument,
 } from './dev-seed.ts';
 
 describe('isCiDeploy', () => {
@@ -110,5 +119,47 @@ describe('dev LinkedIn-alert job', () => {
       throw new Error('unexpected value');
     };
     expect(JobSchema.safeParse(decode({ mapValue: job })).success).toBe(true);
+  });
+});
+
+describe('dev dashboard seed (M5)', () => {
+  const now = new Date('2026-10-14T08:00:00Z');
+  const seeded = devJobDocuments(now);
+
+  it('seeds jobs that parse as jobs, each with a valid description', () => {
+    expect(seeded.length).toBeGreaterThanOrEqual(12);
+    expect(new Set(seeded.map((item) => item.id)).size).toBe(seeded.length);
+    for (const { id, job, description } of seeded) {
+      expect(JobSchema.safeParse(job), id).toMatchObject({ success: true });
+      expect(JobDescriptionSchema.safeParse(description), id).toMatchObject({ success: true });
+    }
+  });
+
+  it('covers every verdict, both aggregators, an S1 skip, a review job and a queued job', () => {
+    const jobs = seeded.map((item) => JobSchema.parse(item.job));
+    for (const verdict of ['apply', 'near_miss', 'wildcard', 'skip']) {
+      expect(
+        jobs.some((job) => job.verdict === verdict),
+        verdict,
+      ).toBe(true);
+    }
+    const sources = new Set(jobs.flatMap((job) => job.sources.map((source) => source.id)));
+    expect(sources).toContain('adzuna');
+    expect(sources).toContain('reed');
+    expect(jobs.some((job) => job.skip?.stage === 's1')).toBe(true);
+    expect(jobs.some((job) => job.review !== undefined)).toBe(true);
+    expect(jobs.some((job) => job.next === 's2')).toBe(true);
+  });
+
+  it('seeds one rating and one applied-on-Apply that agreement counts', () => {
+    const jobs = seeded.map((item) => JobSchema.parse(item.job));
+    expect(jobs.filter((job) => job.feedback)).toHaveLength(1);
+    expect(verdictAgreement(jobs, now)).toMatchObject({ ratedDisagree: 1, appliedAgree: 1 });
+  });
+
+  it('seeds this month’s usage in the shape llm.call() expects', () => {
+    const { month, data } = usageSeedDocument(now);
+    expect(month).toBe('2026-10');
+    expect(UsageSchema.safeParse(data).success).toBe(true);
   });
 });

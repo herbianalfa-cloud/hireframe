@@ -1,7 +1,7 @@
 /**
  * `npm run dev`: runs inside `firebase emulators:exec --project demo-hireframe`, seeds a
- * fake owner (Auth user + `config/app`), criteria v1 and the fake CV's facts with a work-rights
- * setting, then starts the Vite dev server.
+ * fake owner (Auth user + `config/app`), criteria v1, the fake CV's facts with a work-rights
+ * setting, fake judged jobs and this month's usage (M5), then starts the Vite dev server.
  * Callables run in the Functions emulator with a fake LLM unless LIVE=1 (ADR-017).
  * Stopping Vite (Ctrl+C) stops the emulators too.
  */
@@ -13,9 +13,12 @@ import {
   criteriaSeedDocuments,
   DEV_LINKEDIN_JOB_ID,
   DEV_OWNER,
+  devJobDocuments,
   linkedInJobDocuments,
   ownerAccountBody,
   profileSeedDocuments,
+  restDocument,
+  usageSeedDocument,
 } from './dev-seed.ts';
 
 const projectId = assertDemoProject(process.env.GCLOUD_PROJECT);
@@ -73,6 +76,17 @@ await emulatorRequest(
   `${documents}/jobs/${DEV_LINKEDIN_JOB_ID}/description/raw`,
   linkedIn.description,
 );
+const devJobs = devJobDocuments(now);
+for (const { id, job, description } of devJobs) {
+  await emulatorRequest('PATCH', `${documents}/jobs/${id}`, restDocument(job));
+  await emulatorRequest(
+    'PATCH',
+    `${documents}/jobs/${id}/description/raw`,
+    restDocument(description),
+  );
+}
+const usage = usageSeedDocument(now);
+await emulatorRequest('PATCH', `${documents}/usage/${usage.month}`, usage.document);
 
 console.log(
   `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}), criteria v1, the fake ` +
