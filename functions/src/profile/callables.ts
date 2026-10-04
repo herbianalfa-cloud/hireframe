@@ -1,18 +1,18 @@
 // Must stay the first import: global options apply only to functions defined after it.
 import '../options.js';
 
-import { CALLABLE_TIMEOUT_SECONDS, type AppConfig } from '@hireframe/shared';
+import {
+  CALLABLE_TIMEOUT_SECONDS,
+  DEFAULT_MONTHLY_CAP_PENCE,
+  type AppConfig,
+} from '@hireframe/shared';
 import { onCall, type CallableOptions } from 'firebase-functions/https';
 import { defineSecret } from 'firebase-functions/params';
 
 import { bucket, db } from '../admin.js';
 import { requireOwner } from '../auth.js';
 import { loadDevFakes, ownerOptions, useFakes } from '../callable.js';
-import {
-  ANTHROPIC_SECRET_NAME,
-  DEFAULT_FX_USD_TO_GBP,
-  DEFAULT_MONTHLY_CAP_PENCE,
-} from '../config.js';
+import { ANTHROPIC_SECRET_NAME, DEFAULT_FX_USD_TO_GBP } from '../config.js';
 import { extractText } from '../cv/extract.js';
 import { safeHandler } from '../errors.js';
 import { llmCall, type LlmCallDeps, type LlmCallInput } from '../llm/call.js';

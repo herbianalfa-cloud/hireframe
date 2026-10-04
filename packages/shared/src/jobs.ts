@@ -11,6 +11,7 @@ import {
   S1CountsSchema,
   S2CountsSchema,
   S3CountsSchema,
+  VERDICTS,
 } from './funnel.js';
 
 /**
@@ -64,7 +65,13 @@ export const JOB_STATUSES = [
   'rejected',
 ] as const;
 
+/** Statuses the owner can set from the app; the rest are for later milestones (Gmail, Wave 2). */
+export const CLIENT_JOB_STATUSES = ['new', 'saved', 'applied', 'skipped'] as const;
+export type ClientJobStatus = (typeof CLIENT_JOB_STATUSES)[number];
+
 export const JOB_LIMITS = {
+  /** Owner's note on a 👍/👎 (ADR-038). */
+  feedbackNote: 280,
   title: 300,
   company: 200,
   location: 500,
@@ -121,6 +128,19 @@ export const JobSourceRefSchema = z.object({
 export type JobSourceRef = z.infer<typeof JobSourceRefSchema>;
 
 /**
+ * The owner's 👍/👎 on a verdict (ADR-038). `verdict` is the verdict it judged, so a re-score
+ * can't silently change what was rated; `expected` is what the owner thinks it should have been.
+ */
+export const JobFeedbackSchema = z.object({
+  agree: z.boolean(),
+  note: z.string().trim().min(1).max(JOB_LIMITS.feedbackNote).exactOptional(),
+  verdict: z.enum(VERDICTS),
+  expected: z.enum(VERDICTS).exactOptional(),
+  at: z.date(),
+});
+export type JobFeedback = z.infer<typeof JobFeedbackSchema>;
+
+/**
  * `jobs/{jobId}`: M3's ingest fields plus the funnel's verdict fields (funnel.ts, M4). A job
  * waits at stage `s0` until S1 judges it; `stage` is the last stage that ran, `next` the stage it
  * waits for.
@@ -144,6 +164,11 @@ export const JobSchema = JobFunnelFieldsSchema.extend({
   salary: SalarySchema.exactOptional(),
   stage: z.enum(JOB_STAGES),
   status: z.enum(JOB_STATUSES),
+  /** Set with `status: 'applied'` (server time) and removed on leaving it (ADR-038). */
+  appliedAt: z.date().exactOptional(),
+  /** The job's verdict when it was marked applied. */
+  appliedVerdict: z.enum(VERDICTS).exactOptional(),
+  feedback: JobFeedbackSchema.exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),

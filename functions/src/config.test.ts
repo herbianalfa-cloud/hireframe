@@ -1,10 +1,9 @@
-import { CALLABLE_TIMEOUT_SECONDS } from '@hireframe/shared';
+import { CALLABLE_TIMEOUT_SECONDS, DEFAULT_MONTHLY_CAP_PENCE } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
   API_TERMS_HOSTS,
   defaultRunBudgetPence,
-  DEFAULT_MONTHLY_CAP_PENCE,
   FUNNEL,
   funnelLimits,
   hostPolicy,
