@@ -8,13 +8,12 @@ import {
   monthKey,
   PATHS,
   spendMeter,
-  todayKpis,
   UsageSchema,
   verdictAgreement,
   AGREEMENT_DAYS,
   type Agreement,
   type SpendMeter,
-  type TodayKpis,
+  type TodayCounts,
   type Verdict,
 } from '@hireframe/shared';
 import {
@@ -25,18 +24,18 @@ import {
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   Timestamp,
-  where,
   type Firestore,
   type Query,
+  type QueryConstraint,
 } from 'firebase/firestore';
 
 import { getFirebase } from './firebase';
 import { parseJobs, type JobView } from './jobs';
 import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
+import { specConstraints, type QuerySpec } from './query-spec';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
 
@@ -58,17 +57,91 @@ export type TodayListId = (typeof TODAY_LISTS)[number];
 const OPEN_STATUSES = ['new', 'saved'];
 
 const jobs = (db: Firestore) => collection(db, COLLECTIONS.jobs);
+const run = (db: Firestore, spec: QuerySpec, ...extra: QueryConstraint[]): Query =>
+  query(jobs(db), ...specConstraints(spec), ...extra);
 
-function openJobs(db: Firestore, verdicts: readonly Verdict[]): Query {
-  return query(
-    jobs(db),
-    where(
-      'verdict',
-      verdicts.length === 1 ? '==' : 'in',
-      verdicts.length === 1 ? verdicts[0] : verdicts,
+const JUDGED_VERDICTS: readonly Verdict[] = ['apply', 'near_miss', 'wildcard'];
+
+/** Open means still waiting for a decision. */
+function openSpec(verdicts: readonly Verdict[]): QuerySpec {
+  return {
+    collection: COLLECTIONS.jobs,
+    filters: [
+      verdicts.length === 1
+        ? { field: 'verdict', op: '==', value: verdicts[0] }
+        : { field: 'verdict', op: 'in', value: verdicts },
+      { field: 'status', op: 'in', value: OPEN_STATUSES },
+    ],
+    orderBy: [],
+  };
+}
+
+/** A Today list: open jobs of one verdict, newest judged first. */
+export function todayListSpec(list: TodayListId): QuerySpec {
+  return { ...openSpec([list]), orderBy: [{ field: 'judgedAt', direction: 'desc' }] };
+}
+
+/**
+ * The tile counts. The two range counts carry an explicit descending order so the existing
+ * descending indexes serve them; unordered, a range query scans ascending and needs its own.
+ */
+export function kpiSpecs(now: Date) {
+  const dayStart = Timestamp.fromDate(londonDayStart(now));
+  const weekStart = Timestamp.fromDate(londonWeekStart(now));
+  return {
+    toApply: openSpec(['apply']),
+    toReview: openSpec(['near_miss', 'wildcard']),
+    judgedToday: {
+      collection: COLLECTIONS.jobs,
+      filters: [
+        { field: 'verdict', op: 'in', value: JUDGED_VERDICTS },
+        { field: 'judgedAt', op: '>=', value: dayStart },
+      ],
+      orderBy: [{ field: 'judgedAt', direction: 'desc' }],
+    },
+    appliedThisWeek: {
+      collection: COLLECTIONS.jobs,
+      filters: [
+        { field: 'status', op: '==', value: 'applied' },
+        { field: 'appliedAt', op: '>=', value: weekStart },
+      ],
+      orderBy: [{ field: 'appliedAt', direction: 'desc' }],
+    },
+  } satisfies Record<keyof TodayCounts, QuerySpec>;
+}
+
+/** The two agreement reads (ratings, and jobs applied) since `since`. */
+export function agreementSpecs(since: Timestamp) {
+  return {
+    rated: {
+      collection: COLLECTIONS.jobs,
+      filters: [
+        { field: 'feedback.agree', op: 'in', value: [true, false] },
+        { field: 'feedback.at', op: '>=', value: since },
+      ],
+      orderBy: [{ field: 'feedback.at', direction: 'desc' }],
+    },
+    applied: {
+      collection: COLLECTIONS.jobs,
+      filters: [
+        { field: 'status', op: '==', value: 'applied' },
+        { field: 'appliedAt', op: '>=', value: since },
+      ],
+      orderBy: [{ field: 'appliedAt', direction: 'desc' }],
+    },
+  } satisfies Record<string, QuerySpec>;
+}
+
+/** Every dashboard query, for the index check. */
+export function dashboardQuerySpecs(now: Date): Record<string, QuerySpec> {
+  const since = Timestamp.fromMillis(now.getTime());
+  return {
+    ...Object.fromEntries(TODAY_LISTS.map((list) => [`list:${list}`, todayListSpec(list)])),
+    ...Object.fromEntries(Object.entries(kpiSpecs(now)).map(([k, v]) => [`count:${k}`, v])),
+    ...Object.fromEntries(
+      Object.entries(agreementSpecs(since)).map(([k, v]) => [`agreement:${k}`, v]),
     ),
-    where('status', 'in', OPEN_STATUSES),
-  );
+  };
 }
 
 /** A Today list, newest judged first, live. */
@@ -81,7 +154,7 @@ export function watchTodayList(
     async () => {
       const { db } = await getFirebase();
       return onSnapshot(
-        query(openJobs(db, [list]), orderBy('judgedAt', 'desc'), limit(TODAY_LIST_SIZE)),
+        run(db, todayListSpec(list), limit(TODAY_LIST_SIZE)),
         (snapshot) => {
           const { jobs: views, invalid } = parseJobs(snapshot.docs);
           callback({ status: 'ready', data: views, invalid });
@@ -106,28 +179,29 @@ async function count(label: string, source: Query): Promise<number> {
   return snapshot.data().count;
 }
 
+/** Each count, or null when that one read failed (the others still show). */
+export type TodayCountResults = { [K in keyof TodayCounts]: number | null };
+
 /** The four tile counts, measured at `now` (London day and week). One aggregation read each. */
-export async function loadTodayKpis(now: Date, weeklyTarget: number): Promise<TodayKpis> {
+export async function loadTodayCounts(now: Date): Promise<TodayCountResults> {
   const { db } = await getFirebase();
-  const dayStart = Timestamp.fromDate(londonDayStart(now));
-  const weekStart = Timestamp.fromDate(londonWeekStart(now));
-  const [toApply, toReview, judgedToday, appliedThisWeek] = await Promise.all([
-    count('to_apply', openJobs(db, ['apply'])),
-    count('to_review', openJobs(db, ['near_miss', 'wildcard'])),
-    count(
-      'judged_today',
-      query(
-        jobs(db),
-        where('verdict', 'in', ['apply', 'near_miss', 'wildcard']),
-        where('judgedAt', '>=', dayStart),
-      ),
-    ),
-    count(
-      'applied_week',
-      query(jobs(db), where('status', '==', 'applied'), where('appliedAt', '>=', weekStart)),
-    ),
-  ]);
-  return todayKpis({ toApply, toReview, judgedToday, appliedThisWeek }, weeklyTarget);
+  const specs = kpiSpecs(now);
+  const keys = Object.keys(specs) as (keyof TodayCounts)[];
+  const settled = await Promise.allSettled(keys.map((key) => count(key, run(db, specs[key]))));
+  const results = {} as TodayCountResults;
+  keys.forEach((key, i) => {
+    const outcome = settled[i];
+    if (outcome?.status === 'fulfilled') {
+      results[key] = outcome.value;
+    } else {
+      results[key] = null;
+      logError('dashboard.count_failed', {
+        count: key,
+        code: errorCode(outcome?.reason) ?? 'unknown',
+      });
+    }
+  });
+  return results;
 }
 
 export interface SpendView {
@@ -217,19 +291,12 @@ const AgreementJobSchema = JobSchema.pick({
 export async function loadAgreement(now: Date, days = AGREEMENT_DAYS): Promise<Agreement> {
   const { db } = await getFirebase();
   const since = Timestamp.fromMillis(now.getTime() - days * 86_400_000);
+  const specs = agreementSpecs(since);
   const [rated, applied] = await Promise.all([
     withRetry(
       () =>
         withTimeout(
-          getDocs(
-            query(
-              jobs(db),
-              where('feedback.agree', 'in', [true, false]),
-              where('feedback.at', '>=', since),
-              orderBy('feedback.at', 'desc'),
-              limit(AGREEMENT_READ_LIMIT),
-            ),
-          ),
+          getDocs(run(db, specs.rated, limit(AGREEMENT_READ_LIMIT))),
           READ_TIMEOUT_MS,
           'agreement ratings',
         ),
@@ -238,15 +305,7 @@ export async function loadAgreement(now: Date, days = AGREEMENT_DAYS): Promise<A
     withRetry(
       () =>
         withTimeout(
-          getDocs(
-            query(
-              jobs(db),
-              where('status', '==', 'applied'),
-              where('appliedAt', '>=', since),
-              orderBy('appliedAt', 'desc'),
-              limit(AGREEMENT_READ_LIMIT),
-            ),
-          ),
+          getDocs(run(db, specs.applied, limit(AGREEMENT_READ_LIMIT))),
           READ_TIMEOUT_MS,
           'agreement applied',
         ),

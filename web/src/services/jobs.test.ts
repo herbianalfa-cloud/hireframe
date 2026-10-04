@@ -1,7 +1,7 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
-import { jobActionErrorMessage, jobFilterConstraints, parseJobs } from './jobs';
+import { jobActionErrorMessage, jobFilterSpec, parseJobs } from './jobs';
 
 const NOW = new Date('2026-10-14T09:00:00Z');
 
@@ -49,11 +49,12 @@ describe('parseJobs', () => {
   });
 });
 
-describe('jobFilterConstraints', () => {
-  it('always orders by judgedAt, with one constraint per filter', () => {
-    expect(jobFilterConstraints({})).toHaveLength(1);
-    expect(jobFilterConstraints({ verdict: 'apply', status: 'new' })).toHaveLength(3);
-    expect(jobFilterConstraints({ needsReview: true })).toHaveLength(2);
+describe('jobFilterSpec', () => {
+  it('always orders by judgedAt, with one filter per option', () => {
+    expect(jobFilterSpec({}).filters).toHaveLength(0);
+    expect(jobFilterSpec({ verdict: 'apply', status: 'new' }).filters).toHaveLength(2);
+    expect(jobFilterSpec({ needsReview: true }).filters).toHaveLength(1);
+    expect(jobFilterSpec({}).orderBy).toEqual([{ field: 'judgedAt', direction: 'desc' }]);
   });
 });
 

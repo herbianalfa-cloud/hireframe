@@ -1,8 +1,8 @@
-import type { TodayKpis } from '@hireframe/shared';
 import { useEffect, useState } from 'react';
 
 import {
-  loadTodayKpis,
+  loadTodayCounts,
+  type TodayCountResults,
   watchSpend,
   watchTodayList,
   type SpendView,
@@ -23,23 +23,29 @@ export function useSpend(): LiveState<SpendView> {
   return state;
 }
 
-export type KpiState =
-  { status: 'loading' } | { status: 'ready'; kpis: TodayKpis } | { status: 'error' };
+export type KpiState = { status: 'loading' } | { status: 'ready'; counts: TodayCountResults };
 
 /**
- * The tile counts, re-read when `refreshKey` changes (after an action). The weekly target is
- * applied by the caller with `todayKpis`, so waiting for the criteria doesn't delay the counts.
+ * The tile counts, re-read when `refreshKey` changes (after an action). Each count fails on its
+ * own (null), and the weekly target is applied by the caller, so waiting for the criteria
+ * doesn't delay the counts.
  */
 export function useTodayKpis(refreshKey: number): KpiState {
   const [state, setState] = useState<KpiState>({ status: 'loading' });
   useEffect(() => {
     let cancelled = false;
-    loadTodayKpis(new Date(), 1).then(
-      (kpis) => {
-        if (!cancelled) setState({ status: 'ready', kpis });
+    void loadTodayCounts(new Date()).then(
+      (counts) => {
+        if (!cancelled) setState({ status: 'ready', counts });
       },
       () => {
-        if (!cancelled) setState({ status: 'error' });
+        // Only a failure before any count was read (no Firebase); show every tile as unavailable.
+        if (!cancelled) {
+          setState({
+            status: 'ready',
+            counts: { toApply: null, toReview: null, judgedToday: null, appliedThisWeek: null },
+          });
+        }
       },
     );
     return () => {
