@@ -2,15 +2,28 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
-## [Unreleased]
+## [0.5.0]
 ### Added
-- **M5 data and services** (ADR-038), no screens yet:
+- **M5 Dashboard** (ADR-038, ADR-025 addendum). The screens that turn M4's verdicts into the product:
+  - **Today:** four tiles (to apply, to review, applied this week against the criteria target, AI spend against the cap) and the Apply, Near miss and Wildcard lists. Each row has the title, company, location, age, fit and luck, and the one-line reason. Every list has loading, empty and error states, and a truncated list links to the full Jobs view. `hf:usable` marks the first render with the numbers and the Apply list filled (the R7 measure).
+  - **Jobs:** filter by verdict and status (or just the jobs waiting for review), newest judged first, Load more, filters kept in the URL, and the verdict-agreement line with its split.
+  - **Job detail:** a right-hand sheet (full screen on phones, `?job=` so it can be linked) with the verdict, reason, what fell short, the skip rule, review and queued explanations, flags, requirements with the profile facts cited, matched facts, gaps, talking points, the plain-text description on demand, sources, attribution and actions: Open posting, Mark applied (with Undo), Save, Skip, 👍/👎 with a note and an expected verdict. Generate CV is shown disabled until M7. Job text is always shown as plain text.
+  - **Keyboard:** in a job list, `j`/`k` move, `a` marks applied, `s` skips and `o` opens the posting. They work only while focus is inside the list (WCAG 2.1.4).
+  - **System:** the spend meter (amber from 80%), the agreement line and a "Needs attention" list built from failing sources, the latest run's outcome and the spend flags.
+  - **Attribution:** Adzuna jobs show "Jobs by Adzuna" with the official logo, self-hosted and linked to adzuna.co.uk; Reed jobs show a "via Reed" link to their listing.
+  - All three screens load lazily.
+- **Data and services behind them:**
   - The owner can set a job's status (`new`, `saved`, `applied`, `skipped`), stamp it applied (server time and the verdict it was applied on) and rate a verdict 👍/👎 with a note and an expected verdict. The rules allow exactly those fields; ratings name the verdict they judged, so one made after a re-score is rejected.
   - Create-only `events` record each action in the same batch.
   - Shared metrics: verdict agreement over 14 days, London day and week boundaries, the Today tile counts and the spend meter. `DEFAULT_MONTHLY_CAP_PENCE` moved to `packages/shared`.
-  - Six `jobs` indexes for the dashboard queries (they build after deploy).
-  - Web services for jobs, job actions and the dashboard; `npm run dev` seeds twelve fake judged jobs, this month's usage, one rating and one applied job.
+  - Six `jobs` indexes for the dashboard queries. They build after deploy, so wait for **Enabled** under Firestore → Indexes before using the screens.
+  - `npm run dev` seeds twelve fake judged jobs, this month's usage, one rating and one applied job.
   - `check:bundle` prints each initial file's gzip size.
+
+### Changed
+- The spend meter takes its cap from `config/app.monthlyCapPence` first (the override the functions enforce), then the month's stored cap, then the default.
+- The initial-JS budget in `check:bundle` is 300 kB gzip (was 310 kB); it is 299.4 kB.
+- System's scan card no longer says verdicts are coming.
 
 ## [0.4.1]
 ### Fixed
