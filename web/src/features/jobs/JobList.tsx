@@ -110,11 +110,13 @@ export function JobList({
   const act = useCallback(
     (id: string, to: 'applied' | 'skipped') => {
       const view = find(id);
-      if (!view || view.job.status === to) return;
-      // Skipping an applied job would clear its applied stamps; the detail sheet hides Skip there.
+      if (!view) return;
+      // Skipping an applied job would clear its applied stamps; the detail sheet disables Skip there.
       if (to === 'skipped' && view.job.status === 'applied') return;
+      // The key toggles: pressing it on a job already in that status puts the job back to new.
+      const target = view.job.status === to ? 'new' : to;
       setError(undefined);
-      void performJobAction(view, { kind: 'status', to }, { onPatch, onCommitted }).then(
+      void performJobAction(view, { kind: 'status', to: target }, { onPatch, onCommitted }).then(
         (result) => {
           if (!result.ok && 'message' in result) setError(result.message);
         },

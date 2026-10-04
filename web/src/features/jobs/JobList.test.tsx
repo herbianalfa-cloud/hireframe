@@ -105,20 +105,51 @@ describe('JobList', () => {
     expect(onCommitted).not.toHaveBeenCalled();
   });
 
-  it('does not repeat an action the job already has', async () => {
-    const onCommitted = vi.fn();
+  it.each([
+    ['a', 'applied'],
+    ['s', 'skipped'],
+  ] as const)(
+    'toggles: %s on a job that is already %s puts it back to new',
+    async (key, status) => {
+      const onCommitted = vi.fn();
+      render(
+        <JobList
+          jobs={[makeView('x', { status })]}
+          label="Test jobs"
+          now={NOW}
+          onOpen={vi.fn()}
+          onCommitted={onCommitted}
+        />,
+      );
+      screen.getByRole('button').focus();
+      await userEvent.keyboard(key);
+      await waitFor(() => {
+        expect(onCommitted).toHaveBeenCalledTimes(1);
+      });
+      expect(vi.mocked(setJobStatus).mock.calls[0]?.[1]).toBe('new');
+    },
+  );
+
+  it('lets a on a skipped job mark it applied, and s on a saved job skip it', async () => {
     render(
       <JobList
-        jobs={[makeView('x', { status: 'applied' })]}
+        jobs={[makeView('x', { status: 'skipped' }), makeView('y', { status: 'saved' })]}
         label="Test jobs"
         now={NOW}
         onOpen={vi.fn()}
-        onCommitted={onCommitted}
+        onCommitted={vi.fn()}
       />,
     );
-    screen.getByRole('button').focus();
+    const [x, y] = screen.getAllByRole('button');
+    x?.focus();
     await userEvent.keyboard('a');
-    expect(setJobStatus).not.toHaveBeenCalled();
+    y?.focus();
+    await userEvent.keyboard('s');
+    await waitFor(() => {
+      expect(setJobStatus).toHaveBeenCalledTimes(2);
+    });
+    expect(vi.mocked(setJobStatus).mock.calls[0]?.[1]).toBe('applied');
+    expect(vi.mocked(setJobStatus).mock.calls[1]?.[1]).toBe('skipped');
   });
 
   it('does not skip an applied job (it would clear the applied stamps)', async () => {

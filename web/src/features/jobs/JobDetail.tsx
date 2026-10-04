@@ -8,7 +8,7 @@ import {
   FileText,
   ThumbsDown,
   ThumbsUp,
-  Undo2,
+  type LucideIcon,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
@@ -147,6 +147,35 @@ function DescriptionText({ jobId }: { jobId: string }) {
   );
 }
 
+/** One button for a state and its undo: same place and icon, selected while the state holds. */
+function StatusToggle({
+  icon: Icon,
+  on,
+  onLabel,
+  offLabel,
+  disabled,
+  onPress,
+}: {
+  icon: LucideIcon;
+  on: boolean;
+  onLabel: string;
+  offLabel: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Button
+      variant={on ? 'default' : 'secondary'}
+      aria-pressed={on}
+      disabled={disabled}
+      onClick={onPress}
+    >
+      <Icon aria-hidden="true" />
+      {on ? onLabel : offLabel}
+    </Button>
+  );
+}
+
 function Actions({
   view,
   handlers,
@@ -181,47 +210,31 @@ function Actions({
             Open posting
           </a>
         </Button>
-        {job.status === 'applied' ? (
-          <Button
-            variant="secondary"
-            disabled={pending || serverOwned}
-            onClick={() => void to('new')()}
-          >
-            <Undo2 aria-hidden="true" />
-            Undo applied
-          </Button>
-        ) : (
-          <Button disabled={pending || serverOwned} onClick={() => void to('applied')()}>
-            <CircleCheck aria-hidden="true" />
-            Mark applied
-          </Button>
-        )}
-        {job.status === 'saved' ? (
-          <Button
-            variant="secondary"
-            disabled={pending || serverOwned}
-            onClick={() => void to('new')()}
-          >
-            <Undo2 aria-hidden="true" />
-            Unsave
-          </Button>
-        ) : job.status === 'new' ? (
-          <Button variant="secondary" disabled={pending} onClick={() => void to('saved')()}>
-            <Bookmark aria-hidden="true" />
-            Save
-          </Button>
-        ) : null}
-        {job.status === 'skipped' ? (
-          <Button variant="secondary" disabled={pending} onClick={() => void to('new')()}>
-            <Undo2 aria-hidden="true" />
-            Unskip
-          </Button>
-        ) : job.status !== 'applied' && !serverOwned ? (
-          <Button variant="secondary" disabled={pending} onClick={() => void to('skipped')()}>
-            <CircleMinus aria-hidden="true" />
-            Skip
-          </Button>
-        ) : null}
+        <StatusToggle
+          icon={CircleCheck}
+          on={job.status === 'applied'}
+          onLabel="Undo applied"
+          offLabel="Mark applied"
+          disabled={pending || serverOwned}
+          onPress={() => void to(job.status === 'applied' ? 'new' : 'applied')()}
+        />
+        <StatusToggle
+          icon={Bookmark}
+          on={job.status === 'saved'}
+          onLabel="Unsave"
+          offLabel="Save"
+          disabled={pending || serverOwned || !['new', 'saved'].includes(job.status)}
+          onPress={() => void to(job.status === 'saved' ? 'new' : 'saved')()}
+        />
+        <StatusToggle
+          icon={CircleMinus}
+          on={job.status === 'skipped'}
+          onLabel="Unskip"
+          offLabel="Skip"
+          // Skipping an applied job would clear its applied stamps.
+          disabled={pending || serverOwned || job.status === 'applied'}
+          onPress={() => void to(job.status === 'skipped' ? 'new' : 'skipped')()}
+        />
       </div>
       {job.verdict ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -233,9 +246,12 @@ function Actions({
             aria-pressed={job.feedback?.agree === true}
             disabled={pending}
             onClick={() => {
-              // Already rated right on this verdict: nothing to change.
-              if (job.feedback?.agree === true && job.feedback.verdict === job.verdict) return;
-              void run({ kind: 'rate', input: { agree: true } });
+              // Pressing the selected 👍 again takes the rating back.
+              void run(
+                job.feedback?.agree === true
+                  ? { kind: 'unrate' }
+                  : { kind: 'rate', input: { agree: true } },
+              );
             }}
           >
             <ThumbsUp aria-hidden="true" />
@@ -246,7 +262,10 @@ function Actions({
             aria-label="Verdict was wrong"
             aria-pressed={job.feedback?.agree === false}
             disabled={pending}
-            onClick={onRateDown}
+            onClick={() => {
+              if (job.feedback?.agree === false) void run({ kind: 'unrate' });
+              else onRateDown();
+            }}
           >
             <ThumbsDown aria-hidden="true" />
           </Button>

@@ -1,11 +1,19 @@
 import type { ClientJobStatus } from '@hireframe/shared';
 
-import { withFeedback, withStatus } from '@/services/job-optimistic';
+import { withFeedback, withoutFeedback, withStatus } from '@/services/job-optimistic';
 import type { FeedbackInput } from '@/services/job-writes';
-import { jobActionErrorMessage, rateJob, setJobStatus, type JobView } from '@/services/jobs';
+import {
+  jobActionErrorMessage,
+  rateJob,
+  setJobStatus,
+  unrateJob,
+  type JobView,
+} from '@/services/jobs';
 
 export type JobAction =
-  { kind: 'status'; to: ClientJobStatus } | { kind: 'rate'; input: FeedbackInput };
+  | { kind: 'status'; to: ClientJobStatus }
+  | { kind: 'rate'; input: FeedbackInput }
+  | { kind: 'unrate' };
 
 /** How a screen follows an action without reloading anything. */
 export interface JobActionHandlers {
@@ -39,11 +47,17 @@ export async function performJobAction(
   const now = new Date();
   try {
     const write =
-      action.kind === 'status' ? setJobStatus(view, action.to) : rateJob(view, action.input);
+      action.kind === 'status'
+        ? setJobStatus(view, action.to)
+        : action.kind === 'rate'
+          ? rateJob(view, action.input)
+          : unrateJob(view);
     const next =
       action.kind === 'status'
         ? withStatus(view, action.to, now)
-        : withFeedback(view, action.input, now);
+        : action.kind === 'rate'
+          ? withFeedback(view, action.input, now)
+          : withoutFeedback(view, now);
     handlers.onPatch?.(next);
     try {
       await write;

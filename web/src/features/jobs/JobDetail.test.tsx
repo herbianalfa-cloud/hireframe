@@ -3,7 +3,14 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadJobDescription, rateJob, setJobStatus, watchJob, type JobView } from '@/services/jobs';
+import {
+  loadJobDescription,
+  rateJob,
+  setJobStatus,
+  unrateJob,
+  watchJob,
+  type JobView,
+} from '@/services/jobs';
 
 import { makeView } from './fixtures';
 import { JobDetail } from './JobDetail';
@@ -13,6 +20,7 @@ vi.mock('@/services/jobs', () => ({
   loadJobDescription: vi.fn(),
   setJobStatus: vi.fn(),
   rateJob: vi.fn(),
+  unrateJob: vi.fn(),
   jobActionErrorMessage: (error: unknown) => (error instanceof Error ? error.message : 'failed'),
 }));
 vi.mock('@/features/profile/hooks', () => ({
@@ -94,6 +102,7 @@ beforeEach(() => {
   vi.mocked(loadJobDescription).mockReset();
   vi.mocked(setJobStatus).mockReset().mockResolvedValue();
   vi.mocked(rateJob).mockReset().mockResolvedValue();
+  vi.mocked(unrateJob).mockReset().mockResolvedValue();
 });
 
 describe('JobDetail', () => {
@@ -221,11 +230,99 @@ describe('JobDetail', () => {
     expect(onCommitted).not.toHaveBeenCalled();
   });
 
-  it('offers Undo on an applied job', () => {
-    show({ status: 'applied' });
-    open();
-    expect(screen.getByRole('button', { name: 'Undo applied' })).toBeDefined();
+  it('removes the rating when the selected 👍 is pressed again', async () => {
+    const view = show({
+      feedback: { agree: true, verdict: 'apply', at: new Date('2026-10-14T10:00:00Z') },
+    });
+    const { onPatch, onCommitted } = open();
+    await userEvent.click(screen.getByRole('button', { name: 'Verdict was right' }));
+    await waitFor(() => {
+      expect(onCommitted).toHaveBeenCalled();
+    });
+    expect(unrateJob).toHaveBeenCalledWith(view);
+    expect(rateJob).not.toHaveBeenCalled();
+    expect(onPatch.mock.calls[0]?.[0].job.feedback).toBeUndefined();
+    expect(screen.queryByRole('dialog', { name: /what was wrong/i })).toBeNull();
   });
+
+  it('removes the rating when the selected 👎 is pressed again, without a dialog', async () => {
+    const view = show({
+      feedback: { agree: false, verdict: 'apply', at: new Date('2026-10-14T10:00:00Z') },
+    });
+    open();
+    await userEvent.click(screen.getByRole('button', { name: 'Verdict was wrong' }));
+    await waitFor(() => {
+      expect(unrateJob).toHaveBeenCalledWith(view);
+    });
+    expect(screen.queryByRole('dialog', { name: /what was wrong/i })).toBeNull();
+  });
+
+  it('puts the rating back and shows the error when removing it is refused', async () => {
+    const view = show({
+      feedback: { agree: true, verdict: 'apply', at: new Date('2026-10-14T10:00:00Z') },
+    });
+    vi.mocked(unrateJob).mockRejectedValue(new Error('This job changed since you opened it.'));
+    const { onPatch } = open();
+    await userEvent.click(screen.getByRole('button', { name: 'Verdict was right' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('changed');
+    expect(onPatch.mock.calls[1]?.[0]).toBe(view);
+  });
+
+  it.each([
+    ['new', 'Save', 'Unsave', 'saved'],
+    ['new', 'Skip', 'Unskip', 'skipped'],
+    ['new', 'Mark applied', 'Undo applied', 'applied'],
+  ] as const)('%s job: %s is one toggle that becomes %s', async (_from, off, on, target) => {
+    show();
+    const first = open();
+    const button = screen.getByRole('button', { name: off });
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.className).not.toContain('bg-accent');
+    await userEvent.click(button);
+    await waitFor(() => {
+      expect(first.onCommitted).toHaveBeenCalled();
+    });
+    expect(setJobStatus).toHaveBeenLastCalledWith(expect.anything(), target);
+    expect(screen.queryByRole('button', { name: on })).toBeNull();
+  });
+
+  it.each([
+    ['saved', 'Unsave', 'Save'],
+    ['skipped', 'Unskip', 'Skip'],
+    ['applied', 'Undo applied', 'Mark applied'],
+  ] as const)(
+    'a %s job shows %s as selected, and pressing it goes back to new',
+    async (status, on, off) => {
+      show({ status });
+      const { onCommitted } = open();
+      const button = screen.getByRole('button', { name: on });
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(button.className).toContain('bg-accent');
+      expect(screen.queryByRole('button', { name: off })).toBeNull();
+      await userEvent.click(button);
+      await waitFor(() => {
+        expect(onCommitted).toHaveBeenCalled();
+      });
+      expect(setJobStatus).toHaveBeenLastCalledWith(expect.anything(), 'new');
+    },
+  );
+
+  it.each(['new', 'saved', 'skipped', 'applied'] as const)(
+    'keeps the three toggles in one order on a %s job, with Skip disabled when applied',
+    (status) => {
+      show({ status });
+      open();
+      const toggles = screen
+        .getAllByRole('button')
+        .filter((b) => b.hasAttribute('aria-pressed') && !b.hasAttribute('aria-label'));
+      expect(toggles.map((b) => b.textContent)).toEqual([
+        status === 'applied' ? 'Undo applied' : 'Mark applied',
+        status === 'saved' ? 'Unsave' : 'Save',
+        status === 'skipped' ? 'Unskip' : 'Skip',
+      ]);
+      expect(toggles[2]?.hasAttribute('disabled')).toBe(status === 'applied');
+    },
+  );
 
   it('opens the posting in a new tab and keeps Generate CV off until M7', () => {
     show();
@@ -259,9 +356,6 @@ describe('JobDetail', () => {
     // The selected one looks selected (filled), not just announced.
     expect(up.className).toContain('bg-accent');
     expect(down.className).not.toContain('bg-accent');
-    // Pressing the selected 👍 again changes nothing.
-    await userEvent.click(up);
-    expect(rateJob).not.toHaveBeenCalled();
     // Changing to 👎 opens the form, which starts from nothing for a 👍.
     await userEvent.click(down);
     const dialog = await screen.findByRole('dialog', { name: /what was wrong/i });
@@ -283,27 +377,6 @@ describe('JobDetail', () => {
     await waitFor(() => {
       expect(rateJob).toHaveBeenCalledWith(view, { agree: true });
     });
-  });
-
-  it('starts the 👎 form from the earlier note and expected verdict', async () => {
-    show({
-      feedback: {
-        agree: false,
-        verdict: 'apply',
-        note: 'Needs dbt',
-        expected: 'near_miss',
-        at: new Date('2026-10-14T10:00:00Z'),
-      },
-    });
-    open();
-    await userEvent.click(screen.getByRole('button', { name: 'Verdict was wrong' }));
-    const dialog = await screen.findByRole('dialog', { name: /what was wrong/i });
-    expect(within(dialog).getByRole<HTMLTextAreaElement>('textbox', { name: /note/i }).value).toBe(
-      'Needs dbt',
-    );
-    expect(within(dialog).getByLabelText<HTMLSelectElement>(/should have been/i).value).toBe(
-      'near_miss',
-    );
   });
 
   it('asks for a note and the expected verdict on 👎', async () => {
