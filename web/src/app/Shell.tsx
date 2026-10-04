@@ -2,7 +2,6 @@ import { Ellipsis, LogOut } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 
 import { Button } from '@/components/ui/button';
-import { ToastHost } from '@/components/ui/toast-host';
 import { cn } from '@/lib/utils';
 import { ThemeSwitcher } from '@/theme/ThemeSwitcher';
 
@@ -99,7 +98,6 @@ export function Shell() {
         ))}
         <TabLink path="/more" label="More" Icon={Ellipsis} />
       </nav>
-      <ToastHost />
     </div>
   );
 }

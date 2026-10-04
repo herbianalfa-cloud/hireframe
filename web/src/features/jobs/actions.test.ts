@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { dismissToast, getToast } from '@/lib/toast';
 import { rateJob, setJobStatus, type JobView } from '@/services/jobs';
 
 import { performJobAction } from './actions';
@@ -12,16 +11,10 @@ vi.mock('@/services/jobs', () => ({
   jobActionErrorMessage: (error: unknown) => (error instanceof Error ? error.message : 'failed'),
 }));
 
-function clearToast() {
-  const toast = getToast();
-  if (toast) dismissToast(toast.id);
-}
-
 beforeEach(() => {
   vi.mocked(setJobStatus).mockReset().mockResolvedValue();
   vi.mocked(rateJob).mockReset().mockResolvedValue();
 });
-afterEach(clearToast);
 
 describe('performJobAction', () => {
   it('shows the new state before the write is confirmed', async () => {
@@ -38,11 +31,9 @@ describe('performJobAction', () => {
     expect(onPatch).toHaveBeenCalledTimes(1);
     expect(onPatch.mock.calls[0]?.[0].job.status).toBe('saved');
     expect(onCommitted).not.toHaveBeenCalled();
-    expect(getToast()).toBeNull();
     confirm();
     await done;
     expect(onCommitted).toHaveBeenCalledTimes(1);
-    expect(getToast()?.message).toBe('Saved');
   });
 
   it('rolls back to the job as it was and says why when the write is refused', async () => {
@@ -60,7 +51,6 @@ describe('performJobAction', () => {
     expect(onPatch.mock.calls[0]?.[0].job.status).toBe('applied');
     expect(onPatch.mock.calls[1]?.[0]).toBe(view);
     expect(onCommitted).not.toHaveBeenCalled();
-    expect(getToast()).toBeNull();
   });
 
   it('rolls back a refused rating too', async () => {
@@ -89,61 +79,5 @@ describe('performJobAction', () => {
     await expect(performJobAction(view, { kind: 'status', to: 'skipped' })).resolves.toMatchObject({
       ok: true,
     });
-  });
-
-  it.each([
-    ['saved', 'Saved'],
-    ['applied', 'Marked applied'],
-    ['skipped', 'Skipped'],
-  ] as const)('toasts "%s" with Undo', async (to, message) => {
-    await performJobAction(makeView('a'), { kind: 'status', to });
-    expect(getToast()?.message).toBe(message);
-    expect(getToast()?.action?.label).toBe('Undo');
-  });
-
-  it('toasts ratings, without Undo (the rules cannot remove a rating)', async () => {
-    await performJobAction(makeView('a'), { kind: 'rate', input: { agree: true } });
-    expect(getToast()).toMatchObject({ message: 'Rated 👍' });
-    expect(getToast()?.action).toBeUndefined();
-    await performJobAction(makeView('a'), { kind: 'rate', input: { agree: false } });
-    expect(getToast()?.message).toBe('Rated 👎');
-  });
-
-  it('offers no Undo out of applied: going back would stamp a new applied date', async () => {
-    await performJobAction(makeView('a', { status: 'applied' }), { kind: 'status', to: 'new' });
-    expect(getToast()?.message).toBe('Marked not applied');
-    expect(getToast()?.action).toBeUndefined();
-  });
-
-  it('Undo puts the job back to the status it had and patches the list', async () => {
-    const onPatch = vi.fn<(view: JobView) => void>();
-    await performJobAction(
-      makeView('a', { status: 'saved' }),
-      { kind: 'status', to: 'applied' },
-      { onPatch },
-    );
-    getToast()?.action?.run();
-    await vi.waitFor(() => {
-      expect(setJobStatus).toHaveBeenCalledTimes(2);
-    });
-    expect(vi.mocked(setJobStatus).mock.calls[1]?.[0].job.status).toBe('applied');
-    expect(vi.mocked(setJobStatus).mock.calls[1]?.[1]).toBe('saved');
-    await vi.waitFor(() => {
-      expect(getToast()?.message).toBe('Undone');
-    });
-    expect(getToast()?.action).toBeUndefined();
-    expect(onPatch.mock.calls.at(-1)?.[0].job.status).toBe('saved');
-  });
-
-  it('toasts the error if Undo is refused, and rolls back', async () => {
-    const onPatch = vi.fn<(view: JobView) => void>();
-    await performJobAction(makeView('a'), { kind: 'status', to: 'saved' }, { onPatch });
-    vi.mocked(setJobStatus).mockRejectedValue(new Error('This job changed since you opened it.'));
-    getToast()?.action?.run();
-    await vi.waitFor(() => {
-      expect(getToast()?.tone).toBe('error');
-    });
-    expect(getToast()?.message).toContain('changed');
-    expect(onPatch.mock.calls.at(-1)?.[0].job.status).toBe('saved');
   });
 });

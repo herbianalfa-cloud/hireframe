@@ -5,9 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadJobDescription, rateJob, setJobStatus, watchJob, type JobView } from '@/services/jobs';
 
-import { ToastHost } from '@/components/ui/toast-host';
-import { dismissToast, getToast } from '@/lib/toast';
-
 import { makeView } from './fixtures';
 import { JobDetail } from './JobDetail';
 
@@ -222,32 +219,6 @@ describe('JobDetail', () => {
     expect(onPatch.mock.calls[0]?.[0].job.status).toBe('saved');
     expect(onPatch.mock.calls[1]?.[0]).toBe(view);
     expect(onCommitted).not.toHaveBeenCalled();
-  });
-
-  it('toasts the action, and Undo in the toast reverts it without closing the sheet', async () => {
-    show();
-    const onClose = vi.fn();
-    render(
-      <>
-        <JobDetail jobId="job1" onClose={onClose} />
-        <ToastHost />
-      </>,
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-    const toast = await screen.findByText('Saved');
-    // The toast announces without moving focus out of the sheet.
-    expect(screen.getByRole('status').contains(toast)).toBe(true);
-    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
-    // Radix blocks the pointer outside the sheet; the toast opts back in (pointer-events-auto).
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
-    await user.click(screen.getByRole('button', { name: 'Undo' }));
-    await waitFor(() => {
-      expect(setJobStatus).toHaveBeenCalledTimes(2);
-    });
-    expect(vi.mocked(setJobStatus).mock.calls[1]?.[1]).toBe('new');
-    expect(onClose).not.toHaveBeenCalled();
-    const current = getToast();
-    if (current) dismissToast(current.id);
   });
 
   it('offers Undo on an applied job', () => {

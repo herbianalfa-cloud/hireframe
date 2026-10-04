@@ -470,13 +470,13 @@ Consequences: a new query that needs an index fails a unit test, not production.
 
 Actions run through `performJobAction` (`features/jobs/actions.ts`): show the result (`onPatch`), write, and on refusal call `onPatch` with the old job and show the error. `onCommitted` fires only on confirmation and refreshes the counts (tiles, agreement). Nothing reloads the list: Today's lists are live, and the Jobs list swaps one job in place, so loaded pages, scroll and focus stay. One write per job at a time, so a second press can't send a write built from stale data.
 
-A toast (`lib/toast.ts`, a one-slot store) confirms each action after the server accepts it. The always-mounted live region is in the main bundle; the card is a lazy chunk. Undo is offered for status changes except out of `applied` (going back would stamp a new applied date), and never for a rating: the rules cannot remove one, so a rating is changed by rating again. Ratings show their state as filled (not only `aria-pressed`).
+A refused write shows its error inline where the action was taken (the list's error line, the sheet, the feedback dialog); a confirmed one shows only the changed state. A list has no Undo; the sheet has its own Unsave, Unskip and Undo applied buttons. Ratings show their state as filled (not only `aria-pressed`); the rules cannot remove a rating, so it is changed by rating again.
 
-Consequences: an edited job can leave a filtered Jobs list only on the next load, not at once. The toast's Undo is reachable by keyboard from lists but not from inside an open sheet (focus is trapped there; the sheet has its own Unsave, Unskip and Undo applied buttons).
+Consequences: an edited job can leave a filtered Jobs list only on the next load, not at once.
 
 ## ADR-042 `@hireframe/shared` is side-effect-free; the shell imports only pure modules
 
-**Context:** The 0.5.3 toast host took the initial JS to 300.3 kB gzip in CI (budget 300 kB, ADR-021). The cause was older: `web/src/services/firebase.ts` imported `FUNCTIONS_REGION` from `callables.ts`, which also builds zod schemas. Zod schema construction is a runtime call, so the bundler had to keep it, and the profile, criteria, funnel, jobs and events schemas landed in a shared chunk that every visit loads.
+**Context:** The initial JS measured 300.3 kB gzip in CI on this PR (budget 300 kB, ADR-021). The cause: `web/src/services/firebase.ts` imported `FUNCTIONS_REGION` from `callables.ts`, which also builds zod schemas. Zod schema construction is a runtime call, so the bundler had to keep it, and the profile, criteria, funnel, jobs and events schemas landed in a shared chunk that every visit loads.
 
 **Decision:** `FUNCTIONS_REGION` lives in `firestore.ts` (constants only) and `callables.ts` re-exports it. `packages/shared/package.json` declares `"sideEffects": false`, so a module the app doesn't use is left out of the bundle. The budget is unchanged.
 

@@ -12,9 +12,8 @@ All notable changes. Format: Keep a Changelog, SemVer.
 - **Initial JS is 6.7 kB gzip smaller** (300.0 → 293.6 kB; ADR-042). The shell no longer loads every shared schema: `FUNCTIONS_REGION` moved to a pure module and `@hireframe/shared` is marked side-effect-free. Fixes the `check:bundle` failure on this PR; the budget is unchanged.
 
 ### Added
-- **A toast after each action**: Saved, Marked applied, Skipped, Rated 👍, Rated 👎, with Undo for status changes (not out of applied, not for ratings). A polite live region that never takes focus, above the bottom tabs on a phone; the card is a lazy chunk.
 - `jobs.invalid` now logs the failing field names (never values).
-- Tests: the emulator reproduction of the pending snapshot, `readJob`, the optimistic builders, `performJobAction` (patch, rollback, busy, toasts, Undo), the toast host, list focus, in-place Jobs list, rating state.
+- Tests: the emulator reproduction of the pending snapshot, `readJob`, the optimistic builders, `performJobAction` (patch, rollback, busy), list focus, in-place Jobs list, rating state.
 
 ## [0.5.2]
 ### Fixed
