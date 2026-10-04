@@ -8,7 +8,11 @@ All notable changes. Format: Keep a Changelog, SemVer.
 - **Actions no longer reload the Jobs list.** The row and the sheet update in place; scroll, keyboard focus and loaded pages stay. If the write is refused, the job goes back to how it was and the error shows. "Load more" can no longer append a job twice, and an edit made while it loads is kept.
 - **Rating buttons show the current rating** as filled, and can be changed (👎 reopens the form with the earlier note and expected verdict; pressing the selected 👍 again does nothing).
 
+- **Take a rating back.** Pressing the selected 👍 or 👎 again removes the rating, with no dialog; the other button still switches it. `firestore.rules` lets the owner delete the whole `feedback` field together with `updatedAt` and nothing else, and a new create-only event `job_feedback_removed` records the rating that went (ADR-038). Agreement stops counting a removed rating.
+- **Save, Skip and Mark applied are single toggle buttons** in the sheet: same place and icon, `aria-pressed`, selected style while on, label flips (Save/Unsave, Skip/Unskip, Mark applied/Undo applied). The separate Unsave, Unskip and Undo buttons are gone. The `a` and `s` keys toggle the same way (`s` on an applied job still does nothing).
+
 ### Changed
+- The 👎 form no longer opens with the earlier note: pressing the selected 👎 removes it, so a note is changed by rating 👎 again.
 - **Initial JS is 6.7 kB gzip smaller** (300.0 → 293.6 kB; ADR-042). The shell no longer loads every shared schema: `FUNCTIONS_REGION` moved to a pure module and `@hireframe/shared` is marked side-effect-free. Fixes the `check:bundle` failure on this PR; the budget is unchanged.
 
 ### Added
