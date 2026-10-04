@@ -44,6 +44,15 @@ function open() {
   return { onClose, onChanged };
 }
 
+const DEEP: NonNullable<Job['deep']> = {
+  requirements: [],
+  rubric: { evidence: 1.5, companyFit: 0.5 },
+  employer: 'small',
+  model: { fit: 7, luck: 6, verdict: 'near_miss' },
+  reason: 'Close.',
+  talkingPoints: ['Lead with the reporting migration'],
+};
+
 const FULL: Partial<Job> = {
   verdict: 'near_miss',
   shortfall: 'Asks for 5 years of dbt; you have 2.',
@@ -91,7 +100,7 @@ describe('JobDetail', () => {
     show(FULL);
     open();
     expect(screen.getByRole('heading', { name: 'Data Analyst' })).toBeDefined();
-    const text = document.body.textContent ?? '';
+    const text = document.body.textContent;
     for (const expected of [
       'Acme Test Co',
       'London, UK',
@@ -119,7 +128,7 @@ describe('JobDetail', () => {
   it('says a cited fact is gone rather than hiding the claim', () => {
     show({
       deep: {
-        ...(FULL.deep as NonNullable<Job['deep']>),
+        ...DEEP,
         requirements: [
           { text: 'SQL', level: 'must', type: 'skill', match: 'met', gap: null, factIds: ['gone'] },
         ],
@@ -212,9 +221,9 @@ describe('JobDetail', () => {
     const link = screen.getByRole('link', { name: /open posting/i });
     expect(link.getAttribute('href')).toBe('https://jobs.example.test/acme/1');
     expect(link.getAttribute('rel')).toContain('noopener');
-    expect(
-      (screen.getByRole('button', { name: 'Generate CV' }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Generate CV' }).disabled).toBe(
+      true,
+    );
   });
 
   it('records 👍 at once', async () => {

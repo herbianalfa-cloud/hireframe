@@ -37,14 +37,14 @@ beforeEach(() => {
 
 describe('JobList', () => {
   it('shows title, company, age, scores and reason, and opens a row on click', async () => {
-    const { onOpen, rows } = setup();
-    const first = rows()[0];
-    expect(first?.textContent).toContain('First role');
-    expect(first?.textContent).toContain('Acme Test Co');
-    expect(first?.textContent).toContain('3 days');
-    expect(first?.textContent).toContain('fit 8.2 · luck 7.1');
-    expect(first?.textContent).toContain('Strong match on SQL reporting');
-    await userEvent.click(first as HTMLElement);
+    const { onOpen } = setup();
+    const first = screen.getByRole('button', { name: /First role/ });
+    expect(first.textContent).toContain('First role');
+    expect(first.textContent).toContain('Acme Test Co');
+    expect(first.textContent).toContain('3 days');
+    expect(first.textContent).toContain('fit 8.2 · luck 7.1');
+    expect(first.textContent).toContain('Strong match on SQL reporting');
+    await userEvent.click(first);
     expect(onOpen).toHaveBeenCalledWith('a');
   });
 

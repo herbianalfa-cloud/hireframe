@@ -10,8 +10,7 @@ describe('job labels', () => {
     expect(ageText(makeJob({ postedAt: new Date('2026-10-09T09:00:00Z') }), NOW)).toBe('5 days');
     expect(ageText(makeJob({ postedAt: new Date('2026-09-23T09:00:00Z') }), NOW)).toBe('3 weeks');
     expect(ageText(makeJob({ postedAt: new Date('2026-07-01T09:00:00Z') }), NOW)).toBe('3 months');
-    const { postedAt: _postedAt, ...undated } = makeJob();
-    expect(postedText(undated, NOW)).toBe('first seen 2 days ago');
+    expect(postedText({ firstSeenAt: makeJob().firstSeenAt }, NOW)).toBe('first seen 2 days ago');
     expect(postedText(makeJob({ postedAt: NOW }), NOW)).toBe('posted today');
   });
 
