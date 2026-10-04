@@ -64,6 +64,7 @@ export const JOB_STATUSES = [
   'offer',
   'rejected',
 ] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
 
 /** Statuses the owner can set from the app; the rest are for later milestones (Gmail, Wave 2). */
 export const CLIENT_JOB_STATUSES = ['new', 'saved', 'applied', 'skipped'] as const;
