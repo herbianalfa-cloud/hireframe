@@ -80,7 +80,7 @@ export function toRestValue(value: unknown): RestValue {
   }
   if (value instanceof Date) return { timestampValue: value.toISOString() };
   if (Array.isArray(value)) return { arrayValue: { values: value.map(toRestValue) } };
-  if (typeof value === 'object' && value !== null) {
+  if (typeof value === 'object') {
     return { mapValue: { fields: toRestFields(value as Record<string, unknown>) } };
   }
   throw new Error(`Unsupported seed value: ${typeof value}`);

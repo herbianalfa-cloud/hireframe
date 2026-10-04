@@ -240,7 +240,7 @@ describe('seed → Firestore REST conversion', () => {
     expect(documents.length).toBeGreaterThan(24);
     for (const { name, data } of documents) {
       const converted = restDocument(data);
-      const back = fromRestFields(converted.fields as never);
+      const back = fromRestFields(converted.fields);
       // Dates round-trip as Dates; everything else as plain JSON data.
       expect(JSON.stringify(back), name).toBe(JSON.stringify(defined(data)));
     }
