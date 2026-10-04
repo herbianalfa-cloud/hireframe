@@ -2,6 +2,20 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [0.5.2]
+### Fixed
+- **Events can no longer describe a change that didn't happen** (ADR-038). The rules now require a status event to move between two different statuses with the job's own verdict, and a rating event to match a rating written in the same batch (verdict, answer and expected verdict). Before, a standalone event matching the job's current state was accepted.
+- **A note of only spaces is rejected** by the rules, as the schema already did. One would have made the job fail to parse and drop out of the lists.
+- **Pressing `s` on an applied job no longer un-applies it.** It cleared the applied stamps and lowered "Applied this week" and agreement. Skip stays unavailable on applied jobs, as in the detail sheet.
+- **Job actions always show their error.** `setJobStatus` and `rateJob` reject instead of throwing synchronously, so a refused change reaches the list's error message.
+
+### Changed
+- Today's applied tile uses `todayKpis`, which now keeps a failed count unknown (null) instead of guessing.
+
+### Added
+- Rules tests for the cases above, and for every status move and rating the app can produce (judged and unjudged jobs).
+- Every event the builders produce is parsed with `EventSchema` in a test.
+
 ## [0.5.1]
 ### Fixed
 - **Today's tiles showed "Couldn't load the numbers" in production.** "Judged today" and "applied this week" scanned ascending, but the indexes are descending, so Firestore rejected both counts (`failed-precondition`). Both now order descending and use the existing indexes. The emulator doesn't enforce indexes, which is why tests passed.
