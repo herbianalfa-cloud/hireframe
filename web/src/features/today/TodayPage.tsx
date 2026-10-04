@@ -1,4 +1,4 @@
-import { CRITERIA_SEED_V1, type Verdict } from '@hireframe/shared';
+import { CRITERIA_SEED_V1, todayKpis, type Verdict } from '@hireframe/shared';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
@@ -38,7 +38,7 @@ function Count({ value }: { value: number }) {
 }
 
 function Tiles({ state, weeklyTarget }: { state: KpiState; weeklyTarget: number }) {
-  const counts = state.status === 'ready' ? state.counts : null;
+  const counts = state.status === 'ready' ? todayKpis(state.counts, weeklyTarget) : null;
   const pending = (
     <div role="status" aria-label="Loading numbers">
       <Skeleton className="h-12" />
@@ -80,20 +80,17 @@ function Tiles({ state, weeklyTarget }: { state: KpiState; weeklyTarget: number 
         ))}
       </Tile>
       <Tile label="Applied this week">
-        {body(counts?.appliedThisWeek, (value) => {
-          const remaining = Math.max(0, weeklyTarget - value);
-          return (
-            <>
-              <p className="font-mono text-2xl tabular-nums">
-                {value}
-                <span className="text-sm text-muted-foreground"> / {weeklyTarget}</span>
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {remaining === 0 ? 'Target met' : `${String(remaining)} to go`}
-              </p>
-            </>
-          );
-        })}
+        {body(counts?.appliedThisWeek, (value) => (
+          <>
+            <p className="font-mono text-2xl tabular-nums">
+              {value}
+              <span className="text-sm text-muted-foreground"> / {weeklyTarget}</span>
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {counts?.weeklyMet ? 'Target met' : `${String(counts?.weeklyRemaining ?? 0)} to go`}
+            </p>
+          </>
+        ))}
       </Tile>
       <Tile label="AI spend this month">
         <SpendMeter />

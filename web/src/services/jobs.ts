@@ -201,13 +201,13 @@ async function commitAction(jobId: string, write: JobActionWrite): Promise<void>
 }
 
 /** Save, skip, mark applied, or put back to new. */
-export function setJobStatus(view: JobView, to: ClientJobStatus): Promise<void> {
-  return commitAction(view.id, buildJobStatusWrite(view.id, view.raw, to, serverTimestamp()));
+export async function setJobStatus(view: JobView, to: ClientJobStatus): Promise<void> {
+  await commitAction(view.id, buildJobStatusWrite(view.id, view.raw, to, serverTimestamp()));
 }
 
 /** 👍/👎 on the verdict. The rules reject it if a re-score changed the verdict meanwhile. */
-export function rateJob(view: JobView, input: FeedbackInput): Promise<void> {
-  return commitAction(view.id, buildJobFeedbackWrite(view.id, view.raw, input, serverTimestamp()));
+export async function rateJob(view: JobView, input: FeedbackInput): Promise<void> {
+  await commitAction(view.id, buildJobFeedbackWrite(view.id, view.raw, input, serverTimestamp()));
 }
 
 export function jobActionErrorMessage(error: unknown): string {

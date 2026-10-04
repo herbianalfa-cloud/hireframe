@@ -88,6 +88,8 @@ export function JobList({
     (id: string, to: 'applied' | 'skipped') => {
       const view = find(id);
       if (!view || view.job.status === to) return;
+      // Skipping an applied job would clear its applied stamps; the detail sheet hides Skip there.
+      if (to === 'skipped' && view.job.status === 'applied') return;
       setError(undefined);
       setJobStatus(view, to).then(onChanged, (caught: unknown) => {
         setError(jobActionErrorMessage(caught));

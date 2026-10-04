@@ -120,4 +120,19 @@ describe('JobList', () => {
     await userEvent.keyboard('a');
     expect(setJobStatus).not.toHaveBeenCalled();
   });
+
+  it('does not skip an applied job (it would clear the applied stamps)', async () => {
+    render(
+      <JobList
+        jobs={[makeView('x', { status: 'applied' })]}
+        label="Test jobs"
+        now={NOW}
+        onOpen={vi.fn()}
+        onChanged={vi.fn()}
+      />,
+    );
+    screen.getByRole('button').focus();
+    await userEvent.keyboard('s');
+    expect(setJobStatus).not.toHaveBeenCalled();
+  });
 });

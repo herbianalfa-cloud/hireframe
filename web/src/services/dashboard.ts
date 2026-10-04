@@ -13,6 +13,7 @@ import {
   AGREEMENT_DAYS,
   type Agreement,
   type SpendMeter,
+  type TodayCountResults,
   type TodayCounts,
   type Verdict,
 } from '@hireframe/shared';
@@ -44,6 +45,8 @@ import { timestampsToDates } from './timestamps';
  * and verdict agreement. Lists and spend are live; counts and agreement are one-shot reads that
  * the screen repeats after an action.
  */
+
+export type { TodayCountResults };
 
 export const TODAY_LIST_SIZE = 10;
 const READ_TIMEOUT_MS = 15_000;
@@ -178,9 +181,6 @@ async function count(label: string, source: Query): Promise<number> {
   );
   return snapshot.data().count;
 }
-
-/** Each count, or null when that one read failed (the others still show). */
-export type TodayCountResults = { [K in keyof TodayCounts]: number | null };
 
 /** The four tile counts, measured at `now` (London day and week). One aggregation read each. */
 export async function loadTodayCounts(now: Date): Promise<TodayCountResults> {

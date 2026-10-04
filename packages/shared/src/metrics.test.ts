@@ -128,6 +128,14 @@ describe('todayKpis', () => {
     expect(todayKpis(counts, 3)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
     expect(todayKpis(counts, 2)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
   });
+
+  it('keeps a failed count unknown instead of guessing', () => {
+    expect(todayKpis({ ...counts, appliedThisWeek: null }, 5)).toMatchObject({
+      appliedThisWeek: null,
+      weeklyRemaining: null,
+      weeklyMet: null,
+    });
+  });
 });
 
 describe('spendMeter', () => {

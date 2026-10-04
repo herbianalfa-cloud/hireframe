@@ -273,6 +273,7 @@ describe('feedback', () => {
       updateDoc(ref, { feedback: { ...good, note: 'x'.repeat(281) }, updatedAt: NOW }),
     );
     await assertFails(updateDoc(ref, { feedback: { ...good, note: '' }, updatedAt: NOW }));
+    await assertFails(updateDoc(ref, { feedback: { ...good, note: '   ' }, updatedAt: NOW }));
     await assertFails(updateDoc(ref, { feedback: { ...good, expected: 'apply' }, updatedAt: NOW }));
     await assertFails(
       updateDoc(ref, { feedback: { ...good, agree: true, expected: 'skip' }, updatedAt: NOW }),
@@ -331,6 +332,59 @@ describe('everything else stays server-written', () => {
   });
 });
 
+describe('every legitimate batched write from job-writes.ts passes', () => {
+  const CLIENT = ['new', 'saved', 'applied', 'skipped'] as const;
+  const feedbackInputs = [
+    { agree: true },
+    { agree: true, note: 'Spot on.' },
+    { agree: false },
+    { agree: false, note: 'Too senior.', expected: 'near_miss' as const },
+    { agree: false, expected: 'skip' as const },
+  ];
+
+  for (const judged of [true, false]) {
+    it(`covers all status moves on a ${judged ? 'judged' : 'unjudged'} job`, async () => {
+      for (const from of CLIENT) {
+        for (const to of CLIENT) {
+          if (from === to) continue;
+          const base = judged ? seededJob() : withoutKeys(seededJob(), ['verdict']);
+          const raw = {
+            ...base,
+            status: from,
+            ...(from === 'applied'
+              ? { appliedAt: CREATED, ...(judged ? { appliedVerdict: 'apply' } : {}) }
+              : {}),
+          };
+          await seed(raw);
+          await assertSucceeds(commit(dbFor('owner'), buildJobStatusWrite(JOB_ID, raw, to, NOW)));
+        }
+      }
+    });
+  }
+
+  it('covers every rating the dialog can produce', async () => {
+    for (const input of feedbackInputs) {
+      await seed();
+      await assertSucceeds(
+        commit(dbFor('owner'), buildJobFeedbackWrite(JOB_ID, seededJob(), input, NOW)),
+      );
+    }
+  });
+
+  it('covers a rating on a job that is saved or applied', async () => {
+    for (const status of ['saved', 'applied'] as const) {
+      const raw = seededJob({
+        status,
+        ...(status === 'applied' ? { appliedAt: CREATED, appliedVerdict: 'apply' } : {}),
+      });
+      await seed(raw);
+      await assertSucceeds(
+        commit(dbFor('owner'), buildJobFeedbackWrite(JOB_ID, raw, { agree: true }, NOW)),
+      );
+    }
+  });
+});
+
 describe('events are create-only', () => {
   beforeEach(async () => {
     await seed();
@@ -356,6 +410,57 @@ describe('events are create-only', () => {
     await assertFails(commit(db, { ...write, event: { ...write.event, at: CREATED } }));
     await assertFails(commit(db, { ...write, event: { ...write.event, schemaVersion: 2 } }));
     await assertFails(commit(db, { ...write, event: { ...write.event, jobId: 'missing' } }));
+  });
+
+  it('denies an event for a change that did not happen (ADR-038)', async () => {
+    const db = dbFor('owner');
+    // from == to, with the job already there: nothing changed.
+    await seed(seededJob({ status: 'saved' }));
+    const noop = { ...buildJobStatusWrite(JOB_ID, seededJob(), 'saved', NOW).event, from: 'saved' };
+    await assertFails(setDoc(doc(db, `events/${EVENT_ID}`), noop));
+    // A rating event that matches an old rating, with no new rating in the batch.
+    const rated = seededJob({
+      feedback: { agree: true, verdict: 'apply', at: CREATED },
+    });
+    await seed(rated);
+    const old = buildJobFeedbackWrite(JOB_ID, seededJob(), { agree: true }, NOW).event;
+    await assertFails(setDoc(doc(db, `events/${EVENT_ID}`), old));
+    // The same, riding on an unrelated valid status change.
+    const status = buildJobStatusWrite(JOB_ID, rated, 'saved', NOW);
+    await assertFails(
+      writeBatch(db)
+        .update(doc(db, PATHS.job(JOB_ID)), status.update)
+        .set(doc(db, `events/${EVENT_ID}`), old)
+        .commit(),
+    );
+  });
+
+  it('denies a status event whose verdict is not the job’s, or that invents one', async () => {
+    const db = dbFor('owner');
+    await seed();
+    const write = buildJobStatusWrite(JOB_ID, seededJob(), 'saved', NOW);
+    await assertFails(commit(db, { ...write, event: { ...write.event, verdict: 'skip' } }));
+    await assertFails(commit(db, { ...write, event: withoutKeys(write.event, ['verdict']) }));
+    const raw = withoutKeys(seededJob(), ['verdict']);
+    await seed(raw);
+    const unjudged = buildJobStatusWrite(JOB_ID, raw, 'saved', NOW);
+    await assertFails(commit(db, { ...unjudged, event: { ...unjudged.event, verdict: 'apply' } }));
+  });
+
+  it('denies a feedback event that misstates the expected verdict', async () => {
+    await seed();
+    const write = buildJobFeedbackWrite(
+      JOB_ID,
+      seededJob(),
+      { agree: false, expected: 'near_miss' },
+      NOW,
+    );
+    await assertFails(
+      commit(dbFor('owner'), { ...write, event: { ...write.event, expected: 'skip' } }),
+    );
+    await assertFails(
+      commit(dbFor('owner'), { ...write, event: withoutKeys(write.event, ['expected']) }),
+    );
   });
 
   it('denies everyone but the owner', async () => {
