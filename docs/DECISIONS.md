@@ -461,3 +461,15 @@ Consequences: S2 settles at about 0.15p a call and the spend meter is accurate f
 **Also:** each Today count settles on its own (`Promise.allSettled`), so one failing read affects one tile.
 
 Consequences: a new query that needs an index fails a unit test, not production. The check is a model of Firestore's rules, so it can be stricter than Firestore, never knowingly looser.
+
+## ADR-041 Job actions are optimistic, in place, and read pending writes as estimates
+
+**Context:** In v0.5.2 a 👍 or Save made the job vanish for the length of its own write and the Jobs list reload. The client SDK shows a write at once (latency compensation), but a `serverTimestamp()` field that the server hasn't stamped reads as `null` by default. `updatedAt`, `appliedAt` and `feedback.at` are `z.date()`, so `JobSchema` failed, `parseJobs` dropped the job from Today's live lists and `watchJob` showed "couldn't be read" (`jobs.invalid`, twice: list and sheet). `tests/rules/jobs.rules.test.ts` reproduces it against the emulator.
+
+**Decision:** Every job read goes through `readJob` (`services/job-read.ts`), which calls `data({ serverTimestamps: 'estimate' })`, so a pending stamp is the local time until the server confirms. A job that still fails the schema is logged with the failing field paths, never values (job text is untrusted and may be personal).
+
+Actions run through `performJobAction` (`features/jobs/actions.ts`): show the result (`onPatch`), write, and on refusal call `onPatch` with the old job and show the error. `onCommitted` fires only on confirmation and refreshes the counts (tiles, agreement). Nothing reloads the list: Today's lists are live, and the Jobs list swaps one job in place, so loaded pages, scroll and focus stay. One write per job at a time, so a second press can't send a write built from stale data.
+
+A toast (`lib/toast.ts`, a one-slot store) confirms each action after the server accepts it. The always-mounted live region is in the main bundle; the card is a lazy chunk. Undo is offered for status changes except out of `applied` (going back would stamp a new applied date), and never for a rating: the rules cannot remove one, so a rating is changed by rating again. Ratings show their state as filled (not only `aria-pressed`).
+
+Consequences: an edited job can leave a filtered Jobs list only on the next load, not at once. The toast's Undo is reachable by keyboard from lists but not from inside an open sheet (focus is trapped there; the sheet has its own Unsave, Unskip and Undo applied buttons).

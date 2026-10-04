@@ -2,6 +2,17 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [0.5.3]
+### Fixed
+- **A job no longer vanishes while its own write is pending** (ADR-041). Pressing 👍 or Save made the local snapshot carry `null` for the server-stamped fields (`updatedAt`, `appliedAt`, `feedback.at`), which failed the schema, so Today's lists dropped the job and the sheet said it couldn't be read (`jobs.invalid` logged twice). All job reads now use estimated server timestamps. The agreement read does too.
+- **Actions no longer reload the Jobs list.** The row and the sheet update in place; scroll, keyboard focus and loaded pages stay. If the write is refused, the job goes back to how it was and the error shows. "Load more" can no longer append a job twice, and an edit made while it loads is kept.
+- **Rating buttons show the current rating** as filled, and can be changed (👎 reopens the form with the earlier note and expected verdict; pressing the selected 👍 again does nothing).
+
+### Added
+- **A toast after each action**: Saved, Marked applied, Skipped, Rated 👍, Rated 👎, with Undo for status changes (not out of applied, not for ratings). A polite live region that never takes focus, above the bottom tabs on a phone; the card is a lazy chunk.
+- `jobs.invalid` now logs the failing field names (never values).
+- Tests: the emulator reproduction of the pending snapshot, `readJob`, the optimistic builders, `performJobAction` (patch, rollback, busy, toasts, Undo), the toast host, list focus, in-place Jobs list, rating state.
+
 ## [0.5.2]
 ### Fixed
 - **Events can no longer describe a change that didn't happen** (ADR-038). The rules now require a status event to move between two different statuses with the job's own verdict, and a rating event to match a rating written in the same batch (verdict, answer and expected verdict). Before, a standalone event matching the job's current state was accepted.
