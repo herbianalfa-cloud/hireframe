@@ -253,7 +253,7 @@ gcloud run services get-iam-policy scheduledscan --region=europe-west2 --flatten
 **Step 11.** **Jobs** → click a job.
 - a) Press 👎 with a note and "should have been: Near miss".
 - b) Open an Apply job → **Mark applied**.
-- c) **System**: agreement shows 1 rated and 1 applied.
+- c) **System**: agreement shows 2 rated and 2 applied (the seed already has one of each).
 - d) Click into the list and press `j`, `k`, `a`.
 
 **Step 12.** At phone width: bottom tabs show, and Job detail opens full screen.

@@ -10,6 +10,12 @@ import { EmptyPage, MorePage, NotFoundPage } from './pages';
 import { Shell } from './Shell';
 
 // Screens load on first visit (ADR-021), so the shell stays small.
+const TodayPage = lazy(() =>
+  import('@/features/today/TodayPage').then((module) => ({ default: module.TodayPage })),
+);
+const JobsPage = lazy(() =>
+  import('@/features/jobs/JobsPage').then((module) => ({ default: module.JobsPage })),
+);
 const ProfilePage = lazy(() =>
   import('@/features/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })),
 );
@@ -33,6 +39,8 @@ const screen = (page: ReactNode) => () => <Suspense fallback={<ScreenLoading />}
 
 /** Screens that are built; every other nav item shows its designed empty state. */
 const PAGES: Readonly<Record<string, () => ReactNode>> = {
+  '/': screen(<TodayPage />),
+  '/jobs': screen(<JobsPage />),
   '/profile': screen(<ProfilePage />),
   '/criteria': screen(<CriteriaPage />),
   '/system': screen(<SystemPage />),

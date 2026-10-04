@@ -22,6 +22,9 @@ import {
   type SourceView,
 } from '@/services/system';
 
+import { AgreementLine } from '@/features/jobs/AgreementLine';
+import { SpendMeter } from '@/features/today/SpendMeter';
+
 import { useBrokenBoards, useJobCount, useRecentRuns, useSources } from './hooks';
 import {
   errorText,
@@ -33,6 +36,7 @@ import {
   SOURCE_LABELS,
   SOURCE_STATUS_LABELS,
   STOP_TEXT,
+  systemAlerts,
 } from './labels';
 
 const TIME_FORMAT = new Intl.DateTimeFormat('en-GB', {
@@ -100,7 +104,7 @@ function ScanNowCard({ onFinished }: { onFinished: () => void }) {
         <div>
           <h2 className="text-sm font-medium">Scan now</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Fetches every source and adds new jobs. Verdicts arrive with the funnel (M4).
+            Fetches every source, adds new jobs and judges them through the funnel.
           </p>
         </div>
         <Button
@@ -147,6 +151,41 @@ function pausedUntil(view: SourceView, now: Date): Date | null {
     .map((pause) => pause.until)
     .filter((until) => until.getTime() > now.getTime());
   return ahead.length ? new Date(Math.max(...ahead.map((until) => until.getTime()))) : null;
+}
+
+/** Things that need attention, from source health and the latest run (PRD R12). */
+function Alerts() {
+  const sources = useSources();
+  const runs = useRecentRuns();
+  if (sources.status !== 'ready' || runs.status !== 'ready') return null;
+  const alerts = systemAlerts({ sources: sources.data, runs: runs.data, now: new Date() });
+  if (alerts.length === 0) return null;
+  return (
+    <section aria-labelledby="alerts-title" className="mt-6">
+      <h2 id="alerts-title" className="text-sm font-medium">
+        Needs attention
+      </h2>
+      <ul className="mt-2 space-y-2">
+        {alerts.map((alert) => (
+          <li
+            key={alert.id}
+            className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${
+              alert.level === 'danger'
+                ? 'border-danger/40 bg-danger/10 text-danger'
+                : 'border-verdict-near-miss/40 bg-verdict-near-miss/10 text-verdict-near-miss'
+            }`}
+          >
+            {alert.level === 'danger' ? (
+              <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            )}
+            {alert.text}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function SourceCard({ view }: { view: SourceView }) {
@@ -383,8 +422,8 @@ function RecentRuns() {
 
 /**
  * System (PRD R12): Scan now, source health and recent runs (M3, ADR-029), with each run's
- * funnel counts per stage, cost and spend warnings (M4). The spend meter and error alerts
- * arrive in M5.
+ * funnel counts per stage, cost and spend warnings (M4), then the spend meter, verdict
+ * agreement and error alerts (M5).
  */
 export function SystemPage() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -402,6 +441,18 @@ export function SystemPage() {
       <p className="mt-4 text-sm text-muted-foreground">
         {jobCount === null ? 'Jobs stored: …' : `Jobs stored: ${String(jobCount)}`}
       </p>
+      <Alerts />
+      <section aria-labelledby="spend-title" className="mt-8">
+        <h2 id="spend-title" className="text-sm font-medium">
+          AI spend this month
+        </h2>
+        <div className="mt-3 max-w-sm rounded-lg border bg-surface p-4">
+          <SpendMeter />
+        </div>
+        <div className="mt-3">
+          <AgreementLine refreshKey={refreshKey} />
+        </div>
+      </section>
       <section aria-labelledby="sources-title" className="mt-8">
         <h2 id="sources-title" className="text-sm font-medium">
           Sources

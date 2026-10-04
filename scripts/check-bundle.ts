@@ -11,7 +11,7 @@ import { gzipSync } from 'node:zlib';
 
 const DIST = 'web/dist';
 const MAX_CHUNK_BYTES = 500 * 1000;
-const MAX_INITIAL_GZIP_BYTES = 310 * 1000;
+const MAX_INITIAL_GZIP_BYTES = 300 * 1000;
 
 const kB = (bytes: number) => `${(bytes / 1000).toFixed(1)} kB`;
 const failures: string[] = [];

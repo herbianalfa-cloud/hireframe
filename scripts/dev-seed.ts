@@ -65,11 +65,14 @@ export type RestValue =
   | { integerValue: string }
   | { doubleValue: number }
   | { booleanValue: boolean }
+  | { nullValue: null }
   | { timestampValue: string }
   | { arrayValue: { values: RestValue[] } }
   | { mapValue: { fields: Record<string, RestValue> } };
 
 export function toRestValue(value: unknown): RestValue {
+  // typeof null is 'object', so null must be handled before the map case.
+  if (value === null) return { nullValue: null };
   if (typeof value === 'string') return { stringValue: value };
   if (typeof value === 'boolean') return { booleanValue: value };
   if (typeof value === 'number') {
@@ -77,7 +80,7 @@ export function toRestValue(value: unknown): RestValue {
   }
   if (value instanceof Date) return { timestampValue: value.toISOString() };
   if (Array.isArray(value)) return { arrayValue: { values: value.map(toRestValue) } };
-  if (typeof value === 'object' && value !== null) {
+  if (typeof value === 'object') {
     return { mapValue: { fields: toRestFields(value as Record<string, unknown>) } };
   }
   throw new Error(`Unsupported seed value: ${typeof value}`);

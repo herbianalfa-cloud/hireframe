@@ -185,7 +185,7 @@ Context: the M2 web build was one 1.08 MB chunk (Vite's warning threshold is 500
 - Profile and Criteria screens load with `React.lazy` on first visit, with a skeleton fallback.
 - The Functions and Storage SDKs load on first use (`getFunctionsClient`, `getStorageClient` in `services/firebase.ts`); the shell only needs app, auth, App Check and Firestore.
 - Vendor chunks through Rolldown's `output.codeSplitting.groups` (Vite 8 deprecates `manualChunks`): `react`, `firestore`, `firebase` (app, auth, App Check), `zod`. They change less often than app code, so they stay cached across deploys. The Firebase patterns name only the eager packages, because a group also pulls in the dependencies of what it matches.
-- `npm run check:bundle` (CI, after build) fails if any chunk is over 500 kB or the initial JS is over 310 kB gzip.
+- `npm run check:bundle` (CI, after build) fails if any chunk is over 500 kB or the initial JS is over 300 kB gzip (310 kB until M5).
 
 Consequences: initial JS went from 1,083 kB to about 974 kB minified (326 to about 292 kB gzip), and the largest chunk is Firestore at about 472 kB. Firestore and Auth are needed before the first screen (owner check), so they can't be deferred without changing the sign-in flow.
 

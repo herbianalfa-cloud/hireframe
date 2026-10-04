@@ -21,6 +21,7 @@ import {
   linkedInJobDocuments,
   ownerAccountBody,
   profileSeedDocuments,
+  restDocument,
   toRestValue,
   usageSeedDocument,
 } from './dev-seed.ts';
@@ -161,5 +162,95 @@ describe('dev dashboard seed (M5)', () => {
     const { month, data } = usageSeedDocument(now);
     expect(month).toBe('2026-10');
     expect(UsageSchema.safeParse(data).success).toBe(true);
+  });
+});
+
+/** Decodes a Firestore REST value back to plain data, the way the emulator reads it. */
+function fromRest(value: Record<string, unknown>): unknown {
+  const [type, inner] = Object.entries(value)[0] ?? [];
+  switch (type) {
+    case 'stringValue':
+    case 'booleanValue':
+    case 'doubleValue':
+      return inner;
+    case 'nullValue':
+      return null;
+    case 'integerValue':
+      return Number(inner);
+    case 'timestampValue':
+      return new Date(inner as string);
+    case 'arrayValue':
+      return ((inner as { values?: Record<string, unknown>[] }).values ?? []).map(fromRest);
+    case 'mapValue':
+      return fromRestFields((inner as { fields?: Record<string, Record<string, unknown>> }).fields);
+    default:
+      throw new Error(`unknown REST type ${String(type)}`);
+  }
+}
+
+function fromRestFields(fields: Record<string, Record<string, unknown>> | undefined) {
+  return Object.fromEntries(Object.entries(fields ?? {}).map(([k, v]) => [k, fromRest(v)]));
+}
+
+/** Plain data with `undefined` keys dropped, which is what restDocument writes. */
+const defined = (value: unknown): unknown =>
+  JSON.parse(JSON.stringify(value, (_k, v: unknown) => v)) as unknown;
+
+describe('seed → Firestore REST conversion', () => {
+  it('converts null, nested maps, arrays, numbers and timestamps with the right REST types', () => {
+    const when = new Date('2026-10-14T08:00:00Z');
+    expect(toRestValue(null)).toEqual({ nullValue: null });
+    expect(toRestValue(3)).toEqual({ integerValue: '3' });
+    expect(toRestValue(2.5)).toEqual({ doubleValue: 2.5 });
+    expect(toRestValue(when)).toEqual({ timestampValue: '2026-10-14T08:00:00.000Z' });
+    expect(toRestValue([null, { a: [1, { b: null }] }])).toEqual({
+      arrayValue: {
+        values: [
+          { nullValue: null },
+          {
+            mapValue: {
+              fields: {
+                a: {
+                  arrayValue: {
+                    values: [
+                      { integerValue: '1' },
+                      { mapValue: { fields: { b: { nullValue: null } } } },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    expect(() => toRestValue(() => 1)).toThrow(/Unsupported seed value/);
+    expect(() => toRestValue(undefined)).toThrow(/Unsupported seed value/);
+  });
+
+  it('converts every seeded job, description and usage document, and reads back unchanged', () => {
+    const now = new Date('2026-10-14T08:00:00Z');
+    const documents = [
+      ...devJobDocuments(now).flatMap(({ id, job, description }) => [
+        { name: `jobs/${id}`, data: job },
+        { name: `jobs/${id}/description/raw`, data: description },
+      ]),
+      { name: 'usage', data: usageSeedDocument(now).data },
+    ];
+    expect(documents.length).toBeGreaterThan(24);
+    for (const { name, data } of documents) {
+      const converted = restDocument(data);
+      const back = fromRestFields(converted.fields);
+      // Dates round-trip as Dates; everything else as plain JSON data.
+      expect(JSON.stringify(back), name).toBe(JSON.stringify(defined(data)));
+    }
+  });
+
+  it('builds every other seed document (config, criteria, profile, LinkedIn job) without throwing', () => {
+    const now = new Date('2026-10-14T08:00:00Z');
+    expect(() => appConfigDocument(now)).not.toThrow();
+    expect(() => criteriaSeedDocuments(now)).not.toThrow();
+    expect(() => profileSeedDocuments(now)).not.toThrow();
+    expect(() => linkedInJobDocuments(now)).not.toThrow();
   });
 });

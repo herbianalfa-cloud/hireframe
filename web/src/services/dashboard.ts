@@ -1,6 +1,7 @@
 import {
   COLLECTIONS,
   DEFAULT_MONTHLY_CAP_PENCE,
+  DOCS,
   JobSchema,
   londonDayStart,
   londonWeekStart,
@@ -20,6 +21,7 @@ import {
   collection,
   doc,
   getCountFromServer,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -33,7 +35,7 @@ import {
 
 import { getFirebase } from './firebase';
 import { parseJobs, type JobView } from './jobs';
-import { logError } from './log';
+import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
@@ -134,6 +136,42 @@ export interface SpendView {
   untouched: boolean;
 }
 
+/**
+ * The cap the meter shows: `config/app.monthlyCapPence` (the console override the functions
+ * enforce), else the cap stored on this month's usage document, else the default.
+ */
+export function resolveCapPence(configCap: number | undefined, usageCap: number | undefined) {
+  return configCap ?? usageCap ?? DEFAULT_MONTHLY_CAP_PENCE;
+}
+
+/** Builds the meter from a usage document's data (null when the month has none yet). */
+export function spendViewFrom(usageData: unknown, configCap: number | undefined): SpendView | null {
+  if (usageData === null) {
+    return {
+      meter: spendMeter(0, resolveCapPence(configCap, undefined)),
+      untouched: true,
+    };
+  }
+  const parsed = UsageSchema.safeParse(timestampsToDates(usageData));
+  if (!parsed.success) return null;
+  return {
+    meter: spendMeter(parsed.data.spendPence, resolveCapPence(configCap, parsed.data.capPence)),
+    untouched: false,
+  };
+}
+
+/** `config/app.monthlyCapPence`, or undefined when unset or unreadable (the meter then falls back). */
+async function readConfiguredCap(db: Firestore): Promise<number | undefined> {
+  try {
+    const snapshot = await withTimeout(getDoc(doc(db, DOCS.appConfig)), READ_TIMEOUT_MS, 'config');
+    const cap: unknown = snapshot.data()?.monthlyCapPence;
+    return typeof cap === 'number' && Number.isInteger(cap) && cap >= 0 ? cap : undefined;
+  } catch (error) {
+    logError('dashboard.config_failed', { code: errorCode(error) ?? 'unknown' });
+    return undefined;
+  }
+}
+
 /** This month's spend against the cap, live (PRD R11). */
 export function watchSpend(
   now: Date,
@@ -143,31 +181,17 @@ export function watchSpend(
   return listen(
     async () => {
       const { db } = await getFirebase();
+      const configCap = await readConfiguredCap(db);
       return onSnapshot(
         doc(db, PATHS.usage(monthKey(now))),
         (snapshot) => {
-          if (!snapshot.exists()) {
-            callback({
-              status: 'ready',
-              data: { meter: spendMeter(0, DEFAULT_MONTHLY_CAP_PENCE), untouched: true },
-              invalid: 0,
-            });
-            return;
-          }
-          const parsed = UsageSchema.safeParse(timestampsToDates(snapshot.data()));
-          if (!parsed.success) {
+          const view = spendViewFrom(snapshot.exists() ? snapshot.data() : null, configCap);
+          if (!view) {
             logError('dashboard.usage_invalid', {});
             callback({ status: 'error', message: "This month's spend couldn't be read." });
             return;
           }
-          callback({
-            status: 'ready',
-            data: {
-              meter: spendMeter(parsed.data.spendPence, parsed.data.capPence),
-              untouched: false,
-            },
-            invalid: 0,
-          });
+          callback({ status: 'ready', data: view, invalid: 0 });
         },
         (error) => {
           logError('dashboard.usage_failed', { code: error.code });

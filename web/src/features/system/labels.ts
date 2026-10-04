@@ -1,13 +1,15 @@
-import type {
-  FunnelSummary,
-  RescoreCounts,
-  Run,
-  RunStatus,
-  RunTrigger,
-  ScanNowResult,
-  ScanSourceId,
-  SourceStatus,
-  StopReason,
+import {
+  isRunStalled,
+  type FunnelSummary,
+  type RescoreCounts,
+  type Run,
+  type RunStatus,
+  type RunTrigger,
+  type ScanNowResult,
+  type ScanSourceId,
+  type SourceStatus,
+  type SourceHealth,
+  type StopReason,
 } from '@hireframe/shared';
 
 export const SOURCE_LABELS: Readonly<Record<ScanSourceId, string>> = {
@@ -147,4 +149,69 @@ export function scanResultText(result: ScanNowResult, now: Date): string {
   if (runStatus === 'succeeded') return summary;
   if (runStatus === 'failed') return `${summary} Every source failed; see below.`;
   return `${summary} Some sources had problems; see below.`;
+}
+
+export interface SystemAlert {
+  id: string;
+  level: 'warning' | 'danger';
+  text: string;
+}
+
+/**
+ * Error alerts for System (PRD R12), from what the screen already reads: failing sources, the
+ * latest run's outcome and its spend flags. Pure, so it is tested without Firestore.
+ */
+export function systemAlerts(input: {
+  sources: readonly { id: ScanSourceId; health: SourceHealth }[];
+  /** Newest first. */
+  runs: readonly { id: string; run: Run }[];
+  now: Date;
+}): SystemAlert[] {
+  const alerts: SystemAlert[] = [];
+  for (const { id, health } of input.sources) {
+    if (health.status !== 'failing' && health.status !== 'degraded') continue;
+    const why = errorText(health.lastErrorCode);
+    alerts.push({
+      id: `source:${id}`,
+      level: health.status === 'failing' ? 'danger' : 'warning',
+      text: `${SOURCE_LABELS[id]} is ${SOURCE_STATUS_LABELS[health.status].toLowerCase()}${
+        why ? `: ${why}` : ''
+      }.`,
+    });
+  }
+  const latest = input.runs[0];
+  if (latest) {
+    const { run } = latest;
+    if (isRunStalled(run, input.now)) {
+      alerts.push({
+        id: `run:${latest.id}`,
+        level: 'danger',
+        text: 'The latest run was stopped before it finished.',
+      });
+    } else if (run.status === 'failed') {
+      alerts.push({ id: `run:${latest.id}`, level: 'danger', text: 'The latest run failed.' });
+    } else if (run.status === 'partial') {
+      alerts.push({
+        id: `run:${latest.id}`,
+        level: 'warning',
+        text: 'The latest run finished only in part. Recent runs below has the detail.',
+      });
+    }
+    const flags = run.flags ?? [];
+    if (flags.includes('spend_80')) {
+      alerts.push({
+        id: 'spend:80',
+        level: 'warning',
+        text: '80% of the monthly AI cap is used.',
+      });
+    }
+    if (flags.includes('deep_pause')) {
+      alerts.push({
+        id: 'spend:pause',
+        level: 'warning',
+        text: 'Deep reads are paused near the monthly cap.',
+      });
+    }
+  }
+  return alerts;
 }
