@@ -1,7 +1,7 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
-import { jobActionErrorMessage, jobFilterSpec, parseJobs } from './jobs';
+import { jobActionErrorMessage, jobFilterSpec, parseJobs, rateJob, setJobStatus } from './jobs';
 
 const NOW = new Date('2026-10-14T09:00:00Z');
 
@@ -68,5 +68,23 @@ describe('jobActionErrorMessage', () => {
       'Only a judged job can be rated.',
     );
     expect(jobActionErrorMessage({ code: 'unavailable' })).toContain('Check your connection');
+  });
+});
+
+describe('job actions', () => {
+  const [parsed] = parseJobs([snapshot('job-1', stored)]).jobs;
+  if (!parsed) throw new Error('fixture does not parse');
+  const view = { id: 'job-1', job: parsed.job };
+
+  it('reject, rather than throw, when the builder refuses (so callers always get a message)', async () => {
+    await expect(setJobStatus({ ...view, raw: { status: 'interview' } }, 'saved')).rejects.toThrow(
+      'can’t be changed',
+    );
+    await expect(setJobStatus({ ...view, raw: { status: 'new' } }, 'new')).rejects.toThrow(
+      'already has that status',
+    );
+    await expect(rateJob({ ...view, raw: { status: 'new' } }, { agree: true })).rejects.toThrow(
+      'Only a judged job',
+    );
   });
 });
