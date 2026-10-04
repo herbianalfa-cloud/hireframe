@@ -37,6 +37,14 @@ describe('AppRoutes', () => {
     expect(await screen.findByRole('heading', { name: heading })).toBeTruthy();
   });
 
+  it('has the toast live region on every screen, outside the app root', async () => {
+    renderAt('/jobs');
+    await screen.findByRole('heading', { name: 'Jobs screen' });
+    expect(
+      document.body.querySelector(':scope > [role="status"][data-toast-region]'),
+    ).not.toBeNull();
+  });
+
   it('keeps the empty state for screens not built yet', () => {
     renderAt('/lookup');
     expect(screen.getByText('Look up a job link')).toBeTruthy();

@@ -27,6 +27,7 @@ export function DialogContent({
   className,
   children,
   side = 'center',
+  onInteractOutside,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & { side?: 'center' | 'right' }) {
   return (
@@ -40,6 +41,13 @@ export function DialogContent({
             : 'inset-y-0 right-0 w-full max-w-md border-y-0 border-r-0',
           className,
         )}
+        onInteractOutside={(event) => {
+          // A toast's Undo sits outside the dialog; pressing it must not close the dialog.
+          if (event.target instanceof Element && event.target.closest('[data-toast-region]')) {
+            event.preventDefault();
+          }
+          onInteractOutside?.(event);
+        }}
         {...props}
       >
         {children}
