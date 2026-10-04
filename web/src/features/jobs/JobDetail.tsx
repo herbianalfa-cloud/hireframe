@@ -18,8 +18,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate } from '@/lib/format';
 import { useFacts } from '@/features/profile/hooks';
-import { jobActionErrorMessage, rateJob, setJobStatus, type JobView } from '@/services/jobs';
+import type { JobView } from '@/services/jobs';
 
+import { performJobAction, type JobAction, type JobActionHandlers } from './actions';
 import { SourceAttribution } from './AdzunaAttribution';
 import { FeedbackDialog } from './FeedbackDialog';
 import { useJob, useJobDescription } from './hooks';
@@ -148,11 +149,11 @@ function DescriptionText({ jobId }: { jobId: string }) {
 
 function Actions({
   view,
-  onChanged,
+  handlers,
   onRateDown,
 }: {
   view: JobView;
-  onChanged: () => void;
+  handlers: JobActionHandlers;
   onRateDown: () => void;
 }) {
   const { job } = view;
@@ -160,21 +161,16 @@ function Actions({
   const [error, setError] = useState<string>();
   const serverOwned = !['new', 'saved', 'applied', 'skipped'].includes(job.status);
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: JobAction) {
     setPending(true);
     setError(undefined);
-    try {
-      await action();
-      onChanged();
-    } catch (caught) {
-      setError(jobActionErrorMessage(caught));
-    } finally {
-      setPending(false);
-    }
+    const result = await performJobAction(view, action, handlers);
+    if (!result.ok && 'message' in result) setError(result.message);
+    setPending(false);
   }
 
   const to = (status: 'new' | 'saved' | 'applied' | 'skipped') => () =>
-    run(() => setJobStatus(view, status));
+    run({ kind: 'status', to: status });
 
   return (
     <div className="mt-6 border-t pt-4">
@@ -231,17 +227,21 @@ function Actions({
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Was this verdict right?</span>
           <Button
-            variant="secondary"
+            variant={job.feedback?.agree === true ? 'default' : 'secondary'}
             size="icon"
             aria-label="Verdict was right"
             aria-pressed={job.feedback?.agree === true}
             disabled={pending}
-            onClick={() => void run(() => rateJob(view, { agree: true }))}
+            onClick={() => {
+              // Already rated right on this verdict: nothing to change.
+              if (job.feedback?.agree === true && job.feedback.verdict === job.verdict) return;
+              void run({ kind: 'rate', input: { agree: true } });
+            }}
           >
             <ThumbsUp aria-hidden="true" />
           </Button>
           <Button
-            variant="secondary"
+            variant={job.feedback?.agree === false ? 'default' : 'secondary'}
             size="icon"
             aria-label="Verdict was wrong"
             aria-pressed={job.feedback?.agree === false}
@@ -281,7 +281,7 @@ function Actions({
   );
 }
 
-function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) {
+function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandlers }) {
   const { job } = view;
   const facts = useFacts();
   const [rating, setRating] = useState(false);
@@ -403,7 +403,7 @@ function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) 
 
       <Actions
         view={view}
-        onChanged={onChanged}
+        handlers={handlers}
         onRateDown={() => {
           setRating(true);
         }}
@@ -414,7 +414,7 @@ function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) 
           onClose={() => {
             setRating(false);
           }}
-          onSaved={onChanged}
+          handlers={handlers}
         />
       ) : null}
     </>
@@ -428,12 +428,12 @@ function JobBody({ view, onChanged }: { view: JobView; onChanged: () => void }) 
 export function JobDetail({
   jobId,
   onClose,
-  onChanged,
+  onPatch,
+  onCommitted,
 }: {
   jobId: string;
   onClose: () => void;
-  onChanged: () => void;
-}) {
+} & JobActionHandlers) {
   const state = useJob(jobId);
   return (
     <Dialog
@@ -467,7 +467,7 @@ export function JobDetail({
             </p>
           </>
         ) : (
-          <JobBody view={state.data} onChanged={onChanged} />
+          <JobBody view={state.data} handlers={{ onPatch, onCommitted }} />
         )}
       </DialogContent>
     </Dialog>

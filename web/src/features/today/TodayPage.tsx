@@ -103,13 +103,13 @@ function TodaySection({
   list,
   now,
   onOpen,
-  onChanged,
+  onCommitted,
   onReady,
 }: {
   list: TodayListId;
   now: Date;
   onOpen: (jobId: string) => void;
-  onChanged: () => void;
+  onCommitted: () => void;
   onReady?: () => void;
 }) {
   const state = useTodayList(list);
@@ -150,7 +150,7 @@ function TodaySection({
             now={now}
             showVerdict={false}
             onOpen={onOpen}
-            onChanged={onChanged}
+            onCommitted={onCommitted}
             footer={
               state.data.length === TODAY_LIST_SIZE ? (
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -224,7 +224,7 @@ export function TodayPage() {
           list={list}
           now={now}
           onOpen={open}
-          onChanged={changed}
+          onCommitted={changed}
           {...(list === 'apply' ? { onReady: markApplyReady } : {})}
         />
       ))}
@@ -234,7 +234,7 @@ export function TodayPage() {
           onClose={() => {
             setParams({});
           }}
-          onChanged={changed}
+          onCommitted={changed}
         />
       ) : null}
     </section>

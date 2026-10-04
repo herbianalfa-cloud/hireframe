@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadJobDescription, rateJob, setJobStatus, watchJob, type JobView } from '@/services/jobs';
 
+import { ToastHost } from '@/components/ui/toast-host';
+import { dismissToast, getToast } from '@/lib/toast';
+
 import { makeView } from './fixtures';
 import { JobDetail } from './JobDetail';
 
@@ -39,9 +42,10 @@ function show(overrides: Partial<Job> = {}): JobView {
 
 function open() {
   const onClose = vi.fn();
-  const onChanged = vi.fn();
-  render(<JobDetail jobId="job1" onClose={onClose} onChanged={onChanged} />);
-  return { onClose, onChanged };
+  const onCommitted = vi.fn();
+  const onPatch = vi.fn<(view: JobView) => void>();
+  render(<JobDetail jobId="job1" onClose={onClose} onPatch={onPatch} onCommitted={onCommitted} />);
+  return { onClose, onCommitted, onPatch };
 }
 
 const DEEP: NonNullable<Job['deep']> = {
@@ -201,12 +205,49 @@ describe('JobDetail', () => {
 
   it('marks a job applied and tells the page', async () => {
     const view = show();
-    const { onChanged } = open();
+    const { onCommitted } = open();
     await userEvent.click(screen.getByRole('button', { name: 'Mark applied' }));
     await waitFor(() => {
-      expect(onChanged).toHaveBeenCalled();
+      expect(onCommitted).toHaveBeenCalled();
     });
     expect(setJobStatus).toHaveBeenCalledWith(view, 'applied');
+  });
+
+  it('rolls the job back in the page and shows the error when an action is refused', async () => {
+    const view = show();
+    vi.mocked(setJobStatus).mockRejectedValue(new Error('This job changed since you opened it.'));
+    const { onPatch, onCommitted } = open();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('changed');
+    expect(onPatch.mock.calls[0]?.[0].job.status).toBe('saved');
+    expect(onPatch.mock.calls[1]?.[0]).toBe(view);
+    expect(onCommitted).not.toHaveBeenCalled();
+  });
+
+  it('toasts the action, and Undo in the toast reverts it without closing the sheet', async () => {
+    show();
+    const onClose = vi.fn();
+    render(
+      <>
+        <JobDetail jobId="job1" onClose={onClose} />
+        <ToastHost />
+      </>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    const toast = await screen.findByText('Saved');
+    // The toast announces without moving focus out of the sheet.
+    expect(screen.getByRole('status').contains(toast)).toBe(true);
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+    // Radix blocks the pointer outside the sheet; the toast opts back in (pointer-events-auto).
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(setJobStatus).toHaveBeenCalledTimes(2);
+    });
+    expect(vi.mocked(setJobStatus).mock.calls[1]?.[1]).toBe('new');
+    expect(onClose).not.toHaveBeenCalled();
+    const current = getToast();
+    if (current) dismissToast(current.id);
   });
 
   it('offers Undo on an applied job', () => {
@@ -233,6 +274,65 @@ describe('JobDetail', () => {
     await waitFor(() => {
       expect(rateJob).toHaveBeenCalledWith(view, { agree: true });
     });
+  });
+
+  it('shows the current rating as selected, and lets it change', async () => {
+    const view = show({
+      feedback: { agree: true, verdict: 'apply', at: new Date('2026-10-14T10:00:00Z') },
+    });
+    open();
+    const up = screen.getByRole('button', { name: 'Verdict was right' });
+    const down = screen.getByRole('button', { name: 'Verdict was wrong' });
+    expect(up.getAttribute('aria-pressed')).toBe('true');
+    expect(down.getAttribute('aria-pressed')).toBe('false');
+    // The selected one looks selected (filled), not just announced.
+    expect(up.className).toContain('bg-accent');
+    expect(down.className).not.toContain('bg-accent');
+    // Pressing the selected 👍 again changes nothing.
+    await userEvent.click(up);
+    expect(rateJob).not.toHaveBeenCalled();
+    // Changing to 👎 opens the form, which starts from nothing for a 👍.
+    await userEvent.click(down);
+    const dialog = await screen.findByRole('dialog', { name: /what was wrong/i });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save rating' }));
+    await waitFor(() => {
+      expect(rateJob).toHaveBeenCalledWith(view, { agree: false, note: '', expected: undefined });
+    });
+  });
+
+  it('can change 👎 back to 👍', async () => {
+    const view = show({
+      feedback: { agree: false, verdict: 'apply', at: new Date('2026-10-14T10:00:00Z') },
+    });
+    open();
+    expect(screen.getByRole('button', { name: 'Verdict was wrong' }).className).toContain(
+      'bg-accent',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Verdict was right' }));
+    await waitFor(() => {
+      expect(rateJob).toHaveBeenCalledWith(view, { agree: true });
+    });
+  });
+
+  it('starts the 👎 form from the earlier note and expected verdict', async () => {
+    show({
+      feedback: {
+        agree: false,
+        verdict: 'apply',
+        note: 'Needs dbt',
+        expected: 'near_miss',
+        at: new Date('2026-10-14T10:00:00Z'),
+      },
+    });
+    open();
+    await userEvent.click(screen.getByRole('button', { name: 'Verdict was wrong' }));
+    const dialog = await screen.findByRole('dialog', { name: /what was wrong/i });
+    expect(within(dialog).getByRole<HTMLTextAreaElement>('textbox', { name: /note/i }).value).toBe(
+      'Needs dbt',
+    );
+    expect(within(dialog).getByLabelText<HTMLSelectElement>(/should have been/i).value).toBe(
+      'near_miss',
+    );
   });
 
   it('asks for a note and the expected verdict on 👎', async () => {
@@ -284,14 +384,14 @@ describe('JobDetail', () => {
       callback({ status: 'ready', data: null, invalid: 0 });
       return () => undefined;
     });
-    const { unmount } = render(<JobDetail jobId="x" onClose={vi.fn()} onChanged={vi.fn()} />);
+    const { unmount } = render(<JobDetail jobId="x" onClose={vi.fn()} onCommitted={vi.fn()} />);
     expect(screen.getByRole('heading', { name: 'Job not found' })).toBeDefined();
     unmount();
     vi.mocked(watchJob).mockImplementation((_id, callback) => {
       callback({ status: 'error', message: 'Could not load this job.' });
       return () => undefined;
     });
-    render(<JobDetail jobId="x" onClose={vi.fn()} onChanged={vi.fn()} />);
+    render(<JobDetail jobId="x" onClose={vi.fn()} onCommitted={vi.fn()} />);
     expect(screen.getByRole('alert').textContent).toContain('Could not load');
   });
 

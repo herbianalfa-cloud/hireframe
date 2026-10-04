@@ -1,6 +1,8 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
-import { jobActionErrorMessage, setJobStatus, type JobView } from '@/services/jobs';
+import type { JobView } from '@/services/jobs';
+
+import { performJobAction, type JobActionHandlers } from './actions';
 
 import { ageText, scoreText } from './labels';
 import { SourceAttribution } from './AdzunaAttribution';
@@ -70,7 +72,8 @@ export function JobList({
   now,
   showVerdict = true,
   onOpen,
-  onChanged,
+  onPatch,
+  onCommitted,
   footer,
 }: {
   jobs: readonly JobView[];
@@ -78,11 +81,31 @@ export function JobList({
   now: Date;
   showVerdict?: boolean;
   onOpen: (jobId: string) => void;
-  onChanged: () => void;
   footer?: ReactNode;
-}) {
+} & JobActionHandlers) {
   const [error, setError] = useState<string>();
+  const listRef = useRef<HTMLUListElement>(null);
   const find = useCallback((id: string) => jobs.find((view) => view.id === id), [jobs]);
+
+  // A row can leave a live list (a skipped job drops out of Today). If focus was on it, hand
+  // focus to the row that took its place, so keyboard use isn't sent back to the page top.
+  const seen = useRef<{ ids: string[]; focused: string | undefined }>({
+    ids: [],
+    focused: undefined,
+  });
+  useLayoutEffect(() => {
+    const ids = jobs.map((view) => view.id);
+    const { ids: before, focused } = seen.current;
+    if (focused && !ids.includes(focused) && document.activeElement === document.body) {
+      const id = ids[Math.min(before.indexOf(focused), ids.length - 1)];
+      if (id)
+        listRef.current?.querySelector<HTMLElement>(`[data-job-id="${CSS.escape(id)}"]`)?.focus();
+      seen.current.focused = id;
+    }
+    seen.current.ids = ids;
+  }, [jobs]);
+  const rowOf = (target: EventTarget) =>
+    (target as HTMLElement).closest<HTMLElement>('[data-job-row]')?.dataset.jobId;
 
   const act = useCallback(
     (id: string, to: 'applied' | 'skipped') => {
@@ -91,11 +114,13 @@ export function JobList({
       // Skipping an applied job would clear its applied stamps; the detail sheet hides Skip there.
       if (to === 'skipped' && view.job.status === 'applied') return;
       setError(undefined);
-      setJobStatus(view, to).then(onChanged, (caught: unknown) => {
-        setError(jobActionErrorMessage(caught));
-      });
+      void performJobAction(view, { kind: 'status', to }, { onPatch, onCommitted }).then(
+        (result) => {
+          if (!result.ok && 'message' in result) setError(result.message);
+        },
+      );
     },
-    [find, onChanged],
+    [find, onPatch, onCommitted],
   );
   const keys = useListKeys({
     onApplied: (id) => {
@@ -113,8 +138,16 @@ export function JobList({
   return (
     <div>
       <ul
+        ref={listRef}
         aria-label={label}
         className="divide-y rounded-lg border bg-surface p-1 [&>li]:py-0.5"
+        onFocus={(event) => {
+          seen.current.focused = rowOf(event.target);
+        }}
+        onBlur={(event) => {
+          // Blurring because the row was removed keeps the memory; clicking away clears it.
+          if ((event.target as HTMLElement).isConnected) seen.current.focused = undefined;
+        }}
         {...keys}
       >
         {jobs.map((view) => (

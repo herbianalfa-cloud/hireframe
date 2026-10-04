@@ -58,10 +58,10 @@ interface Loaded {
 }
 
 /**
- * Pages of jobs for a filter set. Changing the filters starts over; `reloadKey` re-reads page one
- * in place (after an action) without flashing the skeleton.
+ * Pages of jobs for a filter set. Changing the filters starts over. An action never reloads:
+ * `patch` swaps one job in place, so loaded pages, scroll and focus stay as they are.
  */
-export function useJobsList(filters: JobFilters, reloadKey: number) {
+export function useJobsList(filters: JobFilters) {
   const { verdict, status, needsReview } = filters;
   const sig = `${verdict ?? ''}|${status ?? ''}|${String(needsReview ?? false)}`;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -92,7 +92,7 @@ export function useJobsList(filters: JobFilters, reloadKey: number) {
     return () => {
       cancelled = true;
     };
-  }, [sig, verdict, status, needsReview, reloadKey]);
+  }, [sig, verdict, status, needsReview]);
 
   const loadMore = useCallback(() => {
     if (loaded?.sig !== sig || !loaded.cursor || loadingMore) return;
@@ -106,16 +106,16 @@ export function useJobsList(filters: JobFilters, reloadKey: number) {
       loaded.cursor,
     ).then(
       (page) => {
-        setLoaded((previous) =>
-          previous?.sig === sig
-            ? {
-                ...previous,
-                jobs: [...previous.jobs, ...page.jobs],
-                invalid: previous.invalid + page.invalid,
-                cursor: page.cursor,
-              }
-            : previous,
-        );
+        setLoaded((previous) => {
+          if (previous?.sig !== sig) return previous;
+          const have = new Set(previous.jobs.map((view) => view.id));
+          return {
+            ...previous,
+            jobs: [...previous.jobs, ...page.jobs.filter((view) => !have.has(view.id))],
+            invalid: previous.invalid + page.invalid,
+            cursor: page.cursor,
+          };
+        });
         setLoadingMore(false);
       },
       () => {
@@ -123,6 +123,17 @@ export function useJobsList(filters: JobFilters, reloadKey: number) {
       },
     );
   }, [loaded, sig, loadingMore, verdict, status, needsReview]);
+
+  const patch = useCallback((view: JobView) => {
+    setLoaded((previous) =>
+      previous
+        ? {
+            ...previous,
+            jobs: previous.jobs.map((item) => (item.id === view.id ? view : item)),
+          }
+        : previous,
+    );
+  }, []);
 
   const state: JobsListState =
     loaded?.sig !== sig
@@ -136,7 +147,7 @@ export function useJobsList(filters: JobFilters, reloadKey: number) {
             more: loaded.cursor !== null,
             loadingMore,
           };
-  return { state, loadMore };
+  return { state, loadMore, patch };
 }
 
 export function useAgreement(refreshKey: number): LiveState<Agreement> {
