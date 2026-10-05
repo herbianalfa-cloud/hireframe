@@ -155,7 +155,10 @@ function StatusToggle({
   offLabel,
   disabled,
   onPress,
+  tone = 'accent',
 }: {
+  /** `apply` is the green Apply colour: solid when off, hollow when on. */
+  tone?: 'accent' | 'apply';
   icon: LucideIcon;
   on: boolean;
   onLabel: string;
@@ -165,7 +168,7 @@ function StatusToggle({
 }) {
   return (
     <Button
-      variant={on ? 'default' : 'secondary'}
+      variant={tone === 'apply' ? (on ? 'applyOutline' : 'apply') : on ? 'default' : 'secondary'}
       aria-pressed={on}
       disabled={disabled}
       onClick={onPress}
@@ -213,8 +216,9 @@ function Actions({
         <StatusToggle
           icon={CircleCheck}
           on={job.status === 'applied'}
-          onLabel="Undo applied"
-          offLabel="Mark applied"
+          tone="apply"
+          onLabel="Applied"
+          offLabel="Apply"
           disabled={pending || serverOwned}
           onPress={() => void to(job.status === 'applied' ? 'new' : 'applied')()}
         />

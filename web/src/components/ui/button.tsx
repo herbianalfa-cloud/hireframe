@@ -12,6 +12,10 @@ const buttonVariants = cva(
       variant: {
         default: 'bg-accent text-accent-foreground hover:bg-accent/90',
         secondary: 'border bg-surface-raised text-foreground hover:bg-surface-raised/70',
+        // Solid text uses the page background: 8:1 on the dark green, 5:1 on the light one.
+        apply: 'bg-verdict-apply text-background hover:bg-verdict-apply/90',
+        applyOutline:
+          'border border-verdict-apply bg-transparent text-verdict-apply hover:bg-verdict-apply/10',
         ghost: 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
         danger: 'border border-danger/50 bg-danger/10 text-danger hover:bg-danger/20',
       },

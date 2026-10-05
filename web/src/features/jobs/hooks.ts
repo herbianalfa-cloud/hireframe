@@ -1,15 +1,18 @@
 import type { Agreement } from '@hireframe/shared';
 import type { JobDescription } from '@hireframe/shared';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
+  JOBS_PAGE_SIZE,
   loadJobDescription,
   loadJobsPage,
+  loadJobsWindow,
   watchJob,
   type JobFilters,
   type JobsPage,
   type JobView,
 } from '@/services/jobs';
+import { filterJobs, sortJobs, type JobFilter, type JobSort } from './sort';
 import { loadAgreement } from '@/services/dashboard';
 import type { LiveState } from '@/services/profile';
 
@@ -46,7 +49,15 @@ export function useJobDescription(jobId: string): DescriptionState {
 export type JobsListState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; jobs: JobView[]; invalid: number; more: boolean; loadingMore: boolean };
+  | {
+      status: 'ready';
+      jobs: JobView[];
+      invalid: number;
+      more: boolean;
+      loadingMore: boolean;
+      /** A full read hit its cap, so older matching jobs may be missing. */
+      capped: boolean;
+    };
 
 interface Loaded {
   /** The filters this result is for; a result for other filters counts as loading. */
@@ -54,16 +65,19 @@ interface Loaded {
   jobs: JobView[];
   invalid: number;
   cursor: JobsPage['cursor'];
+  capped: boolean;
   failed: boolean;
 }
 
 /**
  * Pages of jobs for a filter set. Changing the filters starts over. An action never reloads:
  * `patch` swaps one job in place, so loaded pages, scroll and focus stay as they are.
+ * With `full`, one read loads the newest `JOBS_SORT_CAP` jobs instead, for sorting and
+ * filtering in the browser (ADR-044); there is no cursor then.
  */
-export function useJobsList(filters: JobFilters) {
+export function useJobsList(filters: JobFilters, { full = false }: { full?: boolean } = {}) {
   const { verdict, status, needsReview } = filters;
-  const sig = `${verdict ?? ''}|${status ?? ''}|${String(needsReview ?? false)}`;
+  const sig = `${verdict ?? ''}|${status ?? ''}|${String(needsReview ?? false)}|${full ? 'full' : 'paged'}`;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -74,25 +88,33 @@ export function useJobsList(filters: JobFilters) {
       ...(status ? { status } : {}),
       ...(needsReview ? { needsReview } : {}),
     };
-    loadJobsPage(current).then(
-      (page) => {
-        if (cancelled) return;
-        setLoaded({
-          sig,
+    const read = full
+      ? loadJobsWindow(current).then((window) => ({
+          jobs: window.jobs,
+          invalid: window.invalid,
+          cursor: null,
+          capped: window.capped,
+        }))
+      : loadJobsPage(current).then((page) => ({
           jobs: page.jobs,
           invalid: page.invalid,
           cursor: page.cursor,
-          failed: false,
-        });
+          capped: false,
+        }));
+    read.then(
+      (result) => {
+        if (!cancelled) setLoaded({ sig, ...result, failed: false });
       },
       () => {
-        if (!cancelled) setLoaded({ sig, jobs: [], invalid: 0, cursor: null, failed: true });
+        if (!cancelled) {
+          setLoaded({ sig, jobs: [], invalid: 0, cursor: null, capped: false, failed: true });
+        }
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [sig, verdict, status, needsReview]);
+  }, [sig, verdict, status, needsReview, full]);
 
   const loadMore = useCallback(() => {
     if (loaded?.sig !== sig || !loaded.cursor || loadingMore) return;
@@ -146,8 +168,35 @@ export function useJobsList(filters: JobFilters) {
             invalid: loaded.invalid,
             more: loaded.cursor !== null,
             loadingMore,
+            capped: loaded.capped,
           };
   return { state, loadMore, patch };
+}
+
+/**
+ * Filter and sort loaded jobs, showing `pageSize` at a time. Derived, so an optimistic patch
+ * re-sorts in place. The shown count starts over when the sort, a filter or the list's `scope`
+ * (verdict, status, review) changes, not on a patch.
+ */
+export function useSortedJobs(
+  jobs: readonly JobView[],
+  sort: JobSort,
+  filter: JobFilter,
+  scope: string,
+  pageSize: number = JOBS_PAGE_SIZE,
+) {
+  const { lane, gap } = filter;
+  const key = `${scope}|${sort}|${lane ?? ''}|${gap ?? ''}`;
+  const [shown, setShown] = useState({ key, count: pageSize });
+  const count = shown.key === key ? shown.count : pageSize;
+  const all = useMemo(
+    () => sortJobs(filterJobs(jobs, { lane, gap }), sort),
+    [jobs, sort, lane, gap],
+  );
+  const showMore = useCallback(() => {
+    setShown({ key, count: count + pageSize });
+  }, [key, count, pageSize]);
+  return { jobs: all.slice(0, count), total: all.length, hasMore: all.length > count, showMore };
 }
 
 export function useAgreement(refreshKey: number): LiveState<Agreement> {
