@@ -271,13 +271,17 @@ describe('JobDetail', () => {
   it.each([
     ['new', 'Save', 'Unsave', 'saved'],
     ['new', 'Skip', 'Unskip', 'skipped'],
-    ['new', 'Mark applied', 'Undo applied', 'applied'],
+    ['new', 'Mark applied', 'Applied', 'applied'],
   ] as const)('%s job: %s is one toggle that becomes %s', async (_from, off, on, target) => {
     show();
     const first = open();
     const button = screen.getByRole('button', { name: off });
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(button.className).not.toContain('bg-accent');
+    if (off === 'Mark applied') {
+      expect(button.className).toContain('bg-verdict-apply');
+      expect(button.className).not.toContain('border-verdict-apply');
+    }
     await userEvent.click(button);
     await waitFor(() => {
       expect(first.onCommitted).toHaveBeenCalled();
@@ -289,7 +293,7 @@ describe('JobDetail', () => {
   it.each([
     ['saved', 'Unsave', 'Save'],
     ['skipped', 'Unskip', 'Skip'],
-    ['applied', 'Undo applied', 'Mark applied'],
+    ['applied', 'Applied', 'Mark applied'],
   ] as const)(
     'a %s job shows %s as selected, and pressing it goes back to new',
     async (status, on, off) => {
@@ -297,7 +301,16 @@ describe('JobDetail', () => {
       const { onCommitted } = open();
       const button = screen.getByRole('button', { name: on });
       expect(button.getAttribute('aria-pressed')).toBe('true');
-      expect(button.className).toContain('bg-accent');
+      if (status === 'applied') {
+        // Hollow green with a check icon and the label, so colour is not the only signal.
+        expect(button.className).toContain('border-verdict-apply');
+        expect(button.className).toContain('text-verdict-apply');
+        expect(button.className).not.toContain('bg-verdict-apply ');
+        expect(button.querySelector('svg')).not.toBeNull();
+        expect(button.className).toContain('h-11');
+      } else {
+        expect(button.className).toContain('bg-accent');
+      }
       expect(screen.queryByRole('button', { name: off })).toBeNull();
       await userEvent.click(button);
       await waitFor(() => {
@@ -316,7 +329,7 @@ describe('JobDetail', () => {
         .getAllByRole('button')
         .filter((b) => b.hasAttribute('aria-pressed') && !b.hasAttribute('aria-label'));
       expect(toggles.map((b) => b.textContent)).toEqual([
-        status === 'applied' ? 'Undo applied' : 'Mark applied',
+        status === 'applied' ? 'Applied' : 'Mark applied',
         status === 'saved' ? 'Unsave' : 'Save',
         status === 'skipped' ? 'Unskip' : 'Skip',
       ]);
