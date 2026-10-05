@@ -454,6 +454,13 @@ describe('expiry sweep', () => {
     expect(JSON.stringify(failure)).not.toContain('index missing');
   });
 
+  it('logs no drift when every job the sweep reads is expired', async () => {
+    const store = memoryFunnelStore();
+    store.add('stale', queuedS2(20));
+    await run(deps(store, { limits: { s2MaxJobs: 0 } }));
+    expect(logs.some((l) => l.event === 'funnel.sweep_drift')).toBe(false);
+  });
+
   it('reports a clean sweep as not failed', async () => {
     const result = await run(deps(memoryFunnelStore()));
     expect(result.sweepFailed).toBe(false);
@@ -518,6 +525,9 @@ describe('expiry sweep', () => {
     const result = await run(deps(store, { limits: { s2MaxJobs: 0 } }));
     expect(store.get('drift').skip).toBeUndefined();
     expect(result.perStage.s2.expired).toBe(0);
+    expect(logs).toContainEqual(
+      expect.objectContaining({ event: 'funnel.sweep_drift', stage: 's2', kept: 1, read: 1 }),
+    );
   });
 });
 

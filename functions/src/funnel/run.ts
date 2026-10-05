@@ -416,13 +416,20 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   for (const stage of QUEUE_STAGES) {
     try {
       const stale = await store.staleQueued(stage, staleBefore, deps.limits.expireMaxJobs);
+      let kept = 0;
       for (const entry of stale) {
         // `sortAt` is a stored copy; the rule itself is the one S1 and the stages use.
-        if (!isExpired(entry.job, criteria, deps.now())) continue;
+        if (!isExpired(entry.job, criteria, deps.now())) {
+          kept += 1;
+          continue;
+        }
         (stage === 's2' ? s2 : s3).expired += 1;
         await write(entry.id, expiredPatch(stage, ctx()));
       }
       await flush();
+      // Kept jobs come back at the top of the same newest-first window every run, so enough of
+      // them would starve the older ones. Counted so that shows up before it matters (ADR-043).
+      if (kept > 0) log.warn('funnel.sweep_drift', { stage, kept, read: stale.length });
     } catch (error) {
       // Freeing the queue is housekeeping: a store error here must not stop the stages. Jobs
       // whose writes didn't land stay queued, and the next run sweeps them again.
