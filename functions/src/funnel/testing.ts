@@ -147,6 +147,17 @@ export function memoryFunnelStore(
       );
       return Promise.resolve(waiting.slice(0, limit));
     },
+    staleQueued: (stage, before, limit) =>
+      Promise.resolve(
+        list(
+          (job) =>
+            job.next === stage &&
+            job.sortAt !== undefined &&
+            job.sortAt.getTime() < before.getTime(),
+        )
+          .sort((a, b) => time(b.job.sortAt) - time(a.job.sortAt))
+          .slice(0, limit),
+      ),
     recentJobs: (since, limit) =>
       Promise.resolve(
         list((job) => job.firstSeenAt.getTime() >= since.getTime())

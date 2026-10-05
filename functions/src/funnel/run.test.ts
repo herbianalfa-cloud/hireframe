@@ -3,6 +3,7 @@ import {
   costPence,
   worstCasePence,
   type Job,
+  type JobTriage,
   type ModelPrice,
   type TokenCounts,
   type Usage,
@@ -357,6 +358,176 @@ describe('runFunnel', () => {
         (field) => !['title', 'company', 'url', 'status', 'feedback'].includes(field),
       ),
     ).toBe(true);
+  });
+});
+
+describe('expiry sweep', () => {
+  const TRIAGE: JobTriage = {
+    lane: 'primary',
+    seniority: 'junior',
+    blockers: [],
+    pass: true,
+    triageScore: 1,
+    note: 'A fit.',
+  };
+  const queuedS2 = (days: number) =>
+    testJob({ stage: 's1', next: 's2', sortAt: daysAgo(days), postedAt: daysAgo(days) });
+  const queuedS3 = (days: number, score: number) =>
+    testJob({
+      stage: 's2',
+      next: 's3',
+      sortAt: daysAgo(days),
+      postedAt: daysAgo(days),
+      triage: { ...TRIAGE, triageScore: score },
+    });
+
+  it('expires stale jobs below the S2 read limit, which the stage would never reach', async () => {
+    const store = memoryFunnelStore();
+    store.add('fresh', queuedS2(1));
+    for (let i = 0; i < 5; i++) store.add(`stale${String(i)}`, queuedS2(20 + i));
+    const { transport, sent } = recordingTransport();
+    const result = await run(deps(store, { transport, limits: { s2MaxJobs: 1 } }));
+    for (let i = 0; i < 5; i++) {
+      expect(store.get(`stale${String(i)}`)).toMatchObject({
+        verdict: 'skip',
+        skip: { stage: 's2', ruleId: 'freshness' },
+        next: null,
+      });
+    }
+    expect(store.get('fresh').verdict).toBe('apply');
+    expect(result.perStage.s2).toMatchObject({ expired: 5, in: 1 });
+    // The one fresh job is the only model call: S2, then S3.
+    expect(sent.length).toBe(2);
+  });
+
+  it('expires stale S3 jobs with a low triage score, below the S3 read limit', async () => {
+    const store = memoryFunnelStore();
+    store.add('best', queuedS3(1, 9));
+    store.add('low-stale', queuedS3(30, 0.5));
+    store.add('mid-stale', queuedS3(16, 3));
+    const result = await run(deps(store, { limits: { s3MaxJobs: 1 } }));
+    expect(store.get('low-stale')).toMatchObject({
+      verdict: 'skip',
+      skip: { stage: 's3', ruleId: 'freshness' },
+      next: null,
+    });
+    expect(store.get('mid-stale').skip?.ruleId).toBe('freshness');
+    expect(store.get('best').verdict).toBeDefined();
+    expect(result.perStage.s3.expired).toBe(2);
+    expect(result.perStage.s2.expired).toBe(0);
+    expect(result.summary.s3.skip).toBeGreaterThanOrEqual(2);
+  });
+
+  it('leaves the overflow past the sweep limit for the next run', async () => {
+    const store = memoryFunnelStore();
+    for (let i = 0; i < 5; i++) store.add(`stale${String(i)}`, queuedS2(20 + i));
+    const limits = { expireMaxJobs: 2, s2MaxJobs: 0 };
+    const first = await run(deps(store, { limits }));
+    expect(first.perStage.s2.expired).toBe(2);
+    // Newest first: the two least stale go, the three oldest wait.
+    expect(store.get('stale0').skip?.ruleId).toBe('freshness');
+    expect(store.get('stale1').skip?.ruleId).toBe('freshness');
+    for (const id of ['stale2', 'stale3', 'stale4']) expect(store.get(id).next).toBe('s2');
+    const second = await run(deps(store, { limits }));
+    expect(second.perStage.s2.expired).toBe(2);
+    const third = await run(deps(store, { limits }));
+    expect(third.perStage.s2.expired).toBe(1);
+    for (let i = 0; i < 5; i++) {
+      expect(store.get(`stale${String(i)}`).skip?.ruleId).toBe('freshness');
+    }
+  });
+
+  it('carries on to the lease and the stages when the sweep fails, and says so', async () => {
+    const store = memoryFunnelStore();
+    store.add('fresh', queuedS2(1));
+    store.add('stale', queuedS2(20));
+    store.staleQueued = () => Promise.reject(new Error('index missing'));
+    const result = await run(deps(store));
+    expect(result.sweepFailed).toBe(true);
+    expect(result.budget.leasePence).toBeGreaterThan(0);
+    expect(result.perStage.s2.in).toBe(1);
+    expect(store.get('fresh').verdict).toBe('apply');
+    // The stale job isn't swept, but the stage's own check still skips it when it reaches it.
+    expect(store.get('stale').skip?.ruleId).toBe('freshness');
+    const failure = logs.find((l) => l.event === 'funnel.failed' && l.step === 'sweep');
+    expect(failure).toMatchObject({ stage: 's2' });
+    expect(JSON.stringify(failure)).not.toContain('index missing');
+  });
+
+  it('logs no drift when every job the sweep reads is expired', async () => {
+    const store = memoryFunnelStore();
+    store.add('stale', queuedS2(20));
+    await run(deps(store, { limits: { s2MaxJobs: 0 } }));
+    expect(logs.some((l) => l.event === 'funnel.sweep_drift')).toBe(false);
+  });
+
+  it('reports a clean sweep as not failed', async () => {
+    const result = await run(deps(memoryFunnelStore()));
+    expect(result.sweepFailed).toBe(false);
+  });
+
+  it('keeps a job exactly at the cutoff and expires one a millisecond past it', async () => {
+    const usage: Usage = { ...emptyUsage(1_500, TEST_NOW), spendPence: 1_500 };
+    const store = memoryFunnelStore();
+    store.add('at', queuedS2(14));
+    store.add(
+      'past',
+      testJob({
+        stage: 's1',
+        next: 's2',
+        sortAt: new Date(daysAgo(14).getTime() - 1),
+        postedAt: new Date(daysAgo(14).getTime() - 1),
+      }),
+    );
+    await run(deps(store, { leases: memoryLeaseStore(usage) }));
+    expect(store.get('at')).toMatchObject({ next: 's2' });
+    expect(store.get('at').skip).toBeUndefined();
+    expect(store.get('past').skip?.ruleId).toBe('freshness');
+  });
+
+  it('runs with the monthly cap reached and with no profile, spending nothing', async () => {
+    const usage: Usage = { ...emptyUsage(1_500, TEST_NOW), spendPence: 1_500 };
+    const capped = memoryFunnelStore();
+    capped.add('stale', queuedS2(20));
+    const { transport, sent } = recordingTransport();
+    const first = await run(deps(capped, { transport, leases: memoryLeaseStore(usage) }));
+    expect(first.budget.stoppedBy).toBe('monthly_cap');
+    expect(capped.get('stale').skip?.ruleId).toBe('freshness');
+    expect(first.perStage.s2.expired).toBe(1);
+
+    const bare = memoryFunnelStore({ facts: [] });
+    bare.add('stale', queuedS3(20, 5));
+    const second = await run(deps(bare, { transport }));
+    expect(second.budget.stoppedBy).toBe('no_profile');
+    expect(bare.get('stale').skip?.ruleId).toBe('freshness');
+    expect(second.perStage.s3.expired).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(second.costPence).toBe(0);
+  });
+
+  it('counts each stage separately and clears the queue counts', async () => {
+    const store = memoryFunnelStore();
+    store.add('a', queuedS2(20));
+    store.add('b', queuedS2(40));
+    store.add('c', queuedS3(25, 2));
+    const result = await run(deps(store, { leases: memoryLeaseStore(emptyUsage(0, TEST_NOW)) }));
+    expect(result.perStage.s2.expired).toBe(2);
+    expect(result.perStage.s3.expired).toBe(1);
+    expect(result.summary.queued).toEqual({ s2: 0, s3: 0 });
+  });
+
+  it('does not expire a job whose real posting date is fresh, whatever sortAt says', async () => {
+    const store = memoryFunnelStore();
+    store.add(
+      'drift',
+      testJob({ stage: 's1', next: 's2', sortAt: daysAgo(30), postedAt: daysAgo(2) }),
+    );
+    const result = await run(deps(store, { limits: { s2MaxJobs: 0 } }));
+    expect(store.get('drift').skip).toBeUndefined();
+    expect(result.perStage.s2.expired).toBe(0);
+    expect(logs).toContainEqual(
+      expect.objectContaining({ event: 'funnel.sweep_drift', stage: 's2', kept: 1, read: 1 }),
+    );
   });
 });
 

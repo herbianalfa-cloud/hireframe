@@ -239,6 +239,8 @@ export const FUNNEL = {
   /** From this share of the monthly cap S3 pauses; S2 continues until the cap (PRD R11). */
   deepPauseAtFraction: 0.9,
   s1MaxJobs: 2_000,
+  /** Queued jobs past `freshness_days` the expiry sweep reads per stage and run (free). */
+  expireMaxJobs: 2_000,
   s2MaxJobs: 300,
   s3MaxJobs: 25,
   s2Concurrency: 4,
@@ -283,6 +285,8 @@ export type FunnelOverrides = z.infer<typeof FunnelOverridesSchema>;
 export interface FunnelLimits {
   runBudgetPence: number;
   s1MaxJobs: number;
+  /** Stale queued jobs the expiry sweep reads per stage and run. */
+  expireMaxJobs: number;
   s2MaxJobs: number;
   s3MaxJobs: number;
   triageRpm: number;
@@ -294,6 +298,7 @@ export function funnelLimits(monthlyCapPence: number, overrides: FunnelOverrides
   return {
     runBudgetPence: overrides.runBudgetPence ?? defaultRunBudgetPence(monthlyCapPence),
     s1MaxJobs: overrides.s1MaxJobs ?? FUNNEL.s1MaxJobs,
+    expireMaxJobs: FUNNEL.expireMaxJobs,
     s2MaxJobs: overrides.s2MaxJobs ?? FUNNEL.s2MaxJobs,
     s3MaxJobs: overrides.s3MaxJobs ?? FUNNEL.s3MaxJobs,
     triageRpm: overrides.triageRpm ?? FUNNEL.triageRpm,

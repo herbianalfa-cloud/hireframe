@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { CRITERIA_SEED_V1 } from './criteria-seed.js';
 import { TITLE_CASES } from './fixtures/title-cases.js';
-import { checkTitle, laneTitleVariants, matchesExcludedTitle } from './titles.js';
+import {
+  checkTitle,
+  laneTitleVariants,
+  matchesExcludedTitle,
+  SENIORITY_TITLE_IDS,
+} from './titles.js';
 
 const check = (title: string) => checkTitle(title, CRITERIA_SEED_V1);
 
@@ -21,6 +26,33 @@ describe('seed v1 title rules', () => {
     for (const prefix of ['Senior', 'Lead', 'Principal', 'Head of', 'Director,']) {
       expect(check(`${prefix} Junior Brand Manager`).excludedBy).not.toBeNull();
     }
+  });
+
+  it('uses SENIORITY_TITLE_IDS when no list is given', () => {
+    const titles = [
+      'Junior Brand Manager',
+      'Senior Junior Brand Manager',
+      'Associate Business Analyst',
+      'Head of Product',
+      'Plumber',
+    ];
+    for (const title of titles) {
+      expect(checkTitle(title, CRITERIA_SEED_V1)).toEqual(
+        checkTitle(title, CRITERIA_SEED_V1, SENIORITY_TITLE_IDS),
+      );
+    }
+  });
+
+  it('lets an explicit seniority list decide which rules a lane title cannot override', () => {
+    // The seed's `manager` rule loses to the lane title by default...
+    expect(check('Junior Brand Manager').excludedBy).toBeNull();
+    // ...and wins once its ID is on the list,
+    expect(
+      checkTitle('Junior Brand Manager', CRITERIA_SEED_V1, [...SENIORITY_TITLE_IDS, 'manager'])
+        .excludedBy,
+    ).toBe('manager');
+    // while an empty list lets the lane title beat even `senior`.
+    expect(checkTitle('Senior Junior Brand Manager', CRITERIA_SEED_V1, []).excludedBy).toBeNull();
   });
 
   it('reports the lane a title belongs to', () => {

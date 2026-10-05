@@ -6,9 +6,9 @@ import { Timestamp } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
 import { dashboardQuerySpecs } from './dashboard';
-import { indexServes, type CompositeIndex } from './indexes';
+import { diagnosticsQuerySpecs } from './funnel-diagnostics';
 import { jobFilterSpec } from './jobs';
-import type { QuerySpec } from './query-spec';
+import { indexServes, type CompositeIndex, type QuerySpec } from './query-spec';
 
 const indexFile = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../../firestore.indexes.json', import.meta.url)), 'utf8'),
@@ -39,6 +39,14 @@ function jobsListSpecs(): Record<string, QuerySpec> {
 describe('firestore.indexes.json', () => {
   it('serves every dashboard query', () => {
     for (const [name, spec] of Object.entries(dashboardQuerySpecs(NOW))) {
+      expect(indexServes(spec, indexes), name).toBe(true);
+    }
+  });
+
+  it('serves every funnel diagnostics query', () => {
+    const specs = diagnosticsQuerySpecs(NOW);
+    expect(Object.keys(specs)).toHaveLength(7);
+    for (const [name, spec] of Object.entries(specs)) {
       expect(indexServes(spec, indexes), name).toBe(true);
     }
   });

@@ -2,9 +2,11 @@ import {
   applyHardRules,
   DeepReadOutputSchema,
   factAliases,
+  freshnessCutoff,
   FUNNEL_LIMITS,
   isExpired,
   monthKey,
+  QUEUE_STAGES,
   resolveDeepRead,
   scoreJob,
   triagePasses,
@@ -58,8 +60,8 @@ import { fingerprint, PROMPT_VERSIONS, s2System, s2User, s3System, s3User } from
  * The funnel for one run (docs/FUNNEL.md, ADR-032–037): S1 on jobs no stage has judged (the M3
  * backlog the first time), then S2 and S3 on their queues inside the run's spend lease, stage
  * shares, count caps and deadlines. S2 takes the newest jobs first, S3 the best triage scores;
- * whatever doesn't fit stays queued (`next`) for the next run, and a queued job that has gone
- * stale is skipped for free. A re-score first re-runs S1 on the last 14 days and recomputes
+ * whatever doesn't fit stays queued (`next`) for the next run. After S1 and before the lease, an
+ * expiry sweep skips every queued job past `freshness_days` for free, however deep in the queue. A re-score first re-runs S1 on the last 14 days and recomputes
  * verdicts from stored model output wherever the prompts haven't changed.
  *
  * Model and budget problems end a stage and are reported, never thrown. Store errors propagate
@@ -83,6 +85,11 @@ export interface FunnelStore {
   s0Jobs(limit: number): Promise<StoredJob[]>;
   /** Jobs waiting for `stage`: S2 newest first, S3 by triage score then newest. */
   queued(stage: QueueStage, limit: number): Promise<StoredJob[]>;
+  /**
+   * Jobs waiting for `stage` whose `sortAt` is before `before`, newest first (the expiry sweep).
+   * Served by the `(next, sortAt desc)` index for both stages.
+   */
+  staleQueued(stage: QueueStage, before: Date, limit: number): Promise<StoredJob[]>;
   /** Jobs first seen at or after `since` (re-score). */
   recentJobs(since: Date, limit: number): Promise<StoredJob[]>;
   /** Description text by job ID (missing descriptions are left out). */
@@ -141,6 +148,8 @@ export interface FunnelOutcome {
   summary: FunnelSummary;
   /** Job writes that failed (logged); the run is partial when there are any. */
   failedWrites: number;
+  /** The expiry sweep hit a store error (logged); the stages still ran, and the run is partial. */
+  sweepFailed: boolean;
 }
 
 /** Patches are written in small groups, so a run killed mid-stage keeps what it paid for. */
@@ -204,6 +213,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   // ---- Writes: buffered, flushed every few jobs and at the end ----
   let pending: { jobId: string; patch: JobPatch }[] = [];
   let failedWrites = 0;
+  let sweepFailed = false;
   const flush = async () => {
     if (pending.length === 0) return;
     const batch = pending;
@@ -398,6 +408,35 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     await write(entry.id, s1SkipPatch(result.ruleId, s1Outcome(result), ctx()));
   }
   await flush();
+
+  // ---- Expiry sweep: queued jobs past freshness_days leave their queue, free (ADR-043) ----
+  // Runs before the lease, so it happens even at the monthly cap or without a profile. The stage
+  // reads below only see the newest 300 / best 50, so without this the rest would wait forever.
+  const staleBefore = freshnessCutoff(criteria, deps.now());
+  for (const stage of QUEUE_STAGES) {
+    try {
+      const stale = await store.staleQueued(stage, staleBefore, deps.limits.expireMaxJobs);
+      let kept = 0;
+      for (const entry of stale) {
+        // `sortAt` is a stored copy; the rule itself is the one S1 and the stages use.
+        if (!isExpired(entry.job, criteria, deps.now())) {
+          kept += 1;
+          continue;
+        }
+        (stage === 's2' ? s2 : s3).expired += 1;
+        await write(entry.id, expiredPatch(stage, ctx()));
+      }
+      await flush();
+      // Kept jobs come back at the top of the same newest-first window every run, so enough of
+      // them would starve the older ones. Counted so that shows up before it matters (ADR-043).
+      if (kept > 0) log.warn('funnel.sweep_drift', { stage, kept, read: stale.length });
+    } catch (error) {
+      // Freeing the queue is housekeeping: a store error here must not stop the stages. Jobs
+      // whose writes didn't land stay queued, and the next run sweeps them again.
+      log.error('funnel.failed', { step: 'sweep', stage, ...errorFields(error) });
+      sweepFailed = true;
+    }
+  }
 
   // ---- The run's spend lease (ADR-032) ----
   const month = monthKey(deps.now());
@@ -770,6 +809,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         ...(stoppedBy ? { stoppedBy } : {}),
       },
       failedWrites,
+      sweepFailed,
     };
   }
 }

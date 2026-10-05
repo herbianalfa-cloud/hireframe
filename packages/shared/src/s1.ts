@@ -35,10 +35,18 @@ export function sortDate(job: Pick<S1Job, 'postedAt' | 'firstSeenAt'>): Date {
   return job.postedAt ?? job.firstSeenAt;
 }
 
+/** Jobs whose `sortAt` is before this are stale: `now − freshness_days`. */
+export function freshnessCutoff(
+  criteria: Pick<CriteriaContent, 'freshness_days'>,
+  now: Date,
+): Date {
+  return new Date(now.getTime() - criteria.freshness_days * DAY_MS);
+}
+
 /**
  * True when the job is older than `freshness_days`. Without a posting date the first-seen date is
- * used: a job first seen 20 days ago was posted at least 20 days ago. Used by S1 and again when a
- * queued job is taken off the S2/S3 queue.
+ * used: a job first seen 20 days ago was posted at least 20 days ago. Used by S1, by the expiry
+ * sweep and again when a queued job is taken off the S2/S3 queue.
  */
 export function isExpired(
   job: Pick<S1Job, 'postedAt' | 'firstSeenAt'>,
@@ -172,6 +180,14 @@ export function rightToWorkBlocks(text: string, workRights: WorkRights): boolean
   }
 }
 
+/** The patterns S1 skips on, for the S2 diagnostics to sort a model's blocker text the same way. */
+export const BLOCKER_PATTERNS = {
+  sc: SC,
+  dv: DV,
+  driving: DRIVING,
+  rightToWork: RIGHT_TO_WORK_WORDING,
+} as const;
+
 /** Known blocker labels from the seed, by what they mean. Anything else is a literal phrase. */
 function blockerKind(label: string): 'sc' | 'dv' | 'driving' | 'rtw' | null {
   const folded = foldText(label);
@@ -246,10 +262,12 @@ export interface S1Input {
   /** Null until the owner sets it on the Profile screen; then no right-to-work skips. */
   workRights: WorkRights | null;
   now: Date;
+  /** Seniority rule IDs for the title check; the default is `SENIORITY_TITLE_IDS`. */
+  seniorityTitleIds?: readonly string[];
 }
 
 export function applyHardRules(input: S1Input): S1Result {
-  const { job, text, criteria, workRights, now } = input;
+  const { job, text, criteria, workRights, now, seniorityTitleIds } = input;
   const flags: JobFlag[] = [];
   const sortAt = sortDate(job);
   if (job.postedAt === undefined) flags.push('freshness_unknown');
@@ -262,7 +280,7 @@ export function applyHardRules(input: S1Input): S1Result {
     ...(experienceAsk ? { experienceAsk } : {}),
   });
 
-  const title = checkTitle(job.title, criteria);
+  const title = checkTitle(job.title, criteria, seniorityTitleIds);
   if (title.excludedBy) return skip(`title:${title.excludedBy}`);
   if (companyExcluded(job, criteria)) return skip('company');
 

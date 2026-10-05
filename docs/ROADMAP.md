@@ -33,3 +33,4 @@ Run `node scripts/detect-ats.ts --recheck tmp/watchlist-review.csv` on the Worka
 - A re-score stamps a new `judgedAt`, so re-judged old jobs count in "judged today" and jump to the top of Today; decide whether that is wanted and say so in ADR-038.
 - Agreement drops a job rated outside the 14-day window and then applied on an Apply verdict inside it; it counts as neither.
 - The spend meter fixes the month when Today mounts, so a tab left open over the 1st shows last month.
+- From funnel intake (ADR-043): build the existing `functions/src/funnel/store.ts` queries (`queued`, `s0Jobs`, `recentJobs`) through query specs and check them against `firestore.indexes.json`, as the new `staleQueued` is. Re-test any candidate S1 rule PR B rejects on a later 30 days of counts. Try C5 and C6 against real counts once they exist as code.

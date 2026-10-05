@@ -49,6 +49,7 @@ const OUTCOME: FunnelOutcome = {
     costPence: 0,
   },
   failedWrites: 0,
+  sweepFailed: false,
 };
 
 function store(lock: LockResult = { ok: true }) {

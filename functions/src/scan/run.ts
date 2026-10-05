@@ -386,13 +386,16 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
       try {
         funnel = await deps.funnel({ runId, startedAt });
         if (funnel.failedWrites > 0) run.errors.push({ code: 'funnel_write_failed' });
+        if (funnel.sweepFailed) run.errors.push({ code: 'funnel_sweep_failed' });
       } catch (error) {
         log.error('scan.failed', { runId, step: 'funnel', ...errorFields(error) });
         run.errors.push({ code: 'funnel_failed' });
       }
     }
 
-    const funnelFailed = deps.funnel !== undefined && (funnel === null || funnel.failedWrites > 0);
+    const funnelFailed =
+      deps.funnel !== undefined &&
+      (funnel === null || funnel.failedWrites > 0 || funnel.sweepFailed);
     let status = runStatus(perSource, failedWrites + companyWrites.failedWrites);
     if (funnelFailed && status === 'succeeded') status = 'partial';
     const s0: S0Counts = plan.counts;
