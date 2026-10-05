@@ -411,7 +411,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   // reads below only see the newest 300 / best 50, so without this the rest would wait forever.
   const staleBefore = freshnessCutoff(criteria, deps.now());
   for (const stage of QUEUE_STAGES) {
-    const stale = await store.staleQueued(stage, staleBefore, FUNNEL.expireMaxJobs);
+    const stale = await store.staleQueued(stage, staleBefore, deps.limits.expireMaxJobs);
     for (const entry of stale) {
       // `sortAt` is a stored copy; the rule itself is the one S1 and the stages use.
       if (!isExpired(entry.job, criteria, deps.now())) continue;

@@ -418,6 +418,25 @@ describe('expiry sweep', () => {
     expect(result.summary.s3.skip).toBeGreaterThanOrEqual(2);
   });
 
+  it('leaves the overflow past the sweep limit for the next run', async () => {
+    const store = memoryFunnelStore();
+    for (let i = 0; i < 5; i++) store.add(`stale${String(i)}`, queuedS2(20 + i));
+    const limits = { expireMaxJobs: 2, s2MaxJobs: 0 };
+    const first = await run(deps(store, { limits }));
+    expect(first.perStage.s2.expired).toBe(2);
+    // Newest first: the two least stale go, the three oldest wait.
+    expect(store.get('stale0').skip?.ruleId).toBe('freshness');
+    expect(store.get('stale1').skip?.ruleId).toBe('freshness');
+    for (const id of ['stale2', 'stale3', 'stale4']) expect(store.get(id).next).toBe('s2');
+    const second = await run(deps(store, { limits }));
+    expect(second.perStage.s2.expired).toBe(2);
+    const third = await run(deps(store, { limits }));
+    expect(third.perStage.s2.expired).toBe(1);
+    for (let i = 0; i < 5; i++) {
+      expect(store.get(`stale${String(i)}`).skip?.ruleId).toBe('freshness');
+    }
+  });
+
   it('keeps a job exactly at the cutoff and expires one a millisecond past it', async () => {
     const usage: Usage = { ...emptyUsage(1_500, TEST_NOW), spendPence: 1_500 };
     const store = memoryFunnelStore();

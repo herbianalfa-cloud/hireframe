@@ -285,6 +285,8 @@ export type FunnelOverrides = z.infer<typeof FunnelOverridesSchema>;
 export interface FunnelLimits {
   runBudgetPence: number;
   s1MaxJobs: number;
+  /** Stale queued jobs the expiry sweep reads per stage and run. */
+  expireMaxJobs: number;
   s2MaxJobs: number;
   s3MaxJobs: number;
   triageRpm: number;
@@ -296,6 +298,7 @@ export function funnelLimits(monthlyCapPence: number, overrides: FunnelOverrides
   return {
     runBudgetPence: overrides.runBudgetPence ?? defaultRunBudgetPence(monthlyCapPence),
     s1MaxJobs: overrides.s1MaxJobs ?? FUNNEL.s1MaxJobs,
+    expireMaxJobs: FUNNEL.expireMaxJobs,
     s2MaxJobs: overrides.s2MaxJobs ?? FUNNEL.s2MaxJobs,
     s3MaxJobs: overrides.s3MaxJobs ?? FUNNEL.s3MaxJobs,
     triageRpm: overrides.triageRpm ?? FUNNEL.triageRpm,
