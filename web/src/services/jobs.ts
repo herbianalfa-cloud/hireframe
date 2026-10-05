@@ -54,6 +54,8 @@ export interface JobFilters {
 }
 
 export const JOBS_PAGE_SIZE = 25;
+/** Most rows one full read returns, for sorts and filters that run in the browser (ADR-044). */
+export const JOBS_SORT_CAP = 300;
 const WRITE_TIMEOUT_MS = 15_000;
 const READ_TIMEOUT_MS = 15_000;
 
@@ -125,6 +127,33 @@ export async function loadJobsPage(
     invalid,
     cursor: snapshot.docs.length === JOBS_PAGE_SIZE && last ? last : null,
   };
+}
+
+export interface JobsWindow {
+  jobs: JobView[];
+  invalid: number;
+  /** The read hit the cap, so older matching jobs may be missing. */
+  capped: boolean;
+}
+
+/**
+ * The newest `JOBS_SORT_CAP` jobs for a filter set in one read, for sorting and filtering in the
+ * browser. The query is the same one `loadJobsPage` runs: no new index.
+ */
+export async function loadJobsWindow(filters: JobFilters): Promise<JobsWindow> {
+  const { db } = await getFirebase();
+  const constraints = [...specConstraints(jobFilterSpec(filters)), limit(JOBS_SORT_CAP)];
+  const snapshot = await withRetry(
+    () =>
+      withTimeout(
+        getDocs(query(collection(db, COLLECTIONS.jobs), ...constraints)),
+        READ_TIMEOUT_MS,
+        'jobs window',
+      ),
+    { label: 'jobs.window', isRetryable: isTransient },
+  );
+  const { jobs, invalid } = parseJobs(snapshot.docs);
+  return { jobs, invalid, capped: snapshot.docs.length === JOBS_SORT_CAP };
 }
 
 /** One job, live, so an action shows at once. `data` is null when it doesn't exist. */

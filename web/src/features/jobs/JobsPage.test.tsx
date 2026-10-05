@@ -4,14 +4,17 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadAgreement } from '@/services/dashboard';
-import { loadJobsPage, setJobStatus, watchJob } from '@/services/jobs';
+import { loadJobsPage, loadJobsWindow, setJobStatus, watchJob } from '@/services/jobs';
 
 import { makeView } from './fixtures';
 import { JobsPage } from './JobsPage';
 
 vi.mock('@/services/dashboard', () => ({ loadAgreement: vi.fn() }));
 vi.mock('@/services/jobs', () => ({
+  JOBS_PAGE_SIZE: 25,
+  JOBS_SORT_CAP: 300,
   loadJobsPage: vi.fn(),
+  loadJobsWindow: vi.fn(),
   watchJob: vi.fn(),
   loadJobDescription: vi.fn(() => Promise.resolve(null)),
   setJobStatus: vi.fn(),
@@ -47,6 +50,7 @@ function setup(search = '') {
 beforeEach(() => {
   vi.mocked(setJobStatus).mockReset().mockResolvedValue();
   vi.mocked(loadJobsPage).mockReset();
+  vi.mocked(loadJobsWindow).mockReset();
   vi.mocked(watchJob).mockReset();
   vi.mocked(loadAgreement).mockReset().mockResolvedValue({
     ratedAgree: 2,
@@ -233,6 +237,188 @@ describe('actions on the Jobs list', () => {
     });
     expect(loadJobsPage).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('dialog')).toBeDefined();
+  });
+});
+
+describe('sort and filters', () => {
+  const windowOf = (views: ReturnType<typeof makeView>[], capped = false) => ({
+    jobs: views,
+    invalid: 0,
+    capped,
+  });
+  const scored = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      makeView(`s${String(i).padStart(3, '0')}`, {
+        title: `Job ${String(i).padStart(3, '0')}`,
+        fitScore: i % 10,
+        luckScore: 0,
+        judgedAt: new Date(Date.UTC(2026, 9, 1, 0, 0, i)),
+      }),
+    );
+  const titles = () =>
+    screen
+      .getAllByRole('button', { name: /^Job \d+/ })
+      .map((el) => /Job \d+/.exec(el.textContent)?.[0]);
+
+  it('reads the sort, lane and gap from the URL and writes them back', async () => {
+    vi.mocked(loadJobsWindow).mockResolvedValue(
+      windowOf([
+        makeView('a', {
+          title: 'Alpha',
+          gaps: [{ type: 'tool', text: 'Fake gap' }],
+          triage: {
+            lane: 'primary',
+            seniority: 'mid',
+            blockers: [],
+            pass: true,
+            triageScore: 5,
+            note: 'Fake note.',
+          },
+        }),
+      ]),
+    );
+    const probe = setup('?verdict=near_miss&sort=best&lane=primary&gap=tool');
+    await screen.findByText('Alpha');
+    expect(screen.getByLabelText<HTMLSelectElement>('Sort').value).toBe('best');
+    expect(screen.getByLabelText<HTMLSelectElement>('Lane').value).toBe('primary');
+    expect(screen.getByLabelText<HTMLSelectElement>('Gap').value).toBe('tool');
+    await userEvent.selectOptions(screen.getByLabelText('Sort'), 'luck');
+    expect(probe.location()).toContain('sort=luck');
+    await userEvent.selectOptions(screen.getByLabelText('Lane'), 'secondary');
+    expect(probe.location()).toContain('lane=secondary');
+    await userEvent.selectOptions(screen.getByLabelText('Sort'), 'newest');
+    expect(probe.location()).not.toContain('sort=');
+  });
+
+  it('falls back to the defaults for invalid values', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha']));
+    setup('?sort=oldest&lane=none&gap=tool');
+    await screen.findByText('Alpha');
+    expect(screen.getByLabelText<HTMLSelectElement>('Sort').value).toBe('newest');
+    expect(screen.getByLabelText<HTMLSelectElement>('Lane').value).toBe('');
+    expect(loadJobsWindow).not.toHaveBeenCalled();
+  });
+
+  it('switching to Best does one full read, orders across Show more, and reads no more', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha']));
+    vi.mocked(loadJobsWindow).mockResolvedValue(windowOf(scored(60)));
+    setup();
+    await screen.findByText('Alpha');
+    await userEvent.selectOptions(screen.getByLabelText('Sort'), 'best');
+    await screen.findByText('Job 009');
+    expect(loadJobsWindow).toHaveBeenCalledTimes(1);
+    expect(loadJobsWindow).toHaveBeenLastCalledWith({});
+    const first = titles();
+    expect(first).toHaveLength(25);
+    // Every fit-9 job (six of them) comes before any fit-8 job.
+    expect(first.slice(0, 6).every((t) => Number(t?.slice(-1)) === 9)).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    const second = titles();
+    expect(second).toHaveLength(50);
+    expect(second.slice(0, 25)).toEqual(first);
+    await userEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    expect(titles()).toHaveLength(60);
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+    expect(loadJobsWindow).toHaveBeenCalledTimes(1);
+    expect(loadJobsPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('notes when the full read hit the cap, and not otherwise', async () => {
+    vi.mocked(loadJobsWindow).mockResolvedValueOnce(windowOf(scored(3), true));
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/jobs?sort=fit']}>
+        <JobsPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('Sorted among the newest 300 matching jobs.')).toBeDefined();
+    unmount();
+    vi.mocked(loadJobsWindow).mockResolvedValueOnce(windowOf(scored(3)));
+    setup('?sort=fit');
+    await screen.findByText('Job 000');
+    expect(screen.queryByText(/Sorted among the newest/)).toBeNull();
+  });
+
+  it('shows the Gap select only for near misses, and clears it when the verdict changes', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha']));
+    vi.mocked(loadJobsWindow).mockResolvedValue(
+      windowOf([makeView('a', { title: 'Alpha', gaps: [{ type: 'tool', text: 'Fake gap' }] })]),
+    );
+    const probe = setup('?verdict=near_miss&gap=tool-only');
+    await screen.findByText('Alpha');
+    expect(screen.getByLabelText('Gap')).toBeDefined();
+    await userEvent.selectOptions(screen.getByLabelText('Verdict'), 'apply');
+    expect(probe.location()).toBe('/jobs?verdict=apply');
+    expect(screen.queryByLabelText('Gap')).toBeNull();
+  });
+
+  it('ignores a gap in the URL unless the verdict is near miss', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha']));
+    setup('?verdict=apply&gap=tool');
+    await screen.findByText('Alpha');
+    expect(loadJobsWindow).not.toHaveBeenCalled();
+  });
+
+  it('filters by gap in the browser', async () => {
+    const gap = (type: 'tool' | 'domain') => ({ type, text: 'Fake gap' });
+    vi.mocked(loadJobsWindow).mockResolvedValue(
+      windowOf([
+        makeView('a', { title: 'Alpha', gaps: [gap('tool')] }),
+        makeView('b', { title: 'Beta', gaps: [gap('tool'), gap('domain')] }),
+        makeView('c', { title: 'Gamma' }),
+      ]),
+    );
+    setup('?verdict=near_miss&gap=tool-only');
+    await screen.findByText('Alpha');
+    expect(screen.queryByText('Beta')).toBeNull();
+    expect(screen.queryByText('Gamma')).toBeNull();
+    expect(loadJobsWindow).toHaveBeenCalledWith({ verdict: 'near_miss' });
+  });
+
+  it('disables the new controls while Needs review is on and reads the paged list', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha']));
+    setup('?review=1&sort=best&lane=primary');
+    await screen.findByText('Alpha');
+    expect(screen.getByLabelText<HTMLSelectElement>('Sort').disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLSelectElement>('Lane').disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLSelectElement>('Sort').value).toBe('newest');
+    expect(loadJobsWindow).not.toHaveBeenCalled();
+    expect(loadJobsPage).toHaveBeenLastCalledWith({ needsReview: true });
+  });
+
+  it('counts lane and gap as filters: empty state, and Clear keeps the sort', async () => {
+    vi.mocked(loadJobsWindow).mockResolvedValue(windowOf([makeView('a', { title: 'Alpha' })]));
+    const probe = setup('?sort=fit&lane=primary');
+    expect(await screen.findByText('No jobs match these filters')).toBeDefined();
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await waitFor(() => {
+      expect(probe.location()).toBe('/jobs?sort=fit');
+    });
+  });
+
+  it('keeps Newest on cursor paging with Load more', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha'], { id: 'c' }));
+    setup();
+    expect(await screen.findByRole('button', { name: 'Load more' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+    expect(loadJobsWindow).not.toHaveBeenCalled();
+  });
+
+  it('re-sorts in place when an action changes a row, with no reload', async () => {
+    const views = [
+      makeView('a', { title: 'Job 001', fitScore: 9, luckScore: 9 }),
+      makeView('b', { title: 'Job 002', fitScore: 5, luckScore: 5 }),
+    ];
+    vi.mocked(loadJobsWindow).mockResolvedValue(windowOf(views));
+    setup('?sort=best');
+    await screen.findByText('Job 001');
+    screen.getByRole('button', { name: /Job 002/ }).focus();
+    await userEvent.keyboard('s');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Job 002/ }).textContent).toContain('skipped');
+    });
+    expect(titles()).toEqual(['Job 001', 'Job 002']);
+    expect(loadJobsWindow).toHaveBeenCalledTimes(1);
   });
 });
 
