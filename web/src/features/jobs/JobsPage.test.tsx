@@ -241,6 +241,8 @@ describe('actions on the Jobs list', () => {
 });
 
 describe('sort and filters', () => {
+  const CAP_NOTE =
+    "Only the newest 300 jobs for this verdict and status were read, so older jobs that fit your sort or filters aren't shown.";
   const windowOf = (views: ReturnType<typeof makeView>[], capped = false) => ({
     jobs: views,
     invalid: 0,
@@ -331,12 +333,52 @@ describe('sort and filters', () => {
         <JobsPage />
       </MemoryRouter>,
     );
-    expect(await screen.findByText('Sorted among the newest 300 matching jobs.')).toBeDefined();
+    expect(await screen.findByText(CAP_NOTE)).toBeDefined();
     unmount();
     vi.mocked(loadJobsWindow).mockResolvedValueOnce(windowOf(scored(3)));
     setup('?sort=fit');
     await screen.findByText('Job 000');
-    expect(screen.queryByText(/Sorted among the newest/)).toBeNull();
+    expect(screen.queryByText(CAP_NOTE)).toBeNull();
+  });
+
+  it('shows the cap note with the empty state, since older jobs may match', async () => {
+    vi.mocked(loadJobsWindow).mockResolvedValue(
+      windowOf([makeView('a', { title: 'Alpha' })], true),
+    );
+    setup('?sort=fit&lane=primary');
+    expect(await screen.findByText('No jobs match these filters')).toBeDefined();
+    expect(screen.getByText(CAP_NOTE)).toBeDefined();
+  });
+
+  it('notes the cap for Newest with a lane filter too', async () => {
+    vi.mocked(loadJobsWindow).mockResolvedValue(
+      windowOf([makeView('a', { title: 'Alpha' })], true),
+    );
+    setup('?lane=primary');
+    expect(await screen.findByText('No jobs match these filters')).toBeDefined();
+    expect(screen.getByText(CAP_NOTE)).toBeDefined();
+  });
+
+  it('starts Show more over when the verdict changes', async () => {
+    vi.mocked(loadJobsWindow).mockResolvedValue(windowOf(scored(60)));
+    setup('?sort=fit');
+    await screen.findByText('Job 009');
+    await userEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    expect(titles()).toHaveLength(50);
+    await userEvent.selectOptions(screen.getByLabelText('Verdict'), 'apply');
+    await waitFor(() => {
+      expect(loadJobsWindow).toHaveBeenLastCalledWith({ verdict: 'apply' });
+    });
+    await screen.findByRole('button', { name: 'Show more' });
+    expect(titles()).toHaveLength(25);
+    await userEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    expect(titles()).toHaveLength(50);
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'saved');
+    await waitFor(() => {
+      expect(loadJobsWindow).toHaveBeenLastCalledWith({ verdict: 'apply', status: 'saved' });
+    });
+    await screen.findByRole('button', { name: 'Show more' });
+    expect(titles()).toHaveLength(25);
   });
 
   it('shows the Gap select only for near misses, and clears it when the verdict changes', async () => {

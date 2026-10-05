@@ -70,7 +70,12 @@ export function JobsPage() {
     },
     { full },
   );
-  const sorted = useSortedJobs(state.status === 'ready' ? state.jobs : [], sort, { lane, gap });
+  const sorted = useSortedJobs(
+    state.status === 'ready' ? state.jobs : [],
+    sort,
+    { lane, gap },
+    `${verdict ?? ''}|${status ?? ''}|${String(needsReview)}`,
+  );
   const [now] = useState(() => new Date());
 
   const update = useCallback(
@@ -232,6 +237,12 @@ export function JobsPage() {
                 ? 'Clear the filters to see everything.'
                 : 'Jobs appear here once a scan has judged them. Run Scan now on System.'}
             </p>
+            {state.capped ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Only the newest {JOBS_SORT_CAP} jobs for this verdict and status were read, so older
+                jobs that fit your sort or filters aren&apos;t shown.
+              </p>
+            ) : null}
           </div>
         ) : (
           <>
@@ -243,7 +254,8 @@ export function JobsPage() {
             ) : null}
             {state.capped ? (
               <p className="mb-2 text-xs text-muted-foreground">
-                Sorted among the newest {JOBS_SORT_CAP} matching jobs.
+                Only the newest {JOBS_SORT_CAP} jobs for this verdict and status were read, so older
+                jobs that fit your sort or filters aren&apos;t shown.
               </p>
             ) : null}
             <JobList

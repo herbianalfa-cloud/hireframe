@@ -175,16 +175,18 @@ export function useJobsList(filters: JobFilters, { full = false }: { full?: bool
 
 /**
  * Filter and sort loaded jobs, showing `pageSize` at a time. Derived, so an optimistic patch
- * re-sorts in place. The shown count starts over when the sort or filter changes, not on a patch.
+ * re-sorts in place. The shown count starts over when the sort, a filter or the list's `scope`
+ * (verdict, status, review) changes, not on a patch.
  */
 export function useSortedJobs(
   jobs: readonly JobView[],
   sort: JobSort,
   filter: JobFilter,
+  scope: string,
   pageSize: number = JOBS_PAGE_SIZE,
 ) {
   const { lane, gap } = filter;
-  const key = `${sort}|${lane ?? ''}|${gap ?? ''}`;
+  const key = `${scope}|${sort}|${lane ?? ''}|${gap ?? ''}`;
   const [shown, setShown] = useState({ key, count: pageSize });
   const count = shown.key === key ? shown.count : pageSize;
   const all = useMemo(
