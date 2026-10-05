@@ -9,7 +9,7 @@ import {
   RefreshCw,
   TriangleAlert,
 } from 'lucide-react';
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -420,10 +420,15 @@ function RecentRuns() {
   );
 }
 
+// The diagnostics panel and the shared counting code load only when the owner opens it (ADR-043).
+const S2SkipReasons = lazy(() =>
+  import('./S2SkipReasons').then((module) => ({ default: module.S2SkipReasons })),
+);
+
 /**
  * System (PRD R12): Scan now, source health and recent runs (M3, ADR-029), with each run's
  * funnel counts per stage, cost and spend warnings (M4), then the spend meter, verdict
- * agreement and error alerts (M5).
+ * agreement and error alerts (M5), then the S2 skip-reasons panel (funnel intake, ADR-043).
  */
 export function SystemPage() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -466,6 +471,9 @@ export function SystemPage() {
         </h2>
         <RecentRuns />
       </section>
+      <Suspense fallback={<Skeleton className="mt-8 h-16 w-full" />}>
+        <S2SkipReasons />
+      </Suspense>
     </section>
   );
 }
