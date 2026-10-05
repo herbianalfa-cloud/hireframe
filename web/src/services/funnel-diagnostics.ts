@@ -6,7 +6,6 @@ import {
   criteriaVersionId,
   DOCS,
   isModelSkip,
-  JobDescriptionSchema,
   PATHS,
   ProfileSettingsSchema,
   type CriteriaContent,
@@ -38,18 +37,16 @@ import { timestampsToDates } from './timestamps';
 
 /**
  * Funnel diagnostics for the System screen (docs/plans/funnel-intake-plan.md, ADR-043). The
- * owner's own signed-in reads (firestore.rules lets the owner read `jobs` and their descriptions)
+ * owner's own signed-in reads (firestore.rules lets the owner read `jobs` and their descriptions, though the panel reads none yet)
  * are counted in the browser by `@hireframe/shared`'s pure `buildReport`; nothing here writes,
  * and the report holds counts only. Read on demand, never live: up to about 1,500 job documents
- * plus their descriptions per press.
+ * per press, and no descriptions.
  */
 
 /** How far back the S2 skips and the good jobs reach. */
 export const DIAGNOSTICS_DAYS = 30;
 /** Most jobs read per set. */
 export const DIAGNOSTICS_READ_LIMIT = 500;
-/** Descriptions read at once. */
-const TEXT_BATCH = 100;
 const READ_TIMEOUT_MS = 20_000;
 
 const GOOD_VERDICTS: readonly Verdict[] = ['apply', 'near_miss', 'wildcard'];
@@ -159,21 +156,11 @@ async function readSet(source: Query): Promise<LoadedJob[]> {
 }
 
 /**
- * Pairs each job with its description text, a batch at a time. A missing or unreadable
- * description is empty text. The IDs are used for the reads only and never reach the report.
+ * The C1 to C4 candidates are title rules, which run before anything reads a description, so the
+ * panel loads none. PR B adds the description reads when C5 and C6 need them.
  */
-async function withTexts(
-  jobs: readonly LoadedJob[],
-  fetch: (id: string) => Promise<string>,
-): Promise<DiagnosticJob[]> {
-  const out: DiagnosticJob[] = [];
-  for (let i = 0; i < jobs.length; i += TEXT_BATCH) {
-    const part = jobs.slice(i, i + TEXT_BATCH);
-    const texts = await Promise.all(part.map((entry) => fetch(entry.id)));
-    part.forEach((entry, at) => out.push({ job: entry.job, text: texts[at] ?? '' }));
-  }
-  return out;
-}
+const withoutTexts = (jobs: readonly LoadedJob[]): DiagnosticJob[] =>
+  jobs.map((entry) => ({ job: entry.job, text: '' }));
 
 async function count(source: Query, label: string): Promise<number | null> {
   try {
@@ -204,7 +191,7 @@ async function loadWorkRights(): Promise<WorkRights | null> {
 }
 
 /**
- * Reads the three sets and their descriptions, then returns the counts. Throws
+ * Reads the three sets, then returns the counts. Throws
  * `IndexBuildingError` while the new `(skip.stage, judgedAt)` index is still building.
  */
 export async function loadDiagnostics(now: Date): Promise<DiagnosticsReport> {
@@ -223,20 +210,9 @@ export async function loadDiagnostics(now: Date): Promise<DiagnosticsReport> {
     readSet(run(specs.queuedS3)),
   ]);
 
-  const fetchText = async (id: string): Promise<string> => {
-    const snapshot = await guard('description', () => getDoc(doc(db, PATHS.jobDescription(id))));
-    if (!snapshot.exists()) return '';
-    const parsed = JobDescriptionSchema.safeParse(timestampsToDates(snapshot.data()));
-    return parsed.success ? parsed.data.text : '';
-  };
-  const [s2Skipped, goodJobs, queuedS3] = await Promise.all([
-    withTexts(
-      skips.filter((entry) => isModelSkip(entry.job)),
-      fetchText,
-    ),
-    withTexts(good, fetchText),
-    withTexts(queued, fetchText),
-  ]);
+  const s2Skipped = withoutTexts(skips.filter((entry) => isModelSkip(entry.job)));
+  const goodJobs = withoutTexts(good);
+  const queuedS3 = withoutTexts(queued);
 
   const [s2All, s2Sorted, s3All, s3Sorted] = await Promise.all([
     count(query(jobs, ...specConstraints(queuedCountSpecs('s2').all)), 'queued-s2'),
