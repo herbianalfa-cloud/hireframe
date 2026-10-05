@@ -1,5 +1,5 @@
 import { CRITERIA_SEED_V1, todayKpis, type Verdict } from '@hireframe/shared';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
 import { Skeleton } from '@/components/ui/skeleton';
@@ -7,10 +7,23 @@ import { useCurrentCriteria } from '@/features/criteria/hooks';
 import { JobDetail } from '@/features/jobs/JobDetail';
 import { JobList } from '@/features/jobs/JobList';
 import { VERDICT_LABELS } from '@/features/jobs/labels';
+import {
+  filterJobs,
+  GAP_FILTERS,
+  GAP_LABELS,
+  SORT_LABELS,
+  sortJobs,
+  type GapFilter,
+  type JobSort,
+} from '@/features/jobs/sort';
+import { FilterSelect, SortSelect } from '@/features/jobs/SortSelect';
 import { TODAY_LISTS, TODAY_LIST_SIZE, type TodayListId } from '@/services/dashboard';
 
 import { useTodayKpis, useTodayList, type KpiState } from './hooks';
 import { SpendMeter } from './SpendMeter';
+import { useTodaySort } from './sortPreference';
+
+const GAP_OPTIONS = GAP_FILTERS.map((value) => ({ value, label: GAP_LABELS[value] }));
 
 const LIST_TITLES: Readonly<Record<TodayListId, string>> = {
   apply: 'Apply',
@@ -99,6 +112,14 @@ function Tiles({ state, weeklyTarget }: { state: KpiState; weeklyTarget: number 
   );
 }
 
+/** The Jobs view for a list: open jobs, in the same sort and gap. Jobs sorts up to 300 exactly. */
+function seeAllPath(list: TodayListId, sort: JobSort, gap: GapFilter | ''): string {
+  const params = new URLSearchParams({ verdict: list satisfies Verdict, status: 'new' });
+  if (sort !== 'newest') params.set('sort', sort);
+  if (gap) params.set('gap', gap);
+  return `/jobs?${params.toString()}`;
+}
+
 function TodaySection({
   list,
   now,
@@ -113,6 +134,14 @@ function TodaySection({
   onReady?: () => void;
 }) {
   const state = useTodayList(list);
+  const [sort, setSort] = useTodaySort(list);
+  const [gap, setGap] = useState<GapFilter | ''>('');
+  // The loaded rows only: same query, same limit, no extra reads (ADR-044).
+  const loaded = state.status === 'ready' ? state.data : null;
+  const rows = useMemo(
+    () => (loaded ? sortJobs(filterJobs(loaded, gap ? { gap } : {}), sort) : []),
+    [loaded, sort, gap],
+  );
   const ready = state.status === 'ready';
   useEffect(() => {
     if (ready) onReady?.();
@@ -120,15 +149,33 @@ function TodaySection({
   const titleId = `list-${list}`;
   return (
     <section aria-labelledby={titleId} className="mt-8">
-      <h2 id={titleId} className="text-sm font-medium">
-        {LIST_TITLES[list]}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h2 id={titleId} className="text-sm font-medium">
+          {LIST_TITLES[list]}
+          {state.status === 'ready' && state.data.length > 0 ? (
+            <span className="ml-2 font-mono text-xs text-muted-foreground tabular-nums">
+              {gap
+                ? `${String(rows.length)} of ${String(state.data.length)}`
+                : `${String(state.data.length)}${state.data.length === TODAY_LIST_SIZE ? '+' : ''}`}
+            </span>
+          ) : null}
+        </h2>
         {state.status === 'ready' && state.data.length > 0 ? (
-          <span className="ml-2 font-mono text-xs text-muted-foreground tabular-nums">
-            {state.data.length}
-            {state.data.length === TODAY_LIST_SIZE ? '+' : ''}
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            {list === 'near_miss' ? (
+              <FilterSelect
+                label="Gap"
+                hiddenLabel={LIST_TITLES[list]}
+                value={gap}
+                options={GAP_OPTIONS}
+                emptyLabel="Any"
+                onChange={setGap}
+              />
+            ) : null}
+            <SortSelect value={sort} hiddenLabel={LIST_TITLES[list]} onChange={setSort} />
+          </div>
         ) : null}
-      </h2>
+      </div>
       <div className="mt-3">
         {state.status === 'loading' ? (
           <div role="status" aria-label={`Loading ${LIST_TITLES[list]}`} className="space-y-2">
@@ -143,9 +190,13 @@ function TodaySection({
           <p className="rounded-lg border border-dashed bg-surface px-4 py-6 text-center text-sm text-muted-foreground">
             {EMPTY_TEXT[list]}
           </p>
+        ) : rows.length === 0 ? (
+          <p className="rounded-lg border border-dashed bg-surface px-4 py-6 text-center text-sm text-muted-foreground">
+            No {LIST_TITLES[list].toLowerCase()} with this gap in the newest {TODAY_LIST_SIZE}.
+          </p>
         ) : (
           <JobList
-            jobs={state.data}
+            jobs={rows}
             label={`${LIST_TITLES[list]} jobs`}
             now={now}
             showVerdict={false}
@@ -154,12 +205,12 @@ function TodaySection({
             footer={
               state.data.length === TODAY_LIST_SIZE ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Showing the newest {TODAY_LIST_SIZE}.{' '}
-                  <Link
-                    to={`/jobs?verdict=${list satisfies Verdict}`}
-                    className="underline underline-offset-4"
-                  >
+                  {sort === 'newest'
+                    ? `Showing the newest ${String(TODAY_LIST_SIZE)}.`
+                    : `Sorted among the newest ${String(TODAY_LIST_SIZE)}.`}{' '}
+                  <Link to={seeAllPath(list, sort, gap)} className="underline underline-offset-4">
                     See all {VERDICT_LABELS[list].toLowerCase()} jobs
+                    {sort === 'newest' ? '' : ` by ${SORT_LABELS[sort].toLowerCase()}`} →
                   </Link>
                 </p>
               ) : null
