@@ -37,7 +37,7 @@ There are no local admin credentials (ADR-011). The owner can already read `jobs
 - A new pure module, `packages/shared/src/s2-diagnostics.ts`, does the counting. It's unit-tested with fake jobs.
   - `skipReasonCounts(jobs)` counts by `lane`, by `seniority`, by `lane × seniority`, and by **blocker category**. Each blocker string is sorted in code into one of: `experience`, `clearance`, `licence`, `right_to_work`, `location`, `language`, `other`, using the same patterns S1 uses where they exist. The free text itself is never shown.
   - `candidateRuleHits(candidates, sets, criteria, workRights)` runs each candidate rule through the real `applyHardRules`, with criteria plus that one change. For each rule it returns `{ s2Skipped, good, queuedS3 }`: how many jobs the rule *would* have skipped in each set.
-- **Set sizes come first.** The panel shows how many jobs are in each set (S2 skips, good jobs, waiting for S3) and the date range each covers, and the copied JSON includes them. A `good == 0` over a handful of S3 verdicts proves little, so the size is always shown next to the rule hits. ADR-044 records the sizes.
+- **Set sizes come first.** The panel shows how many jobs are in each set (S2 skips, good jobs, waiting for S3) and the date range each covers, and the copied JSON includes them. A `good == 0` over a handful of S3 verdicts proves little, so the size is always shown next to the rule hits. ADR-045 records the sizes.
 - **What the page shows:** count tables only. No titles, companies, notes or text. A **"Copy counts"** button copies the JSON, made of rule IDs, enum values, category names and integers, so you can paste it into chat safely. A test asserts that the copied JSON holds no string from any fake job's title, company, note or blockers.
 
 **Your steps after PR A deploys:** open System, go to "S2 skip reasons", press "Copy counts" and paste the result. Also paste the run figures from 3a below.
@@ -214,7 +214,7 @@ The way to drain it is a few manual Scan now runs with a temporary `config/app.f
 - **ADR-043 Funnel intake: a queue-expiry sweep and S2 skip diagnostics** (PR A). Covers the sweep before the lease, the 30-day panel, counts-only output, the copy format and the read cost.
 - **ADR-040 amendment** (PR A): specs and `indexServes` move to shared, the `<` op, and the new functions queries are covered. The existing functions queries are parked.
 - **ADR-032 amendment** (PR A drafts it, PR B finalises it): the intake-based sizing formula, and the approved `monthlyCapPence` with its inputs (aggregate figures only).
-- **ADR-044 S1 tightening from S2 skip reasons** (PR B): each adopted and rejected candidate with its `{s2Skipped, good, queuedS3}` counts, **plus each set's size and date range**, the new `language` blocker and C6 key if adopted, and the first-week spot-check routine.
+- **ADR-045 S1 tightening from S2 skip reasons** (PR B): each adopted and rejected candidate with its `{s2Skipped, good, queuedS3}` counts, **plus each set's size and date range**, the new `language` blocker and C6 key if adopted, and the first-week spot-check routine.
 
 ## Docs and changelog
 
