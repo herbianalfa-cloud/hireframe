@@ -2,6 +2,16 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [Unreleased]
+### Added
+- **Expiry sweep** (ADR-043). Every run, after S1 and before the spend lease, queued jobs older than `freshness_days` (14) leave the S2 and S3 queues as a free `freshness` skip, however deep they sit. Before, only the newest 300 (S2) and top 50 (S3) were ever looked at, so the rest stayed queued for ever and inflated the queue counts. It needs no lease, so it also runs at the monthly cap or with no profile, and counts into `s2.expired` and `s3.expired`. New `FunnelStore.staleQueued`, `FUNNEL.expireMaxJobs` (2,000 per stage) and `freshnessCutoff` in shared.
+- **"S2 skip reasons" panel on System** (ADR-043). Press Load to count, from your own jobs, why S2 skipped jobs (by lane, seniority, lane × seniority and blocker category), what each candidate S1 rule (C1 to C4) would have skipped among S2 skips, good jobs and jobs waiting for S3, and how many queued jobs have no `sortAt`. Counts only: "Copy counts" copies rule IDs, enum values and integers, never job text. Needs the new `(skip.stage, judgedAt)` index (wait for **Enabled** under Firestore → Indexes; the panel says "Index building" until then).
+- Docs: the intake-sizing method for the per-run budget (FUNNEL.md and an ADR-032 amendment draft). **No cap, lease or budget config changes.**
+
+### Changed
+- `QuerySpec` and `indexServes` moved to `@hireframe/shared`, and the `<` range op was added (ADR-040 amendment). Functions builds its new stale-queue query from a spec checked against `firestore.indexes.json`.
+- `applyHardRules` and `checkTitle` take an optional seniority-ID list (default unchanged), so the panel can try a candidate seniority rule as lane titles can't override it.
+
 ## [0.5.3]
 ### Fixed
 - **A job no longer vanishes while its own write is pending** (ADR-041). Pressing 👍 or Save made the local snapshot carry `null` for the server-stamped fields (`updatedAt`, `appliedAt`, `feedback.at`), which failed the schema, so Today's lists dropped the job and the sheet said it couldn't be read (`jobs.invalid` logged twice). All job reads now use estimated server timestamps. The agreement read does too.
