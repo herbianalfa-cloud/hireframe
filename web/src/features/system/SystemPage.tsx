@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { lazy, Suspense, useState } from 'react';
 
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -471,9 +472,11 @@ export function SystemPage() {
         </h2>
         <RecentRuns />
       </section>
-      <Suspense fallback={<Skeleton className="mt-8 h-16 w-full" />}>
-        <S2SkipReasons />
-      </Suspense>
+      <ErrorBoundary what="The S2 skip reasons panel">
+        <Suspense fallback={<Skeleton className="mt-8 h-16 w-full" />}>
+          <S2SkipReasons />
+        </Suspense>
+      </ErrorBoundary>
     </section>
   );
 }
