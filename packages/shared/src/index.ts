@@ -20,6 +20,7 @@ export * from './profile.js';
 export * from './query-spec.js';
 export * from './removal.js';
 export * from './s1.js';
+export * from './s2-diagnostics.js';
 export * from './score.js';
 export * from './usage.js';
 export { WATCHLIST_SEED } from './watchlist-seed.js';

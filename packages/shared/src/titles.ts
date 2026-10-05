@@ -91,11 +91,13 @@ export function laneOf(title: string, lanes: CriteriaContent['lanes']): Lane | n
 export function checkTitle(
   title: string,
   criteria: Pick<CriteriaContent, 'lanes' | 'excluded_titles'>,
+  /** Rules a lane title never overrides; the diagnostics add a candidate's ID to try it out. */
+  seniorityIds: readonly string[] = SENIORITY_TITLE_IDS,
 ): TitleCheck {
   const lane = laneOf(title, criteria.lanes);
   for (const rule of criteria.excluded_titles) {
     if (!matchesExcludedTitle(title, rule)) continue;
-    if (lane !== null && !SENIORITY_TITLE_IDS.includes(rule.id)) continue;
+    if (lane !== null && !seniorityIds.includes(rule.id)) continue;
     return { excludedBy: rule.id, lane };
   }
   return { excludedBy: null, lane };

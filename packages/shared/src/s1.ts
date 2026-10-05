@@ -180,6 +180,14 @@ export function rightToWorkBlocks(text: string, workRights: WorkRights): boolean
   }
 }
 
+/** The patterns S1 skips on, for the S2 diagnostics to sort a model's blocker text the same way. */
+export const BLOCKER_PATTERNS = {
+  sc: SC,
+  dv: DV,
+  driving: DRIVING,
+  rightToWork: RIGHT_TO_WORK_WORDING,
+} as const;
+
 /** Known blocker labels from the seed, by what they mean. Anything else is a literal phrase. */
 function blockerKind(label: string): 'sc' | 'dv' | 'driving' | 'rtw' | null {
   const folded = foldText(label);
@@ -254,10 +262,12 @@ export interface S1Input {
   /** Null until the owner sets it on the Profile screen; then no right-to-work skips. */
   workRights: WorkRights | null;
   now: Date;
+  /** Seniority rule IDs for the title check; the default is `SENIORITY_TITLE_IDS`. */
+  seniorityTitleIds?: readonly string[];
 }
 
 export function applyHardRules(input: S1Input): S1Result {
-  const { job, text, criteria, workRights, now } = input;
+  const { job, text, criteria, workRights, now, seniorityTitleIds } = input;
   const flags: JobFlag[] = [];
   const sortAt = sortDate(job);
   if (job.postedAt === undefined) flags.push('freshness_unknown');
@@ -270,7 +280,7 @@ export function applyHardRules(input: S1Input): S1Result {
     ...(experienceAsk ? { experienceAsk } : {}),
   });
 
-  const title = checkTitle(job.title, criteria);
+  const title = checkTitle(job.title, criteria, seniorityTitleIds);
   if (title.excludedBy) return skip(`title:${title.excludedBy}`);
   if (companyExcluded(job, criteria)) return skip('company');
 
