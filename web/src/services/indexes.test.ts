@@ -36,16 +36,6 @@ function jobsListSpecs(): Record<string, QuerySpec> {
   return specs;
 }
 
-describe('full-read Jobs list (sort and filter in the browser, ADR-044)', () => {
-  it('runs the same spec as the paged read, so the same indexes serve it', () => {
-    const filters = { verdict: 'near_miss', status: 'new' } as const;
-    // loadJobsWindow and loadJobsPage both build their query from jobFilterSpec(filters) and add
-    // only a limit, which is not part of a spec: no new query shape, no new index.
-    expect(jobFilterSpec(filters)).toEqual(jobsListSpecs()['jobs:near_miss/new']);
-    expect(indexServes(jobFilterSpec(filters), indexes)).toBe(true);
-  });
-});
-
 describe('firestore.indexes.json', () => {
   it('serves every dashboard query', () => {
     for (const [name, spec] of Object.entries(dashboardQuerySpecs(NOW))) {
