@@ -437,6 +437,28 @@ describe('expiry sweep', () => {
     }
   });
 
+  it('carries on to the lease and the stages when the sweep fails, and says so', async () => {
+    const store = memoryFunnelStore();
+    store.add('fresh', queuedS2(1));
+    store.add('stale', queuedS2(20));
+    store.staleQueued = () => Promise.reject(new Error('index missing'));
+    const result = await run(deps(store));
+    expect(result.sweepFailed).toBe(true);
+    expect(result.budget.leasePence).toBeGreaterThan(0);
+    expect(result.perStage.s2.in).toBe(1);
+    expect(store.get('fresh').verdict).toBe('apply');
+    // The stale job isn't swept, but the stage's own check still skips it when it reaches it.
+    expect(store.get('stale').skip?.ruleId).toBe('freshness');
+    const failure = logs.find((l) => l.event === 'funnel.failed' && l.step === 'sweep');
+    expect(failure).toMatchObject({ stage: 's2' });
+    expect(JSON.stringify(failure)).not.toContain('index missing');
+  });
+
+  it('reports a clean sweep as not failed', async () => {
+    const result = await run(deps(memoryFunnelStore()));
+    expect(result.sweepFailed).toBe(false);
+  });
+
   it('keeps a job exactly at the cutoff and expires one a millisecond past it', async () => {
     const usage: Usage = { ...emptyUsage(1_500, TEST_NOW), spendPence: 1_500 };
     const store = memoryFunnelStore();

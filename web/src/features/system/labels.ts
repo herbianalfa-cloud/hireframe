@@ -121,6 +121,7 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
   internal: 'an internal error',
   funnel_failed: 'the funnel failed',
   funnel_write_failed: 'some verdicts could not be saved',
+  funnel_sweep_failed: 'the clean-up of stale queued jobs failed; it will retry next run',
 };
 
 export function errorText(code: string | undefined): string | null {

@@ -534,6 +534,7 @@ describe('the funnel after ingest (M4)', () => {
       costPence: 1.8,
     },
     failedWrites: 0,
+    sweepFailed: false,
     ...patch,
   });
 
@@ -557,6 +558,19 @@ describe('the funnel after ingest (M4)', () => {
     expect(run?.perStage.s0).toBeDefined();
     expect(run?.perStage).toMatchObject({ s1: { in: 3 }, s3: { apply: 1 } });
     expect(run).toMatchObject({ costPence: 1.8, budget: { leasePence: 24 }, flags: ['spend_80'] });
+  });
+
+  it('makes the run partial and records the code when the expiry sweep failed', async () => {
+    const memory = memoryStore();
+    const result = await runScan(
+      deps(memory.store, {
+        disabledSources: ['greenhouse', 'lever', 'ashby', 'workable', 'adzuna', 'hn'],
+        funnel: () => Promise.resolve(outcome({ sweepFailed: true })),
+      }),
+    );
+    if (result.status !== 'completed') throw new Error(result.status);
+    expect(result.runStatus).toBe('partial');
+    expect(memory.runs.get('run-1')?.errors).toContainEqual({ code: 'funnel_sweep_failed' });
   });
 
   it('makes the run partial, never failed, when the funnel throws', async () => {

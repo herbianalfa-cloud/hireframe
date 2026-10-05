@@ -148,6 +148,8 @@ export interface FunnelOutcome {
   summary: FunnelSummary;
   /** Job writes that failed (logged); the run is partial when there are any. */
   failedWrites: number;
+  /** The expiry sweep hit a store error (logged); the stages still ran, and the run is partial. */
+  sweepFailed: boolean;
 }
 
 /** Patches are written in small groups, so a run killed mid-stage keeps what it paid for. */
@@ -211,6 +213,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   // ---- Writes: buffered, flushed every few jobs and at the end ----
   let pending: { jobId: string; patch: JobPatch }[] = [];
   let failedWrites = 0;
+  let sweepFailed = false;
   const flush = async () => {
     if (pending.length === 0) return;
     const batch = pending;
@@ -411,14 +414,21 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   // reads below only see the newest 300 / best 50, so without this the rest would wait forever.
   const staleBefore = freshnessCutoff(criteria, deps.now());
   for (const stage of QUEUE_STAGES) {
-    const stale = await store.staleQueued(stage, staleBefore, deps.limits.expireMaxJobs);
-    for (const entry of stale) {
-      // `sortAt` is a stored copy; the rule itself is the one S1 and the stages use.
-      if (!isExpired(entry.job, criteria, deps.now())) continue;
-      (stage === 's2' ? s2 : s3).expired += 1;
-      await write(entry.id, expiredPatch(stage, ctx()));
+    try {
+      const stale = await store.staleQueued(stage, staleBefore, deps.limits.expireMaxJobs);
+      for (const entry of stale) {
+        // `sortAt` is a stored copy; the rule itself is the one S1 and the stages use.
+        if (!isExpired(entry.job, criteria, deps.now())) continue;
+        (stage === 's2' ? s2 : s3).expired += 1;
+        await write(entry.id, expiredPatch(stage, ctx()));
+      }
+      await flush();
+    } catch (error) {
+      // Freeing the queue is housekeeping: a store error here must not stop the stages. Jobs
+      // whose writes didn't land stay queued, and the next run sweeps them again.
+      log.error('funnel.failed', { step: 'sweep', stage, ...errorFields(error) });
+      sweepFailed = true;
     }
-    await flush();
   }
 
   // ---- The run's spend lease (ADR-032) ----
@@ -792,6 +802,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         ...(stoppedBy ? { stoppedBy } : {}),
       },
       failedWrites,
+      sweepFailed,
     };
   }
 }
