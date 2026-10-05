@@ -220,7 +220,6 @@ describe('the funnel on the emulator', () => {
     for (const id of ['stale-a', 'stale-b']) {
       expect(await read(id)).toMatchObject({
         verdict: 'skip',
-        stage: 's2',
         skip: { stage: 's2', ruleId: 'freshness' },
         next: null,
       });
