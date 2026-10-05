@@ -59,7 +59,7 @@ Out (later waves): see `ROADMAP.md`.
 ### R7 Dashboard
 - Screens: Today, Jobs, Job detail, Lookup, Profile, Criteria, System. Dark default, light toggle, responsive (phone + laptop).
 - Today: KPI tiles (scanned today, Apply, applied this week vs target 10, spend this month vs cap), then Apply / Near miss / Wildcard lists, each sortable (Best overall, Fit, Luck, Newest); Jobs adds Lane and, for near misses, Gap filters (ADR-044).
-- Job actions: Open posting, Mark applied, Skip, 👍/👎 on verdict (with optional reason), Generate CV.
+- Job actions: Open posting, Apply, Skip, 👍/👎 on verdict (with optional reason), Generate CV.
 - AC: Lighthouse accessibility ≥ 95; all actions keyboard-accessible; loads usable in < 2 s on 4G.
 
 ### R8 Lookup

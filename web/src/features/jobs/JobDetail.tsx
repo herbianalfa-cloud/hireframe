@@ -218,7 +218,7 @@ function Actions({
           on={job.status === 'applied'}
           tone="apply"
           onLabel="Applied"
-          offLabel="Mark applied"
+          offLabel="Apply"
           disabled={pending || serverOwned}
           onPress={() => void to(job.status === 'applied' ? 'new' : 'applied')()}
         />

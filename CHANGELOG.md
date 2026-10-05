@@ -10,6 +10,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
 - Docs: the intake-sizing method for the per-run budget (FUNNEL.md and an ADR-032 amendment draft). **No cap, lease or budget config changes.**
 
 ### Changed
+- **The job sheet's "Mark applied" toggle is now "Apply"**: solid green (the Apply colour) until set, then a hollow green "Applied" with the check icon. Still a pressed toggle; contrast holds in both themes.
 - `QuerySpec` and `indexServes` moved to `@hireframe/shared`, and the `<` range op was added (ADR-040 amendment). Functions builds its new stale-queue query from a spec checked against `firestore.indexes.json`.
 - `applyHardRules` and `checkTitle` take an optional seniority-ID list (default unchanged), so the panel can try a candidate seniority rule as lane titles can't override it.
 

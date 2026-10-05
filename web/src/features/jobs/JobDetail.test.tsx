@@ -212,7 +212,7 @@ describe('JobDetail', () => {
   it('marks a job applied and tells the page', async () => {
     const view = show();
     const { onCommitted } = open();
-    await userEvent.click(screen.getByRole('button', { name: 'Mark applied' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
       expect(onCommitted).toHaveBeenCalled();
     });
@@ -271,14 +271,14 @@ describe('JobDetail', () => {
   it.each([
     ['new', 'Save', 'Unsave', 'saved'],
     ['new', 'Skip', 'Unskip', 'skipped'],
-    ['new', 'Mark applied', 'Applied', 'applied'],
+    ['new', 'Apply', 'Applied', 'applied'],
   ] as const)('%s job: %s is one toggle that becomes %s', async (_from, off, on, target) => {
     show();
     const first = open();
     const button = screen.getByRole('button', { name: off });
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(button.className).not.toContain('bg-accent');
-    if (off === 'Mark applied') {
+    if (off === 'Apply') {
       expect(button.className).toContain('bg-verdict-apply');
       expect(button.className).not.toContain('border-verdict-apply');
     }
@@ -293,7 +293,7 @@ describe('JobDetail', () => {
   it.each([
     ['saved', 'Unsave', 'Save'],
     ['skipped', 'Unskip', 'Skip'],
-    ['applied', 'Applied', 'Mark applied'],
+    ['applied', 'Applied', 'Apply'],
   ] as const)(
     'a %s job shows %s as selected, and pressing it goes back to new',
     async (status, on, off) => {
@@ -329,7 +329,7 @@ describe('JobDetail', () => {
         .getAllByRole('button')
         .filter((b) => b.hasAttribute('aria-pressed') && !b.hasAttribute('aria-label'));
       expect(toggles.map((b) => b.textContent)).toEqual([
-        status === 'applied' ? 'Applied' : 'Mark applied',
+        status === 'applied' ? 'Applied' : 'Apply',
         status === 'saved' ? 'Unsave' : 'Save',
         status === 'skipped' ? 'Unskip' : 'Skip',
       ]);
