@@ -1,4 +1,10 @@
-import { buildReport, CRITERIA_SEED_V1, type DiagnosticsReport, type Job } from '@hireframe/shared';
+import {
+  buildReport,
+  CRITERIA_SEED_V1,
+  unexpectedReportEntries,
+  type DiagnosticsReport,
+  type Job,
+} from '@hireframe/shared';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -118,6 +124,7 @@ describe('S2SkipReasons', () => {
       s2Skips: { total: 1 },
       sets: { good: { size: 1 } },
     });
+    expect(unexpectedReportEntries(JSON.parse(copied))).toEqual([]);
     for (const secret of [...SECRETS, 'description text', 'Software Engineer']) {
       expect(copied).not.toContain(secret);
       expect(container.textContent).not.toContain(secret);

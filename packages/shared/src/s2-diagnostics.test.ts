@@ -10,6 +10,7 @@ import {
   candidateRuleHits,
   isModelSkip,
   skipReasonCounts,
+  unexpectedReportEntries,
   type DiagnosticJob,
   type DiagnosticSets,
 } from './s2-diagnostics.js';
@@ -271,6 +272,14 @@ describe('buildReport', () => {
       expect(json).not.toContain(secret);
     }
     expect(report().s2Skips.byBlocker.language).toBe(2);
+  });
+
+  it('has only known keys, counts, nulls and dates, however the text is worded', () => {
+    expect(unexpectedReportEntries(report())).toEqual([]);
+    expect(unexpectedReportEntries({ ...report(), leaked: 1 })).toEqual(['report.leaked']);
+    expect(
+      unexpectedReportEntries({ sets: { good: { size: 1, from: secrets.title, to: null } } }),
+    ).toEqual(['report.sets.good.from']);
   });
 
   it('reports an empty set as null dates', () => {

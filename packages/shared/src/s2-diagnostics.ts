@@ -280,3 +280,45 @@ export function buildReport(input: {
     queuedWithoutSortAt: input.queuedWithoutSortAt,
   };
 }
+
+const REPORT_KEYS: ReadonlySet<string> = new Set([
+  'sets',
+  's2Skips',
+  'candidateHits',
+  'queuedWithoutSortAt',
+  's2Skipped',
+  'good',
+  'queuedS3',
+  's2',
+  's3',
+  'size',
+  'from',
+  'to',
+  'total',
+  'byLane',
+  'bySeniority',
+  'byLaneSeniority',
+  'byBlocker',
+  'withoutBlockers',
+  ...TRIAGE_LANES,
+  ...SENIORITIES,
+  ...BLOCKER_CATEGORIES,
+  ...CANDIDATE_RULES.map((rule) => rule.id),
+]);
+const REPORT_PAIR = new RegExp(`^(${TRIAGE_LANES.join('|')})/(${SENIORITIES.join('|')})$`);
+const REPORT_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Everything in a report that isn't a known key, a count, a null or an ISO date, as paths. Empty
+ * for every report `buildReport` makes; the tests use it to prove no job text can get in.
+ */
+export function unexpectedReportEntries(value: unknown, path = 'report'): string[] {
+  if (value === null || typeof value === 'number') return [];
+  if (typeof value === 'string') return REPORT_DATE.test(value) ? [] : [path];
+  if (typeof value !== 'object') return [path];
+  return Object.entries(value).flatMap(([key, child]) =>
+    REPORT_KEYS.has(key) || REPORT_PAIR.test(key)
+      ? unexpectedReportEntries(child, `${path}.${key}`)
+      : [`${path}.${key}`],
+  );
+}
