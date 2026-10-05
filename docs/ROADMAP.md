@@ -34,3 +34,4 @@ Run `node scripts/detect-ats.ts --recheck tmp/watchlist-review.csv` on the Worka
 - Agreement drops a job rated outside the 14-day window and then applied on an Apply verdict inside it; it counts as neither.
 - The spend meter fixes the month when Today mounts, so a tab left open over the 1st shows last month.
 - From funnel intake (ADR-043): build the existing `functions/src/funnel/store.ts` queries (`queued`, `s0Jobs`, `recentJobs`) through query specs and check them against `firestore.indexes.json`, as the new `staleQueued` is. Re-test any candidate S1 rule PR B rejects on a later 30 days of counts. Try C5 and C6 against real counts once they exist as code.
+- From sort and filter (ADR-044): an age/expiry chip on rows; hide rated jobs; bulk skip; a larger Today read for an exact "Best overall" (only if `hf:usable` has room); `sector` and `hard-blocker` in the gap filter; a lane filter on Today (one page-level select over all three lists).
