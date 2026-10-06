@@ -103,6 +103,8 @@ export async function runIngest(
     };
   }
 
+  // An ingest that takes over a stale scan lock says so, as a scan does.
+  if (lock.recovered) log.warn('scan.recovered', { runId: lock.recovered, code: 'timeout' });
   try {
     log.info('ingest.started', { messages: messages.length });
     const hashes = messages.map((message) => messageHash(message.id));

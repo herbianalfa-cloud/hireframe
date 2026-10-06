@@ -186,7 +186,11 @@ export function runBridge(deps: BridgeDeps): BridgeSummary {
       return { ...summary, stopped: 'http_error' };
     }
     const parsed = parseResponse(response.body);
-    if (!parsed) return { ...summary, stopped: 'bad_response' };
+    if (!parsed) {
+      // A fixed code and the status only: the body is never logged.
+      log('bridge.post_failed', { reason: 'bad_response', status: response.status });
+      return { ...summary, stopped: 'bad_response' };
+    }
     summary.sent += batch.length;
     const sent = new Set(batch.map((message) => message.id));
     for (const { id, status } of parsed.results) {

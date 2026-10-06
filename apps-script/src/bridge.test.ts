@@ -266,6 +266,24 @@ describe('relabelling', () => {
     expect(h.posts).toHaveLength(1); // no point sending the rest
   });
 
+  it('logs a fixed code for each way a post fails, and never the response body', () => {
+    const logged: { event: string; fields: Record<string, number | string> }[] = [];
+    for (const response of [
+      { status: 200, body: 'SECRET not json' },
+      { status: 500, body: 'SECRET oops' },
+      { status: 503, body: 'SECRET busy' },
+    ]) {
+      const h = harness(many(2), { respond: () => response });
+      runBridge({ ...h.deps, log: (event, fields) => logged.push({ event, fields }) });
+    }
+    expect(logged).toEqual([
+      { event: 'bridge.post_failed', fields: { reason: 'bad_response', status: 200 } },
+      { event: 'bridge.post_failed', fields: { reason: 'http_error', status: 500 } },
+      { event: 'bridge.post_failed', fields: { reason: 'busy' } },
+    ]);
+    expect(JSON.stringify(logged)).not.toContain('SECRET');
+  });
+
   it('skips a message Gmail cannot return, and sends the rest', () => {
     const h = harness({ m1: message('m1') }, { listed: ['m2', 'm1'] });
     const summary = runBridge(h.deps);

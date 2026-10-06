@@ -24,6 +24,8 @@ export interface MemoryIngestStore extends IngestStore {
   /** How many `writePlan` calls to fail (each counts one failed write). */
   failWrites: number;
   holdLock(holder: LockHolder): void;
+  /** The next `acquireLock` takes over a stale run, like the real store does (and says which). */
+  recoverRun?: string;
 }
 
 export function memoryIngestStore(): MemoryIngestStore {
@@ -46,6 +48,11 @@ export function memoryIngestStore(): MemoryIngestStore {
         return Promise.resolve({ ok: false, reason: 'running', holder: store.lock.holder });
       }
       store.lock = { holder, startedAt: now };
+      if (store.recoverRun !== undefined) {
+        const recovered = store.recoverRun;
+        delete store.recoverRun;
+        return Promise.resolve({ ok: true, recovered });
+      }
       return Promise.resolve({ ok: true });
     },
     releaseLock: () => {

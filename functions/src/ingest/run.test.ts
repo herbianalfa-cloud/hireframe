@@ -234,6 +234,21 @@ describe('runIngest: the lock', () => {
     expect(store.lock.holder).toBe('scan'); // not released by a request that never held it
   });
 
+  it('logs scan.recovered when it takes over a stale scan lock', async () => {
+    const { store, deps } = setup();
+    store.recoverRun = 'run-stale';
+    await runIngest(deps, [msg('g1', LINKEDIN_ALERT)]);
+    expect(logs.filter((entry) => entry.event === 'scan.recovered')).toEqual([
+      { level: 'warn', event: 'scan.recovered', fields: { runId: 'run-stale', code: 'timeout' } },
+    ]);
+  });
+
+  it('logs nothing about recovery for an ordinary lock', async () => {
+    const { deps } = setup();
+    await runIngest(deps, [msg('g1', LINKEDIN_ALERT)]);
+    expect(logs.some((entry) => entry.event === 'scan.recovered')).toBe(false);
+  });
+
   it('holds the lock as email during the run and releases it after, even on failure', async () => {
     const { store, deps } = setup(() => Promise.reject(new Error('boom')));
     let heldAs: string | null = null;
