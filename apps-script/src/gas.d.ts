@@ -44,7 +44,7 @@ declare const UrlFetchApp: {
     options: {
       method: 'post';
       contentType: string;
-      payload: string;
+      payload: number[];
       headers: Record<string, string>;
       muteHttpExceptions: true;
     },
@@ -56,7 +56,7 @@ declare const PropertiesService: {
 };
 
 declare const Utilities: {
-  computeHmacSha256Signature(value: string, key: string): number[];
+  computeHmacSha256Signature(value: number[], key: number[]): number[];
   getUuid(): string;
   base64DecodeWebSafe(data: string): number[];
   newBlob(bytes: number[]): { getDataAsString(charset: string): string };

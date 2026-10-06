@@ -1,4 +1,5 @@
 import { runBridge, LABELS, PENDING_QUERY, type BridgeMessage } from './bridge.js';
+import { toSignedBytes } from '../../packages/shared/src/signing.js';
 import { createSigner } from './sign.js';
 
 /**
@@ -84,14 +85,17 @@ export function run(): void {
     post(body, headers) {
       const response = UrlFetchApp.fetch(url, {
         method: 'post',
-        contentType: 'application/json',
-        payload: body,
+        contentType: 'application/json; charset=utf-8',
+        // The same bytes that were signed, never a string the runtime might re-encode.
+        payload: toSignedBytes(body),
         headers,
         muteHttpExceptions: true,
       });
       return { status: response.getResponseCode(), body: response.getContentText() };
     },
-    signer: createSigner(secret, (value, key) => Utilities.computeHmacSha256Signature(value, key)),
+    signer: createSigner(secret, (value, key) =>
+      Utilities.computeHmacSha256Signature(toSignedBytes(value), toSignedBytes(key)),
+    ),
     uuid: () => Utilities.getUuid(),
     now: () => Date.now(),
     log: (event, fields) => {

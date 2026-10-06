@@ -1,4 +1,4 @@
-import { INGEST_WIRE, utf8Length } from '../../packages/shared/src/signing.js';
+import { INGEST_WIRE, utf8Bytes, utf8Length } from '../../packages/shared/src/signing.js';
 import type { RequestSigner } from './sign.js';
 
 /**
@@ -28,8 +28,14 @@ export interface BridgeDeps {
   getMessage: (id: string) => BridgeMessage | null;
   /** Adds `hireframe/done` and removes `hireframe/alerts`. */
   markDone: (id: string) => void;
-  /** One POST; may throw (network error, timeout). */
-  post: (body: string, headers: Record<string, string>) => { status: number; body: string };
+  /** One POST of the body's UTF-8 bytes (the bytes that were signed); may throw. */
+  post: (
+    body: readonly number[],
+    headers: Record<string, string>,
+  ) => {
+    status: number;
+    body: string;
+  };
   signer: RequestSigner;
   /** UUID v4. */
   uuid: () => string;
@@ -160,7 +166,8 @@ export function runBridge(deps: BridgeDeps): BridgeSummary {
   const summary: BridgeSummary = { listed: ids.length, sent: 0, posts: 0, relabelled: 0 };
 
   for (const batch of batchByBytes(messages)) {
-    const body = bodyFor(batch);
+    // Encoded once: the signature covers these bytes and they are what is sent.
+    const body = utf8Bytes(bodyFor(batch));
     const headers = deps.signer.headers(body, Math.floor(deps.now() / 1000), deps.uuid());
     summary.posts += 1;
     let response: { status: number; body: string };

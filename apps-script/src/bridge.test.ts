@@ -61,7 +61,9 @@ function harness(
     markDone: (id) => {
       done.push(id);
     },
-    post: (body, headers) => {
+    post: (payload, headers) => {
+      // The bridge posts UTF-8 bytes; the tests read them back as the text they carry.
+      const body = Buffer.from(payload).toString('utf8');
       posts.push({ body, headers });
       const result = respond(body, posts.length);
       if (result instanceof Error) throw result;

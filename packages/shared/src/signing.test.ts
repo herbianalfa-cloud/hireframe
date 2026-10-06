@@ -4,9 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   signedBytesToHex,
+  signingPrefix,
   signingString,
+  toSignedBytes,
   trimSecret,
   truncateUtf8,
+  utf8Bytes,
   utf8Length,
 } from './signing.js';
 
@@ -49,5 +52,38 @@ describe('utf8Length and truncateUtf8', () => {
     }
     expect(truncateUtf8('日本語', 7)).toBe('日本');
     expect(truncateUtf8('abc', 100)).toBe('abc');
+  });
+});
+
+describe('utf8Bytes', () => {
+  const samples = [
+    '',
+    'abc',
+    'é',
+    'Product Analyst · London · £45K',
+    '€5',
+    '日本語',
+    'a😀b',
+    '\ud800x',
+    'x\udc00',
+  ];
+  it.each(samples)('encodes %j like Buffer', (text) => {
+    expect(utf8Bytes(text)).toEqual([...Buffer.from(text, 'utf8')]);
+    expect(utf8Bytes(text)).toHaveLength(utf8Length(text));
+  });
+
+  it('is the signed prefix plus the body, byte for byte', () => {
+    const body = '{"text":"· £"}';
+    expect(
+      Buffer.from([...utf8Bytes(signingPrefix('1760000000', 'n-1')), ...utf8Bytes(body)]).toString(
+        'utf8',
+      ),
+    ).toBe(signingString('1760000000', 'n-1', body));
+  });
+});
+
+describe('toSignedBytes', () => {
+  it("maps unsigned bytes to Apps Script's -128..127", () => {
+    expect(toSignedBytes([0, 127, 128, 255])).toEqual([0, 127, -128, -1]);
   });
 });

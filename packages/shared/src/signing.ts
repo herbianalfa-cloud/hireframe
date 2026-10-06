@@ -32,9 +32,49 @@ export function trimSecret(secret: string): string {
   return secret.trim();
 }
 
+/** `v1.<timestamp>.<nonce>.`: what precedes the raw body in the signed bytes. */
+export function signingPrefix(timestamp: string, nonce: string): string {
+  return `${SIGNATURE_VERSION}.${timestamp}.${nonce}.`;
+}
+
 /** `v1.<timestamp>.<nonce>.<raw body>`: covers the body, the time and the nonce. */
 export function signingString(timestamp: string, nonce: string, body: string): string {
-  return `${SIGNATURE_VERSION}.${timestamp}.${nonce}.${body}`;
+  return `${signingPrefix(timestamp, nonce)}${body}`;
+}
+
+/** UTF-8 bytes (0..255) of a string, without TextEncoder (Apps Script's V8 has none). */
+export function utf8Bytes(text: string): number[] {
+  const bytes: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    let code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+        i += 1;
+      }
+    }
+    // A lone surrogate is encoded as U+FFFD, as TextEncoder and Buffer do (3 bytes).
+    if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
+    if (code < 0x80) bytes.push(code);
+    else if (code < 0x800) bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    else if (code < 0x10000) {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      bytes.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f),
+      );
+    }
+  }
+  return bytes;
+}
+
+/** Apps Script's byte arrays are signed (-128..127); this maps unsigned bytes to them. */
+export function toSignedBytes(bytes: readonly number[]): number[] {
+  return bytes.map((byte) => (byte > 127 ? byte - 256 : byte));
 }
 
 /** Apps Script's HMAC returns signed bytes (-128..127); this maps them to unsigned hex. */
