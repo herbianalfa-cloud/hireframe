@@ -66,7 +66,9 @@ export const ingestEmailJobs = onRequest(
     timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.ingestEmailJobs,
     memory: '512MiB',
     // Stated here, not only inherited from the global options: ingests never run in parallel.
+    // One instance alone isn't enough (2nd gen serves 80 requests at once on an instance).
     maxInstances: 1,
+    concurrency: 1,
     cors: false,
     secrets: [hmacSecret, anthropicApiKey],
   },

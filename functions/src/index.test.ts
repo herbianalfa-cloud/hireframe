@@ -12,6 +12,7 @@ interface Endpoint {
   httpsTrigger?: object;
   availableMemoryMb?: number | string;
   maxInstances?: number | string;
+  concurrency?: number | string;
 }
 
 const endpoints = Object.entries(deployed).map(
@@ -84,7 +85,9 @@ describe('ingestEmailJobs (ADR-046)', () => {
     expect(endpoint?.timeoutSeconds).toBe(120);
   });
 
-  it('states one instance on the function itself, so ingests never run in parallel', () => {
+  it('states one instance and one request at a time, so ingests never run in parallel', () => {
     expect(endpoint?.maxInstances).toBe(1);
+    // 2nd gen defaults to 80 concurrent requests per instance: one instance alone isn't enough.
+    expect(endpoint?.concurrency).toBe(1);
   });
 });
