@@ -5,3 +5,4 @@
 export { addFact, parseCv, resetProfile } from './profile/callables.js';
 export { rescore } from './funnel/callables.js';
 export { scanNow, scheduledScan } from './scan/callables.js';
+export { ingestEmailJobs } from './ingest/endpoint.js';

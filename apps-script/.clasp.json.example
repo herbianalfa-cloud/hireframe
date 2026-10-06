@@ -1,0 +1,4 @@
+{
+  "scriptId": "<your Apps Script project's script ID, from `npx clasp create`>",
+  "rootDir": "build"
+}

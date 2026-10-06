@@ -55,10 +55,10 @@ export function alertParseUser(
   message: Pick<IngestMessage, 'text' | 'html'>,
   links: readonly AlertLink[],
 ): string {
-  const body = (message.text.trim() === '' ? htmlToText(message.html) : message.text).slice(
-    0,
-    ALERTS.maxModelChars,
-  );
+  // Raw URLs in the text are replaced: links reach the model only as the numbered list below.
+  const body = (message.text.trim() === '' ? htmlToText(message.html) : message.text)
+    .replace(/https?:\/\/\S+/g, '[link]')
+    .slice(0, ALERTS.maxModelChars);
   const list = links.length ? `\n\nLinks:\n${links.map(linkLine).join('\n')}` : '';
   return wrapUntrusted('email', `${body}${list}`);
 }

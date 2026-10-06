@@ -1,5 +1,6 @@
 import { FAKE_MODEL_PREFIX } from '../config.js';
 import { fakeDeepRead, fakeTriage } from '../funnel/fake-answers.js';
+import { fakeAlertParse } from '../ingest/fake-answers.js';
 import { FAKE_CV_EXTRACTION, FAKE_CV_REVISED_EXTRACTION } from '../fixtures/fake-cv-response.js';
 import { REVISED_MARKER } from '../fixtures/fake-cv-text.js';
 import type { LlmTransport } from './transport.js';
@@ -27,6 +28,8 @@ export function fakeTransport(): LlmTransport {
         output = fakeTriage(user);
       } else if (request.purpose === 'deepRead') {
         output = fakeDeepRead(request.system, user);
+      } else if (request.purpose === 'alertParse') {
+        output = fakeAlertParse(user);
       } else {
         const note = user.replace(/<\/?note>/g, '').trim();
         const sentence = (note.split(/(?<=[.!?])\s/)[0] ?? note).slice(0, 300).trim();

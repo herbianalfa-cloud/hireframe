@@ -589,3 +589,72 @@ describe('the funnel after ingest (M4)', () => {
     expect(logs.some((l) => l.event === 'scan.failed' && l.fields.step === 'funnel')).toBe(true);
   });
 });
+
+describe('the scheduled scan and short lock holders (ADR-048)', () => {
+  /** A store whose lock answers from a script, then lets the scan take it. */
+  function scripted(answers: LockResult[]) {
+    const memory = memoryStore();
+    const attempts: Date[] = [];
+    const store: ScanStore = {
+      ...memory.store,
+      acquireLock: (_runId, now) => {
+        attempts.push(now);
+        return Promise.resolve(answers.shift() ?? ({ ok: true } as const));
+      },
+    };
+    return { memory, store, attempts };
+  }
+
+  function waiting(clock: { t: number }, slept: number[]): Partial<ScanDeps> {
+    return {
+      now: () => new Date(clock.t),
+      trigger: 'schedule',
+      waitForShortHolders: {
+        intervalMs: 15_000,
+        maxMs: 4 * 60_000,
+        sleep: (ms) => {
+          slept.push(ms);
+          clock.t += ms;
+          return Promise.resolve();
+        },
+      },
+    };
+  }
+
+  const email: LockResult = { ok: false, reason: 'running', holder: 'email' };
+
+  it('waits for an email holder, retrying every 15 s, then runs', async () => {
+    const clock = { t: NOW.getTime() };
+    const slept: number[] = [];
+    const { memory, store, attempts } = scripted([email, email]);
+    const result = await runScan(deps(store, waiting(clock, slept)));
+    if (result.status !== 'completed') throw new Error(result.status);
+    expect(slept).toEqual([15_000, 15_000]);
+    expect(attempts).toHaveLength(3);
+    // The run's own clock starts once it has the lock.
+    expect(memory.runs.get(result.runId)?.startedAt.getTime()).toBe(NOW.getTime() + 30_000);
+  });
+
+  it('gives up after 4 minutes and reports busy with the holder', async () => {
+    const clock = { t: NOW.getTime() };
+    const slept: number[] = [];
+    const { store } = scripted(Array(100).fill(email) as LockResult[]);
+    const result = await runScan(deps(store, waiting(clock, slept)));
+    expect(result).toEqual({ status: 'busy', holder: 'email' });
+    expect(slept.reduce((a, b) => a + b, 0)).toBe(4 * 60_000);
+  });
+
+  it('skips at once when a scan holds the lock', async () => {
+    const clock = { t: NOW.getTime() };
+    const slept: number[] = [];
+    const { store } = scripted([{ ok: false, reason: 'running', holder: 'scan' }]);
+    const result = await runScan(deps(store, waiting(clock, slept)));
+    expect(result).toEqual({ status: 'busy', holder: 'scan' });
+    expect(slept).toEqual([]);
+  });
+
+  it('a manual scan never waits: it reports busy and names the holder', async () => {
+    const { store } = scripted([email]);
+    expect(await runScan(deps(store))).toEqual({ status: 'busy', holder: 'email' });
+  });
+});

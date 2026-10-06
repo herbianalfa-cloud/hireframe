@@ -11,6 +11,10 @@ coverage/
 functions/deploy/
 functions/.secret.local
 
+# Gmail bridge: the bundle (scripts/build-apps-script.ts) and the owner's own script ID
+apps-script/build/
+apps-script/.clasp.json
+
 # Local scratch output (e.g. scripts/make-cv-fixtures.ts)
 /tmp/
 
