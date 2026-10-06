@@ -104,7 +104,7 @@ export interface ScanDeps {
    */
   waitForShortHolders?: { intervalMs: number; maxMs: number; sleep: (ms: number) => Promise<void> };
   /** The funnel, run after ingest while the lock is held (M4). */
-  funnel?: (input: { runId: string; startedAt: Date }) => Promise<FunnelOutcome>;
+  funnel?: (input: { runId: string; invokedAt: Date }) => Promise<FunnelOutcome>;
 }
 
 export type ScanResult = ScanNowResult | { status: 'busy'; holder?: LockHolder };
@@ -201,13 +201,16 @@ function sourceCode(error: unknown): string {
 
 export async function runScan(deps: ScanDeps): Promise<ScanResult> {
   const { store } = deps;
-  let startedAt = deps.now();
+  // Function timeouts and the funnel's deadlines count from invocation, not from when the lock
+  // was taken after a wait for an email ingest; `startedAt` is the latter (the run document's).
+  const invokedAt = deps.now();
+  let startedAt = invokedAt;
   const runId = store.newRunId();
 
   let lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
   const wait = deps.waitForShortHolders;
   if (wait) {
-    const giveUpAt = startedAt.getTime() + wait.maxMs;
+    const giveUpAt = invokedAt.getTime() + wait.maxMs;
     while (
       !lock.ok &&
       lock.reason === 'running' &&
@@ -217,7 +220,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     ) {
       log.info('scan.waiting', { holder: lock.holder });
       await wait.sleep(wait.intervalMs);
-      // The run's own deadlines start once it has the lock.
+      // The run's own start (not its deadlines) moves to when it has the lock.
       startedAt = deps.now();
       lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
     }
@@ -268,7 +271,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     const companies = stored.map((entry) => entry.company);
 
     // ---- Fetch every source in parallel ----
-    const deadline = startedAt.getTime() + SCAN.fetchBudgetMs;
+    const deadline = invokedAt.getTime() + SCAN.fetchBudgetMs;
     const sources = deps.createSources();
     const disabled = new Set(deps.disabledSources);
     const outcomes = await Promise.all(
@@ -419,7 +422,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     let funnel: FunnelOutcome | null = null;
     if (deps.funnel) {
       try {
-        funnel = await deps.funnel({ runId, startedAt });
+        funnel = await deps.funnel({ runId, invokedAt });
         if (funnel.failedWrites > 0) run.errors.push({ code: 'funnel_write_failed' });
         if (funnel.sweepFailed) run.errors.push({ code: 'funnel_sweep_failed' });
       } catch (error) {

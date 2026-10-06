@@ -33,7 +33,8 @@ export interface FunnelWiring {
 
 export type FunnelRunner = (input: {
   runId: string;
-  startedAt: Date;
+  /** When the function was invoked: the funnel's deadlines count from here. */
+  invokedAt: Date;
   rescoreSince?: Date;
 }) => Promise<FunnelOutcome>;
 
@@ -49,7 +50,7 @@ export function funnelOverrides(config: Pick<AppConfig, 'funnel'>): FunnelOverri
 export function funnelFor(wiring: FunnelWiring): FunnelRunner {
   const monthlyCapPence = wiring.config.monthlyCapPence ?? DEFAULT_MONTHLY_CAP_PENCE;
   const limits = funnelLimits(monthlyCapPence, funnelOverrides(wiring.config));
-  return async ({ runId, startedAt, rescoreSince }) => {
+  return async ({ runId, invokedAt, rescoreSince }) => {
     const store = firestoreFunnelStore(wiring.firestore);
     const criteria = await getCurrentCriteria(wiring.firestore);
     const reedApiKey = wiring.reedApiKey;
@@ -57,7 +58,7 @@ export function funnelFor(wiring: FunnelWiring): FunnelRunner {
       ? createReedHydrator({
           http: scanHttpClient(
             wiring.fetch,
-            startedAt.getTime() + FUNNEL.s3StopMs,
+            invokedAt.getTime() + FUNNEL.s3StopMs,
             await store.reedPauses(),
           ),
           apiKey: reedApiKey,
@@ -85,7 +86,7 @@ export function funnelFor(wiring: FunnelWiring): FunnelRunner {
           new Promise((resolve) => {
             setTimeout(resolve, ms);
           }),
-        startedAtMs: startedAt.getTime(),
+        startedAtMs: invokedAt.getTime(),
       },
       { runId, ...(rescoreSince ? { rescoreSince } : {}) },
     );

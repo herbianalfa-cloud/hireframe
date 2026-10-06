@@ -13,6 +13,7 @@ import {
 } from '@hireframe/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { SCAN } from '../config.js';
 import type { FunnelOutcome } from '../funnel/run.js';
 import { setLogSink, type LogEvent, type LogFields } from '../log.js';
 import { fakeFetch } from '../sources/fake-fetch.js';
@@ -633,6 +634,34 @@ describe('the scheduled scan and short lock holders (ADR-048)', () => {
     expect(attempts).toHaveLength(3);
     // The run's own clock starts once it has the lock.
     expect(memory.runs.get(result.runId)?.startedAt.getTime()).toBe(NOW.getTime() + 30_000);
+  });
+
+  it('counts the fetch and funnel deadlines from invocation, not from the lock after a wait', async () => {
+    const clock = { t: NOW.getTime() };
+    const slept: number[] = [];
+    // Fifteen 15 s waits: the scan gets the lock 3 min 45 s after it was invoked.
+    const { memory, store } = scripted(Array(15).fill(email) as LockResult[]);
+    let funnelInvokedAt: Date | undefined;
+    const deadlines: number[] = [];
+    const result = await runScan(
+      deps(store, {
+        ...waiting(clock, slept),
+        httpFor: (deadline) => {
+          deadlines.push(deadline);
+          return testHttpClient();
+        },
+        funnel: ({ invokedAt }) => {
+          funnelInvokedAt = invokedAt;
+          return Promise.reject(new Error('stop here'));
+        },
+      }),
+    );
+    if (result.status !== 'completed') throw new Error(result.status);
+    const waited = 15 * 15_000;
+    expect(memory.runs.get(result.runId)?.startedAt.getTime()).toBe(NOW.getTime() + waited);
+    expect(funnelInvokedAt?.getTime()).toBe(NOW.getTime());
+    expect(deadlines.length).toBeGreaterThan(0);
+    for (const deadline of deadlines) expect(deadline).toBe(NOW.getTime() + SCAN.fetchBudgetMs);
   });
 
   it('gives up after 4 minutes and reports busy with the holder', async () => {

@@ -54,7 +54,7 @@ export async function runRescore(
     log.info('rescore.started', { runId });
     if (lock.recovered) log.warn('scan.recovered', { runId: lock.recovered, code: 'timeout' });
     const rescoreSince = new Date(startedAt.getTime() - RESCORE_DAYS * DAY_MS);
-    const outcome = await deps.funnel({ runId, startedAt, rescoreSince });
+    const outcome = await deps.funnel({ runId, invokedAt: startedAt, rescoreSince });
     const errors = [
       ...(outcome.failedWrites > 0 ? [{ code: 'funnel_write_failed' }] : []),
       ...(outcome.sweepFailed ? [{ code: 'funnel_sweep_failed' }] : []),
