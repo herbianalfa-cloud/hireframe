@@ -96,9 +96,10 @@ describe('Gmail bridge limits (ADR-046, ADR-047, ADR-048)', () => {
     expect(HMAC.nonceTtlSeconds).toBe(600);
   });
 
-  it('opens model calls only inside the 60 s UrlFetchApp limit, and leaves room to finish', () => {
-    expect(ALERTS.modelWindowMs).toBe(35_000);
-    // The last call starts at 35 s and may take its full budget; the function timeout covers it.
+  it('answers the script inside its 60 s UrlFetchApp limit: last call start plus its budget is 50 s at most', () => {
+    expect(ALERTS.modelWindowMs + MODELS.alertParse.budgetMs).toBeLessThanOrEqual(50_000);
+    expect(ALERTS.modelWindowMs).toBe(15_000);
+    // The function's own timeout still covers the whole request.
     expect(ALERTS.modelWindowMs + MODELS.alertParse.budgetMs).toBeLessThanOrEqual(
       CALLABLE_TIMEOUT_SECONDS.ingestEmailJobs * 1000,
     );

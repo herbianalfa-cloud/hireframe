@@ -307,9 +307,9 @@ describe('runIngest: other senders (model fallback)', () => {
     expect(down.store.messages.size).toBe(0);
   });
 
-  it('defers later model messages once 35 s of the request have passed', async () => {
+  it('defers later model messages once 15 s of the request have passed', async () => {
     const slow: ModelParser = (message) => {
-      clock += 20_000;
+      clock += 10_000;
       return waasParser(message);
     };
     const { store, deps, calls } = setup(slow);
@@ -319,7 +319,7 @@ describe('runIngest: other senders (model fallback)', () => {
       msg('w3', { ...WAAS_ALERT, text: `${WAAS_ALERT.text} 3` }),
       msg('g1', LINKEDIN_ALERT),
     ]);
-    expect(calls).toEqual(['w1', 'w2']); // 0 s and 20 s start; at 40 s the window has closed
+    expect(calls).toEqual(['w1', 'w2']); // 0 s and 10 s start; at 20 s the window has closed
     expect(result).toMatchObject({
       results: [
         { id: 'w1', status: 'processed' },

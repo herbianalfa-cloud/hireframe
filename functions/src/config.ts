@@ -70,7 +70,7 @@ export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
     budgetMs: 60_000,
   },
   /** Alert emails from senders with no deterministic parser (ADR-047). */
-  alertParse: { id: 'claude-haiku-4-5', maxTokens: 3_000, timeoutMs: 25_000, budgetMs: 45_000 },
+  alertParse: { id: 'claude-haiku-4-5', maxTokens: 3_000, timeoutMs: 15_000, budgetMs: 35_000 },
 };
 
 /** The callable whose timeout bounds each purpose's calls. */
@@ -337,8 +337,11 @@ export const ALERTS = {
   /** Messages per request, and the wire limits the script truncates to (shared with it). */
   maxMessagesPerRequest: INGEST_WIRE.messagesPerRequest,
   maxBodyBytes: INGEST_WIRE.serverMaxBytes,
-  /** Model calls start only within this of the request starting: UrlFetchApp gives up at ~60 s. */
-  modelWindowMs: 35_000,
+  /**
+   * Model calls start only within this of the request starting. UrlFetchApp gives up at ~60 s, so
+   * this plus the `alertParse` budget stays within 50 s (config.test.ts).
+   */
+  modelWindowMs: 15_000,
   /** `alertMessages` documents are kept this long (a TTL policy on `expireAt`). */
   messageTtlDays: 30,
   /** Daily spend on alert parsing; `config/app.alerts.dailyCapPence` overrides it. */
