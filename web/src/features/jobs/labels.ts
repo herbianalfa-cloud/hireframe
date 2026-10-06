@@ -92,6 +92,15 @@ export function isSearchLink(url: string): boolean {
   }
 }
 
+/** True for an `https:` URL (and nothing else): the only kind an unverified link may be. */
+export function isHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /** The host of an off-allowlist alert link, shown beside the "unverified link" mark. */
 export function linkHost(url: string): string {
   try {

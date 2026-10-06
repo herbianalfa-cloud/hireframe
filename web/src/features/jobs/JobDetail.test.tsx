@@ -240,7 +240,7 @@ describe('JobDetail', () => {
       expect(within(itemOf('Greenhouse')).queryByText('Easy Apply on LinkedIn')).toBeNull();
     });
 
-    it('marks an off-allowlist link as unverified, with its host', () => {
+    it('shows an off-allowlist link by its host, marked unverified', () => {
       show({
         sources: [
           {
@@ -254,10 +254,38 @@ describe('JobDetail', () => {
         ],
       });
       open();
-      expect(screen.getByRole('link', { name: 'Email alert' }).getAttribute('href')).toBe(
-        'https://click.example.net/c/9f8e7d',
-      );
-      expect(screen.getByText(/unverified link \(click\.example\.net\)/)).toBeDefined();
+      const link = screen.getByRole('link', { name: 'click.example.net' });
+      expect(link.getAttribute('href')).toBe('https://click.example.net/c/9f8e7d');
+      // The source's name is not the link text: the link says where it goes.
+      expect(screen.queryByRole('link', { name: 'Email alert' })).toBeNull();
+      expect(link.closest('li')?.textContent).toContain('Email alert');
+      expect(link.closest('li')?.textContent).toContain('unverified link');
+    });
+
+    it('never renders a non-https unverified link as a link', () => {
+      show({
+        sources: [
+          {
+            id: 'email-alert',
+            url: 'http://click.example.net/c/9f8e7d',
+            externalId: 'abcd1234abcd1234',
+            seenAt: SEEN,
+            unverified: true,
+          },
+          {
+            id: 'email-alert',
+            url: 'javascript:alert(1)',
+            externalId: 'efgh5678efgh5678',
+            seenAt: SEEN,
+            unverified: true,
+          },
+        ],
+      });
+      open();
+      expect(screen.queryByRole('link', { name: 'click.example.net' })).toBeNull();
+      expect(screen.getByText('click.example.net')).toBeDefined();
+      expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+      expect(screen.getAllByText(/unverified link/)).toHaveLength(2);
     });
 
     it('labels a LinkedIn search URL as a search link, not a posting', () => {

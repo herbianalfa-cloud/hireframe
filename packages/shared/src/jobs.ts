@@ -139,17 +139,22 @@ export const RawJobSchema = z.object({
 });
 export type RawJob = z.infer<typeof RawJobSchema>;
 
-export const JobSourceRefSchema = z.object({
-  id: z.enum(JOB_SOURCE_IDS),
-  url: HttpUrl,
-  externalId: z.string().min(1).max(JOB_LIMITS.externalId),
-  seenAt: z.date(),
-  easyApply: z.literal(true).exactOptional(),
-  /** `url` is an off-allowlist link from a model-parsed alert: shown with its host, never trusted. */
-  unverified: z.literal(true).exactOptional(),
-  /** `url` is a search link, not a posting. */
-  searchLink: z.literal(true).exactOptional(),
-});
+export const JobSourceRefSchema = z
+  .object({
+    id: z.enum(JOB_SOURCE_IDS),
+    url: HttpUrl,
+    externalId: z.string().min(1).max(JOB_LIMITS.externalId),
+    seenAt: z.date(),
+    easyApply: z.literal(true).exactOptional(),
+    /** `url` is an off-allowlist link from a model-parsed alert: shown with its host, never trusted. */
+    unverified: z.literal(true).exactOptional(),
+    /** `url` is a search link, not a posting. */
+    searchLink: z.literal(true).exactOptional(),
+  })
+  .refine((ref) => !ref.unverified || /^https:\/\//i.test(ref.url), {
+    message: 'an unverified link must be https',
+    path: ['url'],
+  });
 export type JobSourceRef = z.infer<typeof JobSourceRefSchema>;
 
 /**

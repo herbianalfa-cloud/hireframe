@@ -29,6 +29,7 @@ import {
   GAP_LABELS,
   LEVEL_LABELS,
   MATCH_LABELS,
+  isHttpsUrl,
   isSearchLink,
   linkHost,
   postedText,
@@ -415,18 +416,36 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
         <ul className="space-y-1">
           {job.sources.map((source) => (
             <li key={`${source.id}:${source.externalId}`}>
-              <a
-                href={source.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline underline-offset-4"
-              >
-                {SOURCE_NAMES[source.id] ?? source.id}
-              </a>
+              {source.unverified ? (
+                <>
+                  <span>{SOURCE_NAMES[source.id] ?? source.id}: </span>
+                  {/* An off-allowlist link: its host is the text, and only https is ever a link. */}
+                  {isHttpsUrl(source.url) ? (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-4"
+                    >
+                      {linkHost(source.url)}
+                    </a>
+                  ) : (
+                    <span>{linkHost(source.url)}</span>
+                  )}
+                </>
+              ) : (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4"
+                >
+                  {SOURCE_NAMES[source.id] ?? source.id}
+                </a>
+              )}
               <span className="text-xs text-muted-foreground">
                 {source.searchLink && !source.unverified ? ' · search link' : ''}
-                {source.unverified ? ` · unverified link (${linkHost(source.url)})` : ''} · seen{' '}
-                {formatDate(source.seenAt)}
+                {source.unverified ? ' · unverified link' : ''} · seen {formatDate(source.seenAt)}
               </span>
               {source.easyApply ? (
                 <Badge variant="accent" className="ml-2">

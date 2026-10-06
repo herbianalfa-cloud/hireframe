@@ -6,6 +6,7 @@ import {
   JOB_STATUSES,
   JobFeedbackSchema,
   JobKeysProjectionSchema,
+  JobSourceRefSchema,
   STALE_RUN_MS,
 } from './jobs.js';
 
@@ -46,5 +47,38 @@ describe('JobFeedbackSchema', () => {
   it('keeps the client statuses a subset of the job statuses', () => {
     for (const status of CLIENT_JOB_STATUSES) expect(JOB_STATUSES).toContain(status);
     expect(CLIENT_JOB_STATUSES).toEqual(['new', 'saved', 'applied', 'skipped']);
+  });
+});
+
+describe('JobSourceRefSchema', () => {
+  const ref = {
+    id: 'email-alert' as const,
+    url: 'https://click.example.net/c/9',
+    externalId: 'abcd1234abcd1234',
+    seenAt: new Date('2026-10-01T08:00:00Z'),
+  };
+
+  it('accepts an unverified link only over https', () => {
+    expect(JobSourceRefSchema.safeParse({ ...ref, unverified: true }).success).toBe(true);
+    expect(
+      JobSourceRefSchema.safeParse({
+        ...ref,
+        url: 'http://click.example.net/c/9',
+        unverified: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      JobSourceRefSchema.safeParse({
+        ...ref,
+        url: 'HTTP://click.example.net/c/9',
+        unverified: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('still accepts a verified http link (an allow-listed source may serve one)', () => {
+    expect(
+      JobSourceRefSchema.safeParse({ ...ref, url: 'http://boards.example.com/1' }).success,
+    ).toBe(true);
   });
 });
