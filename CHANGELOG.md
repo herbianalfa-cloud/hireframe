@@ -2,15 +2,39 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
-## [Unreleased]
+## [0.6.0]
+### Added
+- **M6 PR 6A: the Gmail bridge** (ADR-046, ADR-047, ADR-048). LinkedIn, Work at a Startup, Escape the City and the other alert-only boards now reach Hireframe through your own Gmail:
+  - **Apps Script** (`/apps-script`, TypeScript, `npm run build:apps-script`, pushed with clasp): every 30 minutes it takes the oldest 20 messages labelled `hireframe/alerts` and sends only `{ id, receivedAt, from, text, html }` (never a subject, recipient or other header) in signed POSTs bounded by bytes (each under about 900 kB, at most 5 messages; one oversize message is cut to fit and sent alone). A message is relabelled `hireframe/done` only when the server says `processed`, `duplicate` or `unparsed` for it; `busy`, `deferred`, an error or a timeout leave the label, so the next trigger retries. Advanced Gmail service with the `gmail.modify` scope, not `GmailApp`.
+  - **`ingestEmailJobs`** (an HTTPS function, publicly invocable, one instance): HMAC-SHA256 over `v1.<timestamp>.<nonce>.<raw body>` verified on the raw bytes, skew at most 300 s, the nonce kept 10 minutes in `nonces/{nonce}` (TTL policy) so a replayed request is a 401, constant-time compare, the same 401 for every signature, skew or replay failure and no body echoed or logged. Both sides trim the secret. A new secret, `INGEST_HMAC_SECRET` (RUNBOOK Part G).
+  - **Parsing.** Routing is on the exact `From` address (the subject is never read). `jobalerts-noreply@linkedin.com` goes to a deterministic card parser (job ID from any `/jobs/view` URL form, canonical URL with no tracking, `Company · Location (Hybrid|Remote|On-site)`, a bare town takes the alert's country, optional salary, Easy Apply kept on its source). An auto-forwarded copy parses like a direct one. Anyone else goes through one cheap-model call (`alertParse`, Haiku, 10p a day by default) with the email as untrusted data; the model returns an index into the links read from the HTML, so it can't plant a URL. A link off the host allowlist keeps the job, stored on its source only as an unverified link, and the job's own link is a LinkedIn search link labelled "Search link".
+  - **Dedupe.** Alert jobs dedupe through the same `keys[]`, so an alert and a Greenhouse posting of the same role are one job in either order (PRD R5), and `linkedin:{id}` is in `keys` for Lookup (R8). Each message is recorded by hash, so a retry is a `duplicate`.
+  - **The lock.** Ingest and scans never write at once: `locks/scan` has a `holder` and a `staleAt`; ingest holds it as `email` for at most 3 minutes and never starts the manual-scan cooldown; `scheduledScan` waits up to 4 minutes (every 15 s) for an `email` holder instead of skipping, and still skips for a scan.
+  - **Needs a description.** An alert has no description, so S3 sends such a job (or one with under 200 characters of text) to the new `next: 'description'` state, free: no model call, no slot, flag `needs_description`, counted as `s3.needsDescription`. A merge that brings a full description (an ATS posting arriving in a scan) writes the text, fills `postedAt` and sends the job to S3. The expiry sweep covers the new state.
+  - **Screens.** System has a Gmail alerts card (last ingest, counts, a table per sender, and a failing status when emails can't be read) and "Waiting for a description: n". The job sheet shows "Easy Apply on LinkedIn", "unverified link (host)", "Search link" and a "Needs a description" note.
+  - `npm run dev` seeds an alert job waiting for a description, and `node scripts/sign-test-alert.ts` posts a fake alert (`--twice` shows a replay refused).
+- A daily cap mechanism for model purposes (`usage/{month}.daily`, optional), shared with Lookup in 6B: checked in the same transaction as the monthly cap, and charged for stale reservations too.
+- ADR-046, ADR-047 and ADR-048; ARCHITECTURE, FUNNEL, SECURITY (the HMAC replay test is ticked) and RUNBOOK Part G.
+
+### Changed
+- `findJobsByKeys` reads through a query spec (`jobsByKeysSpec`) checked against the index file; `SpecOp` gains `array-contains-any`.
+- `locks/scan` documents written before this release still work (no holder means a scan, and the 12 minute stale time applies).
+- `CHANGELOG`: the earlier `[Unreleased]` items are filed under the versions they shipped in, `0.5.4` (expiry sweep and S2 skip-reasons panel) and `0.5.5` (sort and filter).
+
+## [0.5.5]
 ### Added
 - **Sort and filter on Today and Jobs** (ADR-044). Sort by Best overall (fit + luck), Fit, Luck or Newest. Jobs also gets a Lane filter (Primary, Secondary, Opportunistic) and, for near misses, a Gap filter (Tool, Domain, Seniority, Tool only: a near miss whose every gap is a tool). On Jobs they live in the URL (`?sort=best&lane=primary&gap=tool`). Newest still pages with **Load more**; any other sort or filter reads the newest 300 matching jobs once, sorts in the browser and shows 25 at a time (**Show more**), with a note when the read hit 300. On Today each list has a Sort select over its 10 rows (Apply defaults to Best overall, the others to Newest, remembered per list in this browser) and Near misses a Gap select; when a list is full the footer links to the same view on Jobs. No new queries or indexes, and Today's first load is unchanged.
+
+### Changed
+- **The job sheet's "Mark applied" toggle is now "Apply"**: solid green (the Apply colour) until set, then a hollow green "Applied" with the check icon. Still a pressed toggle; contrast holds in both themes.
+
+## [0.5.4]
+### Added
 - **Expiry sweep** (ADR-043). Every run, after S1 and before the spend lease, queued jobs older than `freshness_days` (14) leave the S2 and S3 queues as a free `freshness` skip, however deep they sit. Before, only the newest 300 (S2) and top 50 (S3) were ever looked at, so the rest stayed queued for ever and inflated the queue counts. It needs no lease, so it also runs at the monthly cap or with no profile, and counts into `s2.expired` and `s3.expired`. New `FunnelStore.staleQueued`, `expireMaxJobs` in `FunnelLimits` (2,000 per stage; the rest waits for the next run) and `freshnessCutoff` in shared. A sweep error no longer stops the run: it is logged, recorded as `funnel_sweep_failed` (run partial) and the stages carry on. Jobs the sweep reads but keeps are logged as `funnel.sweep_drift`.
 - **"S2 skip reasons" panel on System** (ADR-043). Press Load to count, from your own jobs, why S2 skipped jobs (by lane, seniority, lane × seniority and blocker category), what each candidate S1 rule (C1 to C4) would have skipped among S2 skips, good jobs and jobs waiting for S3, and how many queued jobs have no `sortAt`. Counts only: "Copy counts" copies rule IDs, enum values and integers, never job text. Reads no descriptions yet (C1 to C4 are title rules), and sits in an error boundary so a failed lazy chunk shows a reload message. Needs the new `(skip.stage, judgedAt)` index (wait for **Enabled** under Firestore → Indexes; the panel says "Index building" until then).
 - Docs: the intake-sizing method for the per-run budget (FUNNEL.md and an ADR-032 amendment draft). **No cap, lease or budget config changes.**
 
 ### Changed
-- **The job sheet's "Mark applied" toggle is now "Apply"**: solid green (the Apply colour) until set, then a hollow green "Applied" with the check icon. Still a pressed toggle; contrast holds in both themes.
 - `QuerySpec` and `indexServes` moved to `@hireframe/shared`, and the `<` range op was added (ADR-040 amendment). Functions builds its new stale-queue query from a spec checked against `firestore.indexes.json`.
 - `applyHardRules` and `checkTitle` take an optional seniority-ID list (default unchanged), so the panel can try a candidate seniority rule as lane titles can't override it.
 
