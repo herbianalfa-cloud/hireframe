@@ -46,7 +46,9 @@ export interface NormalisedJob {
   /** A LinkedIn "Easy Apply" badge, kept on this source's ref (ADR-047). */
   easyApply?: true;
   /** An off-allowlist alert link: on the source ref only, no keys (ADR-047). */
-  unverified?: true;
+  unverifiedUrl?: string;
+  /** `url` is a search link, not a posting (ADR-047). */
+  searchLink?: true;
   /** `d:` key, or null when the company or title has no comparison form. */
   dedupeKey: string | null;
   /** Every key, deduplicated and sorted. */
@@ -98,7 +100,8 @@ export function normaliseRawJob(raw: RawJob): NormalisedJob | null {
     ...(raw.salary ? { salary: raw.salary } : {}),
     description: { kind: raw.description.kind, text },
     ...(raw.easyApply ? { easyApply: true as const } : {}),
-    ...(raw.unverified ? { unverified: true as const } : {}),
+    ...(raw.unverifiedUrl ? { unverifiedUrl: raw.unverifiedUrl } : {}),
+    ...(raw.searchLink ? { searchLink: true as const } : {}),
     dedupeKey: key,
     keys: [...keys].sort(),
   };
@@ -300,11 +303,12 @@ export function planIngest(
 export function sourceRef(job: NormalisedJob, seenAt: Date): JobSourceRef {
   return {
     id: job.sourceId,
-    url: job.url,
+    url: job.unverifiedUrl ?? job.url,
     externalId: job.externalId,
     seenAt,
     ...(job.easyApply ? { easyApply: true as const } : {}),
-    ...(job.unverified ? { unverified: true as const } : {}),
+    ...(job.unverifiedUrl ? { unverified: true as const } : {}),
+    ...(job.searchLink ? { searchLink: true as const } : {}),
   };
 }
 

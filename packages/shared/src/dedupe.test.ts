@@ -284,14 +284,25 @@ describe('Easy Apply and alert links on the source ref (ADR-047)', () => {
       sourceId: 'email-alert',
       externalId: 'abcd1234abcd1234',
       url: 'https://www.linkedin.com/jobs/search/?keywords=quill',
-      unverified: true,
+      unverifiedUrl: 'https://click.example.net/c/9f8e7d',
     });
     const job = norm(raw);
-    expect(job.unverified).toBe(true);
+    expect(job.unverifiedUrl).toBe('https://click.example.net/c/9f8e7d');
     expect(job.keys.filter((key) => !key.startsWith('d:'))).toEqual(['email:abcd1234abcd1234']);
-    expect(sourceRefOf(job)).toMatchObject({ id: 'email-alert', unverified: true });
+    expect(sourceRefOf(job)).toMatchObject({
+      id: 'email-alert',
+      url: 'https://click.example.net/c/9f8e7d',
+      unverified: true,
+    });
+    expect(buildJobUrl(job)).toBe('https://www.linkedin.com/jobs/search?keywords=quill');
   });
 });
+
+function buildJobUrl(job: NormalisedJob) {
+  const [group] = dedupeBatch([job]);
+  if (!group) throw new Error('no group');
+  return buildNewJob(group, 'jobs/x/description/raw', NOW).job.url;
+}
 
 function sourceRefOf(job: NormalisedJob) {
   const [group] = dedupeBatch([job]);

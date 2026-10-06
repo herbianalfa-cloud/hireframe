@@ -126,10 +126,16 @@ export const RawJobSchema = z.object({
   /** A LinkedIn "Easy Apply" badge: data about the posting, kept on its source (ADR-047). */
   easyApply: z.literal(true).exactOptional(),
   /**
-   * An off-allowlist link taken from a model-parsed alert: stored on the source ref only, gives
-   * no keys and is never followed (ADR-047).
+   * An https link from a model-parsed alert on a host off the allowlist (ADR-047): stored on the
+   * source ref only (marked `unverified`), gives no keys, never followed or logged. `url` is then
+   * a search link.
    */
-  unverified: z.literal(true).exactOptional(),
+  unverifiedUrl: z
+    .url({ protocol: /^https$/ })
+    .max(JOB_LIMITS.url)
+    .exactOptional(),
+  /** `url` is a LinkedIn search link built from the title and company, not a posting (ADR-047). */
+  searchLink: z.literal(true).exactOptional(),
 });
 export type RawJob = z.infer<typeof RawJobSchema>;
 
@@ -139,7 +145,10 @@ export const JobSourceRefSchema = z.object({
   externalId: z.string().min(1).max(JOB_LIMITS.externalId),
   seenAt: z.date(),
   easyApply: z.literal(true).exactOptional(),
+  /** `url` is an off-allowlist link from a model-parsed alert: shown with its host, never trusted. */
   unverified: z.literal(true).exactOptional(),
+  /** `url` is a search link, not a posting. */
+  searchLink: z.literal(true).exactOptional(),
 });
 export type JobSourceRef = z.infer<typeof JobSourceRefSchema>;
 

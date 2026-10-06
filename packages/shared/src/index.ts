@@ -6,6 +6,7 @@ export * from './criteria.js';
 export * from './dedupe.js';
 export * from './alerts/linkedin.js';
 export * from './alerts/links.js';
+export * from './alerts/model.js';
 export * from './alerts/route.js';
 export * from './alerts/salary.js';
 export * from './funnel.js';
