@@ -32,6 +32,12 @@ export const EMPLOYER_KINDS = ['big_brand', 'small', 'other'] as const;
 /** Stages that can queue a job (`next`) and that a job can stop at. */
 export const QUEUE_STAGES = ['s2', 's3'] as const;
 export type QueueStage = (typeof QUEUE_STAGES)[number];
+/**
+ * What a job can wait for: the model stages, or a description only the owner can supply
+ * (`description`, M6: an alert job with no text; ADR-048). Only `QUEUE_STAGES` use a lease.
+ */
+export const WAIT_STATES = [...QUEUE_STAGES, 'description'] as const;
+export type WaitState = (typeof WAIT_STATES)[number];
 export const FUNNEL_STAGES = ['s1', 's2', 's3'] as const;
 
 export const FUNNEL_LIMITS = {
@@ -123,6 +129,8 @@ export const JOB_FLAGS = [
   'score_drift',
   /** A requirement claimed met or partial without a real fact was downgraded to missing. */
   'unsupported_match',
+  /** No description to read: the job waits for one (M6, ADR-048). */
+  'needs_description',
 ] as const;
 export type JobFlag = (typeof JOB_FLAGS)[number];
 
@@ -204,8 +212,8 @@ export const JobInputsSchema = z.object({
 
 /** Funnel fields on `jobs/{jobId}`; all optional, because M3 wrote jobs without them. */
 export const JobFunnelFieldsSchema = z.object({
-  /** The stage this job waits for; null or absent when it isn't queued. */
-  next: z.enum(QUEUE_STAGES).nullable().exactOptional(),
+  /** What this job waits for; null or absent when it isn't queued. */
+  next: z.enum(WAIT_STATES).nullable().exactOptional(),
   /** `postedAt` if known, else `firstSeenAt`: queue order and freshness (set by S1). */
   sortAt: z.date().exactOptional(),
   experienceAsk: ExperienceAskSchema.exactOptional(),
@@ -283,6 +291,8 @@ export const S3CountsSchema = z.object({
   drift: Count,
   /** Jobs judged from stored S3 output with no model call (re-score). */
   recomputed: Count,
+  /** Jobs sent to wait for a description, free (M6). Optional so older runs still parse. */
+  needsDescription: Count.exactOptional(),
   costPence: z.number().min(0),
   durationMs: Count,
 });

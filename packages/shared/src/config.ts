@@ -19,6 +19,8 @@ export const AppConfigSchema = z.object({
   /** Plain strings: a typo set in the console must never fail the owner check. Unknown IDs are ignored. */
   disabledSources: z.array(z.string()).max(20).exactOptional(),
   funnel: z.unknown().exactOptional(),
+  /** `{ dailyCapPence }` for alert parsing (ADR-047); parsed on its own like `funnel`. */
+  alerts: z.unknown().exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

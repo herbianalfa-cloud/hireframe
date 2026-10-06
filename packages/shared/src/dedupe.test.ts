@@ -247,3 +247,131 @@ describe('cappedKeys (JOB_LIMITS.keys)', () => {
     expect(plan.updates[0]?.addKeys).toEqual(['linkedin:4012345678']);
   });
 });
+
+describe('Easy Apply and alert links on the source ref (ADR-047)', () => {
+  const alert = rawJob({
+    ...LINKEDIN_ALERT_JOB,
+    description: { kind: 'none', format: 'text', body: '' },
+    easyApply: true,
+  });
+
+  it('carries easyApply from the posting to the source ref of a new job', () => {
+    const [group] = dedupeBatch([norm(alert)]);
+    if (!group) throw new Error('no group');
+    const { job } = buildNewJob(group, 'jobs/x/description/raw', NOW);
+    expect(job.sources[0]).toMatchObject({ id: 'linkedin-alert', easyApply: true });
+  });
+
+  it('keeps easyApply on its own source when merged into an ATS job', () => {
+    const groups = dedupeBatch([norm(alert)]);
+    const existing = [
+      {
+        id: 'job-gh',
+        keys: ['greenhouse:5551234', ...norm(GREENHOUSE_JOB).keys],
+        firstSeenAt: NOW,
+        sourceCount: 1,
+      },
+    ];
+    const plan = planIngest(groups, existing);
+    expect(plan.updates).toHaveLength(1);
+    const added = plan.updates[0]?.addSources[0];
+    expect(added?.easyApply).toBe(true);
+    expect(added && sourceRefOf(added)).toMatchObject({ id: 'linkedin-alert', easyApply: true });
+  });
+
+  it('marks an unverified link on the source ref only, and gives it no keys of its own', () => {
+    const raw = rawJob({
+      sourceId: 'email-alert',
+      externalId: 'abcd1234abcd1234',
+      url: 'https://www.linkedin.com/jobs/search/?keywords=quill',
+      unverified: true,
+    });
+    const job = norm(raw);
+    expect(job.unverified).toBe(true);
+    expect(job.keys.filter((key) => !key.startsWith('d:'))).toEqual(['email:abcd1234abcd1234']);
+    expect(sourceRefOf(job)).toMatchObject({ id: 'email-alert', unverified: true });
+  });
+});
+
+function sourceRefOf(job: NormalisedJob) {
+  const [group] = dedupeBatch([job]);
+  if (!group) throw new Error('no group');
+  return buildNewJob(group, 'jobs/x/description/raw', NOW).job.sources[0];
+}
+
+describe('description upgrade on merge (ADR-048)', () => {
+  const alert = norm(
+    rawJob({
+      ...LINKEDIN_ALERT_JOB,
+      description: { kind: 'none', format: 'text', body: '' },
+      postedAt: undefined as never,
+    }),
+  );
+  const greenhouse = norm(GREENHOUSE_JOB);
+  const waiting = {
+    id: 'job-alert',
+    keys: alert.keys,
+    firstSeenAt: NOW,
+    sourceCount: 1,
+    descriptionKind: 'none' as const,
+    next: 'description' as const,
+  };
+
+  it('writes the full text, the posting date and releases the job to S3', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [waiting]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0]?.upgrade).toEqual({
+      text: greenhouse.description.text,
+      sourceId: 'greenhouse',
+      postedAt: greenhouse.postedAt,
+      release: true,
+    });
+  });
+
+  it('does not release a job that is not waiting for a description', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [{ ...waiting, next: 's2' as const }]);
+    expect(plan.updates[0]?.upgrade).toMatchObject({ release: false });
+  });
+
+  it('keeps a posting date the job already has', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [
+      { ...waiting, postedAt: new Date('2026-09-01T00:00:00Z') },
+    ]);
+    expect(plan.updates[0]?.upgrade?.postedAt).toBeUndefined();
+  });
+
+  it('upgrades a snippet-only job too', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [
+      { ...waiting, descriptionKind: 'snippet' },
+    ]);
+    expect(plan.updates[0]?.upgrade).toBeDefined();
+  });
+
+  it('leaves a job that already has full text alone (the other order)', () => {
+    const plan = planIngest(dedupeBatch([alert]), [
+      {
+        id: 'job-gh',
+        keys: greenhouse.keys,
+        firstSeenAt: NOW,
+        sourceCount: 1,
+        descriptionKind: 'full' as const,
+        next: 's2' as const,
+      },
+    ]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0]?.upgrade).toBeUndefined();
+    expect(plan.updates[0]?.addSources[0]?.sourceId).toBe('linkedin-alert');
+  });
+
+  it('keeps a waiting job waiting when the new source is snippet-only', () => {
+    const snippet = norm(
+      rawJob({
+        sourceId: 'adzuna',
+        externalId: '99',
+        description: { kind: 'snippet', format: 'text', body: 'A snippet.' },
+      }),
+    );
+    const plan = planIngest(dedupeBatch([snippet]), [waiting]);
+    expect(plan.updates[0]?.upgrade).toBeUndefined();
+  });
+});

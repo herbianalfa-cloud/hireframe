@@ -12,6 +12,7 @@ import {
   type S0Counts,
   type Salary,
 } from './jobs.js';
+import type { WaitState } from './funnel.js';
 import {
   canonicalUrl,
   keysFromUrl,
@@ -42,6 +43,10 @@ export interface NormalisedJob {
   postedAt?: Date;
   salary?: Salary;
   description: { kind: DescriptionKind; text: string };
+  /** A LinkedIn "Easy Apply" badge, kept on this source's ref (ADR-047). */
+  easyApply?: true;
+  /** An off-allowlist alert link: on the source ref only, no keys (ADR-047). */
+  unverified?: true;
   /** `d:` key, or null when the company or title has no comparison form. */
   dedupeKey: string | null;
   /** Every key, deduplicated and sorted. */
@@ -92,6 +97,8 @@ export function normaliseRawJob(raw: RawJob): NormalisedJob | null {
     ...(raw.postedAt ? { postedAt: raw.postedAt } : {}),
     ...(raw.salary ? { salary: raw.salary } : {}),
     description: { kind: raw.description.kind, text },
+    ...(raw.easyApply ? { easyApply: true as const } : {}),
+    ...(raw.unverified ? { unverified: true as const } : {}),
     dedupeKey: key,
     keys: [...keys].sort(),
   };
@@ -105,6 +112,7 @@ const SOURCE_PRIORITY: readonly JobSourceId[] = [
   'workable',
   'reed',
   'linkedin-alert',
+  'email-alert',
   'adzuna',
   'hn',
 ];
@@ -164,15 +172,33 @@ export interface ExistingJobKeys {
   firstSeenAt: Date;
   /** Sources already on the job, so merges stay within `JOB_LIMITS.sources`. */
   sourceCount: number;
+  /** For the description upgrade on merge (ADR-048); absent means "nothing to upgrade". */
+  descriptionKind?: DescriptionKind;
+  next?: WaitState | null;
+  postedAt?: Date;
 }
 
 export type IngestOutcome = 'new' | 'merged' | 'duplicate';
+
+/**
+ * A merge that brings a full description to a job that has none (or only a snippet): the text
+ * replaces it, the posting date fills a gap, and a job waiting for a description goes to S3
+ * (ADR-048). Written in the same batch as the new source.
+ */
+export interface DescriptionUpgrade {
+  text: string;
+  sourceId: JobSourceId;
+  postedAt?: Date;
+  /** The job was at `next: 'description'`: it moves on to `s3`. */
+  release: boolean;
+}
 
 export interface JobUpdate {
   jobId: string;
   /** Members whose source isn't on the job yet. */
   addSources: NormalisedJob[];
   addKeys: string[];
+  upgrade?: DescriptionUpgrade;
 }
 
 export interface IngestPlan {
@@ -247,6 +273,16 @@ export function planIngest(
       updates.set(target.id, update);
       update.addSources.push(job);
       sourceCounts.set(target.id, sources + 1);
+      const upgradable = target.descriptionKind === 'none' || target.descriptionKind === 'snippet';
+      if (!update.upgrade && upgradable && job.description.kind === 'full') {
+        const gap = target.postedAt === undefined && job.postedAt !== undefined;
+        update.upgrade = {
+          text: job.description.text,
+          sourceId: job.sourceId,
+          ...(gap && job.postedAt ? { postedAt: job.postedAt } : {}),
+          release: target.next === 'description',
+        };
+      }
       // The posting's own source key first, so the cap never drops the key that recognises it.
       for (const key of [job.sourceKey, ...job.keys]) {
         if (!known.has(key) && known.size < JOB_LIMITS.keys) {
@@ -262,7 +298,14 @@ export function planIngest(
 }
 
 export function sourceRef(job: NormalisedJob, seenAt: Date): JobSourceRef {
-  return { id: job.sourceId, url: job.url, externalId: job.externalId, seenAt };
+  return {
+    id: job.sourceId,
+    url: job.url,
+    externalId: job.externalId,
+    seenAt,
+    ...(job.easyApply ? { easyApply: true as const } : {}),
+    ...(job.unverified ? { unverified: true as const } : {}),
+  };
 }
 
 /** The `jobs/{jobId}` document and its description for a new batch group. */

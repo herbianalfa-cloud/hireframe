@@ -4,7 +4,7 @@
  * indexes, so a missing one only shows up in production. Pure and SDK-free, so the web app and
  * Functions share it (ADR-040, ADR-042).
  */
-export type SpecOp = '==' | 'in' | '>=' | '<';
+export type SpecOp = '==' | 'in' | 'array-contains-any' | '>=' | '<';
 
 export interface QuerySpec {
   collection: string;
@@ -24,7 +24,7 @@ const isRange = (op: SpecOp): boolean => op === '>=' || op === '<';
  * Whether Firestore can serve `spec` with the automatic single-field indexes plus the declared
  * composites. Deliberately strict (no index merging for ordered queries), so a query that only
  * works on a lucky merge is declared explicitly instead.
- * - Equality fields (`==`, `in`) may appear in any order, then the ordered fields, in order and
+ * - Equality fields (`==`, `in`, `array-contains-any`) may appear in any order, then the ordered fields, in order and
  *   in the same direction. A range filter (`>=`, `<`) orders its own field first, ascending
  *   unless ordered.
  * - Served without a composite: one ordered field and no filters on other fields, or equality

@@ -376,6 +376,7 @@ export const SOURCE_KEY_PREFIX: Readonly<Record<JobSourceId, string>> = {
   adzuna: 'adzuna',
   hn: 'hn',
   'linkedin-alert': 'linkedin',
+  'email-alert': 'email',
 };
 
 export function sourceKey(sourceId: JobSourceId, externalId: string): string {
