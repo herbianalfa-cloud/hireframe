@@ -10,3 +10,7 @@ noreply@anthropic.com
 hireframe-fns@hireframe-f6b03.iam.gserviceaccount.com
 *@appspot.gserviceaccount.com
 *@developer.gserviceaccount.com
+# The deploy service account (docs/RUNBOOK.md Part A step 7).
+github-deployer@hireframe-f6b03.iam.gserviceaccount.com
+# LinkedIn's job-alert sender, which the Gmail bridge routes on (docs/plans/m6-plan.md, M6).
+jobalerts-noreply@linkedin.com
