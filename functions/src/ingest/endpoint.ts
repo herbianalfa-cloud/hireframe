@@ -81,7 +81,6 @@ export const ingestEmailJobs = onRequest(
         response.status(500).json({ error: 'internal' });
         return;
       }
-      const firestore = db();
       const result = await ingestHandler(
         {
           method: request.method,
@@ -91,9 +90,11 @@ export const ingestEmailJobs = onRequest(
         },
         {
           secret,
-          nonces: firestoreNonceStore(firestore),
+          // Firestore is first touched here, after the signature has verified (never before).
+          nonces: { claim: (nonce, at) => firestoreNonceStore(db()).claim(nonce, at) },
           now: () => new Date(),
           run: async (messages) => {
+            const firestore = db();
             const config = await readConfig();
             const fakes = useFakes ? await loadDevFakes() : null;
             const transport = fakes
