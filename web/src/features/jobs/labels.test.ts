@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { makeJob, NOW } from './fixtures';
-import { ageText, agreementText, postedText, salaryText, scoreText, skipText } from './labels';
+import {
+  ageText,
+  agreementText,
+  isSearchLink,
+  linkHost,
+  postedText,
+  salaryText,
+  scoreText,
+  skipText,
+} from './labels';
 
 describe('job labels', () => {
   it('ages from the posting date, else first seen', () => {
@@ -52,5 +61,20 @@ describe('job labels', () => {
     ).toBe(
       'Verdict agreement, last 14 days: 75% (target 85%) · 2 rated right, 1 rated wrong, 1 applied on Apply',
     );
+  });
+});
+
+describe('alert link labels (M6)', () => {
+  it('recognises a LinkedIn search URL, and nothing that is a posting', () => {
+    expect(isSearchLink('https://www.linkedin.com/jobs/search?keywords=a%20b')).toBe(true);
+    expect(isSearchLink('https://www.linkedin.com/jobs/search/?keywords=a')).toBe(true);
+    expect(isSearchLink('https://www.linkedin.com/jobs/view/4012345678')).toBe(false);
+    expect(isSearchLink('https://jobs.example.com/jobs/search')).toBe(false);
+    expect(isSearchLink('not a url')).toBe(false);
+  });
+
+  it('shows the host of a link without www', () => {
+    expect(linkHost('https://www.click.example.net/c/1?u=2')).toBe('click.example.net');
+    expect(linkHost('nope')).toBe('unknown host');
   });
 });

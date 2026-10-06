@@ -74,6 +74,7 @@ export function funnelText(run: Run): string | null {
   const queued = (s2?.queued ?? 0) + (s3?.queued ?? 0);
   const review = (s2?.review ?? 0) + (s3?.review ?? 0);
   if (queued > 0) parts.push(`${String(queued)} queued`);
+  if (s3?.needsDescription) parts.push(`${String(s3.needsDescription)} waiting for a description`);
   if (review > 0) parts.push(`${String(review)} for review`);
   parts.push(penceText(run.costPence));
   return parts.join(' · ');
@@ -122,6 +123,8 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
   funnel_failed: 'the funnel failed',
   funnel_write_failed: 'some verdicts could not be saved',
   funnel_sweep_failed: 'the clean-up of stale queued jobs failed; it will retry next run',
+  unparsed: 'some alert emails could not be read; the sender may have changed its layout',
+  deferred: 'some alert emails are waiting for the daily AI limit or the next try',
 };
 
 export function errorText(code: string | undefined): string | null {

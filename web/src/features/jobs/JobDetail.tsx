@@ -29,6 +29,8 @@ import {
   GAP_LABELS,
   LEVEL_LABELS,
   MATCH_LABELS,
+  isSearchLink,
+  linkHost,
   postedText,
   REVIEW_TEXT,
   salaryText,
@@ -210,7 +212,7 @@ function Actions({
         <Button asChild variant="secondary">
           <a href={job.url} target="_blank" rel="noopener noreferrer">
             <ExternalLink aria-hidden="true" />
-            Open posting
+            {isSearchLink(job.url) ? 'Search link' : 'Open posting'}
           </a>
         </Button>
         <StatusToggle
@@ -352,6 +354,13 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
             {REVIEW_TEXT[job.review.code]}. Read it yourself; a re-score may retry it.
           </p>
         </Section>
+      ) : job.next === 'description' ? (
+        <Section title="Needs a description">
+          <p>
+            This job came from an email alert, which carries no description, so there is nothing to
+            read yet. A later scan may find the posting on the company&apos;s job board.
+          </p>
+        </Section>
       ) : job.next ? (
         <Section title="Queued">
           <p>Waiting for the {STAGE_NAMES[job.next]} step in a later run.</p>
@@ -415,9 +424,15 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
                 {SOURCE_NAMES[source.id] ?? source.id}
               </a>
               <span className="text-xs text-muted-foreground">
-                {' '}
-                · seen {formatDate(source.seenAt)}
+                {source.searchLink && !source.unverified ? ' · search link' : ''}
+                {source.unverified ? ` · unverified link (${linkHost(source.url)})` : ''} · seen{' '}
+                {formatDate(source.seenAt)}
               </span>
+              {source.easyApply ? (
+                <Badge variant="accent" className="ml-2">
+                  Easy Apply on LinkedIn
+                </Badge>
+              ) : null}
             </li>
           ))}
         </ul>

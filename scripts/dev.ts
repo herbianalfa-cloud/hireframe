@@ -8,9 +8,11 @@
 import { spawn } from 'node:child_process';
 
 import {
+  alertWaitingJobDocuments,
   appConfigDocument,
   assertDemoProject,
   criteriaSeedDocuments,
+  DEV_ALERT_WAITING_JOB_ID,
   DEV_LINKEDIN_JOB_ID,
   DEV_OWNER,
   devJobDocuments,
@@ -76,6 +78,13 @@ await emulatorRequest(
   `${documents}/jobs/${DEV_LINKEDIN_JOB_ID}/description/raw`,
   linkedIn.description,
 );
+const waiting = alertWaitingJobDocuments(now);
+await emulatorRequest('PATCH', `${documents}/jobs/${DEV_ALERT_WAITING_JOB_ID}`, waiting.job);
+await emulatorRequest(
+  'PATCH',
+  `${documents}/jobs/${DEV_ALERT_WAITING_JOB_ID}/description/raw`,
+  waiting.description,
+);
 const devJobs = devJobDocuments(now);
 for (const { id, job, description } of devJobs) {
   await emulatorRequest('PATCH', `${documents}/jobs/${id}`, restDocument(job));
@@ -90,7 +99,8 @@ await emulatorRequest('PATCH', `${documents}/usage/${usage.month}`, usage.docume
 
 console.log(
   `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}), criteria v1, the fake ` +
-    `CV's ${String(profile.facts.length)} facts with work rights, and one fake LinkedIn-alert job. ` +
+    `CV's ${String(profile.facts.length)} facts with work rights, one fake LinkedIn-alert job and one ` +
+    'alert job waiting for a description. `node scripts/sign-test-alert.ts` posts a fake alert email. ' +
     'In the sign-in pop-up pick that account; "Add new account" gives a non-owner. ' +
     `CV and note parsing use ${process.env.LIVE === '1' ? 'the real Anthropic API (LIVE=1)' : 'a fake model'}; ` +
     'run `node scripts/make-cv-fixtures.ts` for fake CVs to upload. ' +

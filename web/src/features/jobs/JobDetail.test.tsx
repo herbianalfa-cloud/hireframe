@@ -209,6 +209,93 @@ describe('JobDetail', () => {
     expect(screen.getByRole('img', { name: 'Adzuna' })).toBeDefined();
   });
 
+  describe('email alert jobs (M6)', () => {
+    const SEEN = new Date('2026-10-07T09:00:00Z');
+
+    it('shows Easy Apply on the LinkedIn source it came from, and on no other', () => {
+      show({
+        sources: [
+          {
+            id: 'greenhouse',
+            url: 'https://jobs.example.test/gh/1',
+            externalId: '1',
+            seenAt: SEEN,
+          },
+          {
+            id: 'linkedin-alert',
+            url: 'https://www.linkedin.com/jobs/view/4012345678',
+            externalId: '4012345678',
+            seenAt: SEEN,
+            easyApply: true,
+          },
+        ],
+      });
+      open();
+      const sources = screen.getByRole('heading', { name: 'Sources' }).parentElement;
+      const items = within(sources as HTMLElement).getAllByRole('listitem');
+      expect(within(items[1] as HTMLElement).getByText('Easy Apply on LinkedIn')).toBeDefined();
+      expect(within(items[0] as HTMLElement).queryByText('Easy Apply on LinkedIn')).toBeNull();
+    });
+
+    it('marks an off-allowlist link as unverified, with its host', () => {
+      show({
+        sources: [
+          {
+            id: 'email-alert',
+            url: 'https://click.example.net/c/9f8e7d',
+            externalId: 'abcd1234abcd1234',
+            seenAt: SEEN,
+            unverified: true,
+            searchLink: true,
+          },
+        ],
+      });
+      open();
+      expect(screen.getByRole('link', { name: 'Email alert' }).getAttribute('href')).toBe(
+        'https://click.example.net/c/9f8e7d',
+      );
+      expect(screen.getByText(/unverified link \(click\.example\.net\)/)).toBeDefined();
+    });
+
+    it('labels a LinkedIn search URL as a search link, not a posting', () => {
+      show({
+        url: 'https://www.linkedin.com/jobs/search?keywords=Operations%20Analyst%20Ridge%20Labs',
+        sources: [
+          {
+            id: 'email-alert',
+            url: 'https://www.linkedin.com/jobs/search?keywords=Operations%20Analyst%20Ridge%20Labs',
+            externalId: 'abcd1234abcd1234',
+            seenAt: SEEN,
+            searchLink: true,
+          },
+        ],
+      });
+      open();
+      expect(screen.getByRole('link', { name: 'Search link' })).toBeDefined();
+      expect(screen.queryByRole('link', { name: 'Open posting' })).toBeNull();
+      expect(screen.getByText(/· search link/)).toBeDefined();
+    });
+
+    it('says a job at next: description needs a description, not that it is queued', () => {
+      show({
+        stage: 's2',
+        next: 'description',
+        descriptionKind: 'none',
+        flags: ['needs_description'],
+      });
+      open();
+      expect(screen.getByRole('heading', { name: 'Needs a description' })).toBeDefined();
+      expect(screen.queryByRole('heading', { name: 'Queued' })).toBeNull();
+      expect(screen.getByText(/No description to read: an email alert carries none/)).toBeDefined();
+    });
+
+    it('keeps "Open posting" for a real posting', () => {
+      show();
+      open();
+      expect(screen.getByRole('link', { name: 'Open posting' })).toBeDefined();
+    });
+  });
+
   it('marks a job applied and tells the page', async () => {
     const view = show();
     const { onCommitted } = open();

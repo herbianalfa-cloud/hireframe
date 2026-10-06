@@ -1,5 +1,3 @@
-import { LINKEDIN_ALERT_SENDER } from '../alerts/route.js';
-
 /**
  * Fake alert emails for the parsers, the ingest pipeline and the bridge tests (M6, ADR-047).
  * Fake companies, IDs and links only: no real postings, no personal data (CLAUDE.md). A real
@@ -12,7 +10,11 @@ export interface AlertFixture {
   html: string;
 }
 
-export const LINKEDIN_FROM = `LinkedIn Job Alerts <${LINKEDIN_ALERT_SENDER}>`;
+/**
+ * Import-free on purpose, so scripts (`sign-test-alert.ts`) can load it under Node's type
+ * stripping. route.test.ts checks this address still routes to the LinkedIn parser.
+ */
+export const LINKEDIN_FROM = 'LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>';
 
 interface Card {
   id: string;

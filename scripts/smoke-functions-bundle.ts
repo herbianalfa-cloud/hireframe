@@ -20,7 +20,15 @@ if (wrong.length > 0) {
 // Production bundles never carry the emulator's fixtures (callable.ts `loadDevFakes`).
 const { readFileSync } = await import('node:fs');
 const source = readFileSync(new URL('../functions/deploy/index.js', import.meta.url), 'utf8');
-const fixtureMarkers = ['Acme Analytics', 'Alex Example'];
+// Acme and Alex: the fake watchlist and CV. The rest: the fake alert emails (M6).
+const fixtureMarkers = [
+  'Acme Analytics',
+  'Alex Example',
+  'Pylon Labs',
+  'Mallory Systems',
+  'Founding Product Analyst',
+  'Bramble Software',
+];
 const leaked = fixtureMarkers.filter((marker) => source.includes(marker));
 if (leaked.length > 0 && process.env.HIREFRAME_DEV_BUNDLE !== '1') {
   throw new Error(`smoke-functions-bundle: fixture data in the bundle: ${leaked.join(', ')}`);

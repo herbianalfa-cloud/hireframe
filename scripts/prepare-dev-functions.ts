@@ -1,6 +1,6 @@
 /**
  * `npm run dev` step after the functions build: gives the Functions emulator a value for every
- * secret (ANTHROPIC_API_KEY, REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY) so it never tries
+ * secret (ANTHROPIC_API_KEY, REED_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY, INGEST_HMAC_SECRET) so it never tries
  * Secret Manager (a demo-* project can't reach it).
  * - Default: placeholders. The emulator uses the fake LLM and fake job APIs.
  * - LIVE=1: copies your keys from `functions/.secret.local` (gitignored) for real calls. A key
@@ -13,7 +13,13 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 const SOURCE = 'functions/.secret.local';
 const TARGET = 'functions/deploy/.secret.local';
 
-const SECRETS = ['ANTHROPIC_API_KEY', 'REED_API_KEY', 'ADZUNA_APP_ID', 'ADZUNA_APP_KEY'];
+const SECRETS = [
+  'ANTHROPIC_API_KEY',
+  'REED_API_KEY',
+  'ADZUNA_APP_ID',
+  'ADZUNA_APP_KEY',
+  'INGEST_HMAC_SECRET',
+];
 
 if (process.env.LIVE === '1') {
   if (!existsSync(SOURCE)) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { LINKEDIN_FROM, WAAS_FROM } from '../fixtures/alerts.js';
 import { routeAlert, senderAddress, senderDomain } from './route.js';
 
 describe('routeAlert', () => {
@@ -21,6 +22,13 @@ describe('routeAlert', () => {
     ]) {
       expect(routeAlert(from), from).toBe('model');
     }
+  });
+});
+
+describe('the fixtures', () => {
+  it('route the way the real senders do', () => {
+    expect(routeAlert(LINKEDIN_FROM)).toBe('linkedin');
+    expect(routeAlert(WAAS_FROM)).toBe('model');
   });
 });
 

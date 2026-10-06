@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { dashboardQuerySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
 import { jobFilterSpec } from './jobs';
+import { needsDescriptionCountSpec } from './system';
 import { indexServes, type CompositeIndex, type QuerySpec } from './query-spec';
 
 const indexFile = JSON.parse(
@@ -49,6 +50,16 @@ describe('firestore.indexes.json', () => {
     for (const [name, spec] of Object.entries(specs)) {
       expect(indexServes(spec, indexes), name).toBe(true);
     }
+  });
+
+  it('serves the System count of jobs waiting for a description without a new index', () => {
+    expect(needsDescriptionCountSpec).toEqual({
+      collection: 'jobs',
+      filters: [{ field: 'next', op: '==', value: 'description' }],
+      orderBy: [],
+    });
+    expect(indexServes(needsDescriptionCountSpec, indexes)).toBe(true);
+    expect(indexServes(needsDescriptionCountSpec, [])).toBe(true);
   });
 
   it('serves every Jobs filter combination', () => {
