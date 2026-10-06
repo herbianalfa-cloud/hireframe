@@ -1,6 +1,6 @@
 /**
  * Bundles the Gmail bridge for Apps Script (ADR-046): esbuild → `apps-script/build/Code.js` plus
- * `appsscript.json`, ready for `npx clasp push` (docs/RUNBOOK.md Part G). Apps Script calls
+ * `appsscript.json`, ready for `npm exec -w apps-script clasp -- push` (docs/RUNBOOK.md Part G). Apps Script calls
  * top-level functions by name, so the footer defines `run` and `setup` as plain globals over the
  * bundle's exports.
  */

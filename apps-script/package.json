@@ -6,5 +6,8 @@
   "scripts": {
     "build": "node ../scripts/build-apps-script.ts",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@google/clasp": "3.4.1"
   }
 }

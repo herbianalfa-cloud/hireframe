@@ -33,7 +33,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria, the fake CV's facts with work rights, one LinkedIn-alert job, one alert job waiting for a description, twelve fake judged jobs and this month's usage; fake LLM and fake job APIs unless `LIVE=1`)
 - `npm run test:rules` — Firestore + Storage security rules tests and emulator integration tests (`tests/emulator/`) (needs Java 21)
 - `npm run build` — build all workspaces (functions: esbuild bundle in `functions/deploy/`; Gmail bridge: `apps-script/build/`)
-- `npm run build:apps-script` — bundle the Gmail bridge (`apps-script/build/Code.js` + `appsscript.json`) for `npx clasp push` (RUNBOOK Part G)
+- `npm run build:apps-script` — bundle the Gmail bridge (`apps-script/build/Code.js` + `appsscript.json`) for `npm exec -w apps-script clasp -- push` (RUNBOOK Part G)
 - `node scripts/sign-test-alert.ts [waas] [--twice] [--id <id>]` — post a fake alert email, signed with the local placeholder secret, to the emulator's `ingestEmailJobs` (local only; `--twice` shows a replay refused)
 - `npm run check:bundle` — web bundle budget after `build`: no chunk over 500 kB, initial JS under the gzip budget (prints each initial file's size)
 - `node scripts/smoke-functions-bundle.ts` — after `build`: the functions bundle imports and every function is in europe-west2
