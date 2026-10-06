@@ -45,6 +45,12 @@ export const TEST_FACTS: FunnelFact[] = FAKE_CV_EXTRACTION.facts.map((fact, inde
   lanes: fact.lanes,
 }));
 
+/** A description long enough to be deep-read (FUNNEL.minDeepReadChars). */
+export const TEST_DESCRIPTION =
+  'Help the product team understand how customers use the app. You will build dashboards, ' +
+  'write SQL against the warehouse, run small experiments with product managers, and turn ' +
+  'what you find into clear recommendations for the squad. Graduates are welcome to apply.';
+
 let counter = 0;
 
 export function testJob(patch: Partial<Job> = {}): Job {
@@ -121,7 +127,7 @@ export function memoryFunnelStore(
     workRights:
       options.workRights === undefined ? { workRights: 'time_limited' } : options.workRights,
     patches,
-    add(id, job, text = 'Help the product team understand how customers use the app.') {
+    add(id, job, text = TEST_DESCRIPTION) {
       jobs.set(id, JobSchema.parse(job));
       texts.set(id, text);
     },

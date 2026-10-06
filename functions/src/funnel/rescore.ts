@@ -1,7 +1,14 @@
-import { RESCORE_DAYS, RescoreInputSchema, type RescoreResult, type Run } from '@hireframe/shared';
+import {
+  RESCORE_DAYS,
+  RescoreInputSchema,
+  type LockHolder,
+  type RescoreResult,
+  type Run,
+} from '@hireframe/shared';
 import { HttpsError } from 'firebase-functions/https';
 
 import { errorFields, log } from '../log.js';
+import { busyMessage } from '../scan/handler.js';
 import type { ScanStore } from '../scan/run.js';
 import type { FunnelRunner } from './wiring.js';
 
@@ -19,12 +26,19 @@ export interface RescoreDeps {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export async function runRescore(deps: RescoreDeps): Promise<RescoreResult | { status: 'busy' }> {
+export async function runRescore(
+  deps: RescoreDeps,
+): Promise<RescoreResult | { status: 'busy'; holder?: LockHolder }> {
   const { store } = deps;
   const startedAt = deps.now();
   const runId = store.newRunId();
-  const lock = await store.acquireLock(runId, startedAt, 0);
-  if (!lock.ok) return { status: 'busy' };
+  const lock = await store.acquireLock(runId, startedAt, 0, 'rescore');
+  if (!lock.ok) {
+    return {
+      status: 'busy',
+      ...(lock.reason === 'running' && lock.holder ? { holder: lock.holder } : {}),
+    };
+  }
   const run: Run = {
     trigger: 'rescore',
     status: 'running',
@@ -86,14 +100,20 @@ export async function runRescore(deps: RescoreDeps): Promise<RescoreResult | { s
 /** Input validation and the busy → `failed-precondition` mapping, testable without Firebase. */
 export async function rescoreHandler(
   data: unknown,
-  rescore: () => Promise<RescoreResult | { status: 'busy' }>,
+  rescore: () => Promise<RescoreResult | { status: 'busy'; holder?: LockHolder }>,
 ): Promise<RescoreResult> {
   if (!RescoreInputSchema.safeParse(data ?? {}).success) {
     throw new HttpsError('invalid-argument', 'Unexpected input.');
   }
   const result = await rescore();
   if (result.status === 'busy') {
-    throw new HttpsError('failed-precondition', 'A scan is running. Try again when it finishes.');
+    // Short holders get their own wording; a scan keeps the message the screen already shows.
+    throw new HttpsError(
+      'failed-precondition',
+      result.holder === 'email' || result.holder === 'lookup'
+        ? busyMessage(result.holder)
+        : 'A scan is running. Try again when it finishes.',
+    );
   }
   return result;
 }

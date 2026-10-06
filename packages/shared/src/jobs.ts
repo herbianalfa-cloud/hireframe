@@ -254,6 +254,16 @@ export const QuotaSchema = z.object({
 });
 export type Quota = z.infer<typeof QuotaSchema>;
 
+/** Per-sender totals on `sources/email` (ADR-047): counts and the sender's domain only. */
+export const SenderStatsSchema = z.object({
+  messages: Count,
+  jobs: Count,
+  unparsed: Count,
+  unverifiedLinks: Count,
+  lastAt: z.date(),
+});
+export type SenderStats = z.infer<typeof SenderStatsSchema>;
+
 /** `sources/{sourceId}`: rolling health for the System screen (ADR-029). */
 export const SourceHealthSchema = z.object({
   status: z.enum(SOURCE_STATUSES),
@@ -270,6 +280,8 @@ export const SourceHealthSchema = z.object({
     .array(z.object({ host: z.string().min(1).max(253), until: z.date() }))
     .max(10)
     .exactOptional(),
+  /** `sources/email` only: totals per sender domain, at most 20 and the rest under `other`. */
+  bySender: z.record(z.string().min(1).max(253), SenderStatsSchema).exactOptional(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),
 });

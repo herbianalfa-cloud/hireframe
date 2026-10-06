@@ -1,4 +1,4 @@
-import { ScanNowInputSchema, type ScanNowResult } from '@hireframe/shared';
+import { ScanNowInputSchema, type LockHolder, type ScanNowResult } from '@hireframe/shared';
 import { HttpsError } from 'firebase-functions/https';
 
 import type { ScanResult } from './run.js';
@@ -17,9 +17,16 @@ export async function scanNowHandler(
   }
   const result = await scan();
   if (result.status === 'busy') {
-    throw new HttpsError('failed-precondition', 'A scan is already running.');
+    throw new HttpsError('failed-precondition', busyMessage(result.holder));
   }
   return result;
+}
+
+/** What the System screen says when the lock is held: a short holder gets its own wording. */
+export function busyMessage(holder: LockHolder | undefined): string {
+  if (holder === 'email') return 'Importing alerts, try again in a minute.';
+  if (holder === 'lookup') return 'Adding a job from Lookup, try again in a minute.';
+  return 'A scan is already running.';
 }
 
 /** A mounted secret, or undefined when it's empty or the local-dev placeholder. */

@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import { INGEST_WIRE } from './signing.js';
 
+const Count = z.int().min(0);
+
 export * from './signing.js';
 
 /**
@@ -60,3 +62,26 @@ export const INGEST_ERROR_CODES = [
   'internal',
 ] as const;
 export type IngestErrorCode = (typeof INGEST_ERROR_CODES)[number];
+
+/**
+ * `alertMessages/{sha256(gmail message id)}` (server-only, ADR-047): proof a message was handled,
+ * so a retried one is a `duplicate`. Counts and the sender's domain only: no subject, address,
+ * link or text. A TTL policy on `expireAt` deletes it after 30 days.
+ */
+export const AlertMessageSchema = z.object({
+  sender: z.string().min(1).max(253),
+  parser: z.enum(['deterministic', 'model']),
+  jobs: Count,
+  new: Count,
+  merged: Count,
+  duplicate: Count,
+  unverifiedLinks: Count,
+  status: z.enum(['processed', 'unparsed']),
+  at: z.date(),
+  expireAt: z.date(),
+  schemaVersion: z.literal(1),
+});
+export type AlertMessage = z.infer<typeof AlertMessageSchema>;
+
+/** `nonces/{nonce}` (server-only, ADR-046): a seen request nonce; TTL policy on `expireAt`. */
+export const NonceSchema = z.object({ expireAt: z.date(), schemaVersion: z.literal(1) });

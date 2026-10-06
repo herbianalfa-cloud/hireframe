@@ -6,11 +6,11 @@ import {
   FUNNEL_LIMITS,
   isExpired,
   monthKey,
-  QUEUE_STAGES,
   resolveDeepRead,
   scoreJob,
   triagePasses,
   TriageOutputSchema,
+  WAIT_STATES,
   type CriteriaVersion,
   type FunnelFact,
   type FunnelSummary,
@@ -28,6 +28,7 @@ import {
   type S2Counts,
   type S3Counts,
   type StopReason,
+  type WaitState,
   type WorkRightsSetting,
 } from '@hireframe/shared';
 
@@ -42,6 +43,7 @@ import { eachLimited } from '../sources/types.js';
 import {
   expiredPatch,
   mergeFlags,
+  needsDescriptionPatch,
   requeuePatch,
   reviewPatch,
   s1PassPatch,
@@ -86,10 +88,10 @@ export interface FunnelStore {
   /** Jobs waiting for `stage`: S2 newest first, S3 by triage score then newest. */
   queued(stage: QueueStage, limit: number): Promise<StoredJob[]>;
   /**
-   * Jobs waiting for `stage` whose `sortAt` is before `before`, newest first (the expiry sweep).
-   * Served by the `(next, sortAt desc)` index for both stages.
+   * Jobs waiting for `state` whose `sortAt` is before `before`, newest first (the expiry sweep).
+   * Served by the `(next, sortAt desc)` index for all three wait states.
    */
-  staleQueued(stage: QueueStage, before: Date, limit: number): Promise<StoredJob[]>;
+  staleQueued(state: WaitState, before: Date, limit: number): Promise<StoredJob[]>;
   /** Jobs first seen at or after `since` (re-score). */
   recentJobs(since: Date, limit: number): Promise<StoredJob[]>;
   /** Description text by job ID (missing descriptions are left out). */
@@ -158,6 +160,8 @@ const FLUSH_EVERY = 20;
 const MAX_CONSECUTIVE_ERRORS = 3;
 /** Flags a re-score carries over from the earlier deep read. */
 const DEEP_FLAGS: readonly JobFlag[] = ['snippet_only', 'unsupported_match'];
+/** Flags S3 sets and a fresh judgement replaces. */
+const STALE_FLAGS: readonly JobFlag[] = [...DEEP_FLAGS, 'score_drift', 'needs_description'];
 
 function chunks<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
@@ -196,6 +200,7 @@ function emptyCounts() {
     queued: 0,
     drift: 0,
     recomputed: 0,
+    needsDescription: 0,
     costPence: 0,
     durationMs: 0,
   };
@@ -413,7 +418,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   // Runs before the lease, so it happens even at the monthly cap or without a profile. The stage
   // reads below only see the newest 300 / best 50, so without this the rest would wait forever.
   const staleBefore = freshnessCutoff(criteria, deps.now());
-  for (const stage of QUEUE_STAGES) {
+  for (const stage of WAIT_STATES) {
     try {
       const stale = await store.staleQueued(stage, staleBefore, deps.limits.expireMaxJobs);
       let kept = 0;
@@ -678,6 +683,20 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         await write(entry.id, { set: { next: 's2' }, clear: [] });
         return;
       }
+      // No text to read: try the hydrators (Reed details today), else the job waits for a
+      // description. No model call, no slot, no lease (ADR-048).
+      let text = texts.get(entry.id) ?? '';
+      let hydrated = false;
+      if (job.descriptionKind === 'none' || text.length < FUNNEL.minDeepReadChars) {
+        const full = deps.hydrator ? await deps.hydrator.fullText(entry) : null;
+        if (full === null) {
+          s3.needsDescription = (s3.needsDescription ?? 0) + 1;
+          await write(entry.id, needsDescriptionPatch(job));
+          return;
+        }
+        text = full;
+        hydrated = true;
+      }
       if (started >= deps.limits.s3MaxJobs) return;
       if (pastDeadline(FUNNEL.s3StopMs)) {
         errors.stop('deadline');
@@ -694,11 +713,8 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         started -= 1;
         return;
       }
-      let text = texts.get(entry.id) ?? '';
-      const extraFlags: JobFlag[] = (job.flags ?? []).filter(
-        (flag) => !DEEP_FLAGS.includes(flag) && flag !== 'score_drift',
-      );
-      let snippet = job.descriptionKind === 'snippet';
+      const extraFlags: JobFlag[] = (job.flags ?? []).filter((flag) => !STALE_FLAGS.includes(flag));
+      let snippet = job.descriptionKind === 'snippet' && !hydrated;
       if (snippet && deps.hydrator) {
         const full = await deps.hydrator.fullText(entry);
         if (full !== null) {

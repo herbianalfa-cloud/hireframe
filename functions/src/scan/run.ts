@@ -5,11 +5,13 @@ import {
   planIngest,
   RawJobSchema,
   SCAN_SOURCE_IDS,
+  SHORT_LOCK_HOLDERS,
   type Company,
   type CompanySeed,
   type CriteriaContent,
   type ExistingJobKeys,
   type IngestPlan,
+  type LockHolder,
   type NormalisedJob,
   type Quota,
   type Run,
@@ -45,7 +47,7 @@ import type {
 export type LockResult =
   /** `recovered`: the ID of a killed run whose stale lock this scan took over (now failed). */
   | { ok: true; recovered?: string }
-  | { ok: false; reason: 'running' }
+  | { ok: false; reason: 'running'; holder?: LockHolder }
   | { ok: false; reason: 'recent'; lastFinishedAt: Date };
 
 export interface StoredCompany {
@@ -55,7 +57,13 @@ export interface StoredCompany {
 
 export interface ScanStore {
   newRunId(): string;
-  acquireLock(runId: string, now: Date, cooldownMs: number): Promise<LockResult>;
+  /** `holder` defaults to `scan`; email ingest (and, in 6B, lookup) take it briefly (ADR-048). */
+  acquireLock(
+    runId: string,
+    now: Date,
+    cooldownMs: number,
+    holder?: LockHolder,
+  ): Promise<LockResult>;
   releaseLock(runId: string, now: Date): Promise<void>;
   createRun(runId: string, run: Run): Promise<void>;
   finishRun(runId: string, run: Run): Promise<void>;
@@ -90,11 +98,16 @@ export interface ScanDeps {
   cooldownMs: number;
   trigger: Run['trigger'];
   now: () => Date;
+  /**
+   * A scheduled scan waits for a short holder (email ingest) instead of skipping, so the 07:30
+   * run is never lost to a 30-minute ingest; a scan holder still makes it skip (ADR-048).
+   */
+  waitForShortHolders?: { intervalMs: number; maxMs: number; sleep: (ms: number) => Promise<void> };
   /** The funnel, run after ingest while the lock is held (M4). */
   funnel?: (input: { runId: string; startedAt: Date }) => Promise<FunnelOutcome>;
 }
 
-export type ScanResult = ScanNowResult | { status: 'busy' };
+export type ScanResult = ScanNowResult | { status: 'busy'; holder?: LockHolder };
 
 const QUOTA_SOURCES: Partial<Record<ScanSourceId, keyof typeof QUOTAS>> = {
   reed: 'reed',
@@ -188,13 +201,35 @@ function sourceCode(error: unknown): string {
 
 export async function runScan(deps: ScanDeps): Promise<ScanResult> {
   const { store } = deps;
-  const startedAt = deps.now();
+  let startedAt = deps.now();
   const runId = store.newRunId();
 
-  const lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
+  let lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
+  const wait = deps.waitForShortHolders;
+  if (wait) {
+    const giveUpAt = startedAt.getTime() + wait.maxMs;
+    while (
+      !lock.ok &&
+      lock.reason === 'running' &&
+      lock.holder !== undefined &&
+      SHORT_LOCK_HOLDERS.includes(lock.holder) &&
+      deps.now().getTime() < giveUpAt
+    ) {
+      log.info('scan.waiting', { holder: lock.holder });
+      await wait.sleep(wait.intervalMs);
+      // The run's own deadlines start once it has the lock.
+      startedAt = deps.now();
+      lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
+    }
+  }
   if (!lock.ok) {
-    log.info('scan.refused', { reason: lock.reason });
-    if (lock.reason === 'running') return { status: 'busy' };
+    log.info('scan.refused', {
+      reason: lock.reason,
+      ...(lock.reason === 'running' && lock.holder ? { holder: lock.holder } : {}),
+    });
+    if (lock.reason === 'running') {
+      return { status: 'busy', ...(lock.holder ? { holder: lock.holder } : {}) };
+    }
     const waitMs = lock.lastFinishedAt.getTime() + deps.cooldownMs - startedAt.getTime();
     return {
       status: 'skipped_recent',

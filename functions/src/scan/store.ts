@@ -13,6 +13,7 @@ import {
   type Company,
   type CompanySeed,
   type ExistingJobKeys,
+  type LockHolder,
   type Quota,
   type ScanSourceId,
   type SourceHealth,
@@ -21,10 +22,12 @@ import {
   FieldValue,
   type DocumentReference,
   type Firestore,
+  type Query,
   type WriteBatch,
 } from 'firebase-admin/firestore';
 
-import { SCAN } from '../config.js';
+import { SCAN, SHORT_LOCK } from '../config.js';
+import { JOBS_BY_KEYS_SELECT, jobsByKeysSpec } from '../funnel/queries.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 import { eachLimited } from '../sources/types.js';
@@ -34,6 +37,15 @@ import type { LockResult, ScanStore, StoredCompany } from './run.js';
  * Admin SDK reads and writes for a scan (ADR-029). Clients can read `jobs`, `runs`,
  * `companies`, `sources` and `locks` but never write them (firestore.rules).
  */
+
+function isShortHolder(holder: LockHolder | undefined): boolean {
+  return holder === 'email' || holder === 'lookup';
+}
+
+/** How long a lock may stay held before it counts as dead (ADR-048). */
+export function lockStaleMs(holder: LockHolder): number {
+  return holder === 'email' ? SHORT_LOCK.emailStaleMs : SCAN.lockStaleMs;
+}
 
 function chunks<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
@@ -47,31 +59,35 @@ export function firestoreScanStore(db: Firestore): ScanStore {
   return {
     newRunId: () => db.collection(COLLECTIONS.runs).doc().id,
 
-    acquireLock(runId, now, cooldownMs) {
+    acquireLock(runId, now, cooldownMs, holder = 'scan') {
       return db.runTransaction(async (tx): Promise<LockResult> => {
         const snapshot = await tx.get(lockRef);
         // An unreadable lock is treated as free: blocking every scan forever would be worse.
         const parsed = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
         const lock = parsed.success ? parsed.data : undefined;
-        if (
-          lock?.runId &&
-          lock.startedAt &&
-          now.getTime() - lock.startedAt.getTime() < SCAN.lockStaleMs
-        ) {
-          return { ok: false, reason: 'running' };
+        // `staleAt` is optional (locks written before M6 have none): fall back to the scan's.
+        const staleAt = lock?.startedAt
+          ? (lock.staleAt ?? new Date(lock.startedAt.getTime() + SCAN.lockStaleMs))
+          : undefined;
+        if (lock?.runId && staleAt && now.getTime() < staleAt.getTime()) {
+          return { ok: false, reason: 'running', holder: lock.holder ?? 'scan' };
         }
         if (lock?.lastFinishedAt && now.getTime() - lock.lastFinishedAt.getTime() < cooldownMs) {
           return { ok: false, reason: 'recent', lastFinishedAt: lock.lastFinishedAt };
         }
         // A stale lock belongs to a scan that was killed before its `finally` ran (callable
         // timeout or memory), so its run is still `running`: mark it failed while taking over.
-        const deadRunRef = lock?.runId ? db.doc(PATHS.run(lock.runId)) : null;
+        // Short holders have no run record.
+        const deadScan = lock?.runId && !isShortHolder(lock.holder);
+        const deadRunRef = deadScan && lock.runId ? db.doc(PATHS.run(lock.runId)) : null;
         const deadRun = deadRunRef ? await tx.get(deadRunRef) : null;
         const recovered =
           deadRunRef && deadRun?.exists && deadRun.get('status') === 'running' ? deadRunRef : null;
         tx.set(lockRef, {
           runId,
           startedAt: now,
+          holder,
+          staleAt: new Date(now.getTime() + lockStaleMs(holder)),
           ...(lock?.lastFinishedAt ? { lastFinishedAt: lock.lastFinishedAt } : {}),
           schemaVersion: 1,
         });
@@ -93,7 +109,13 @@ export function firestoreScanStore(db: Firestore): ScanStore {
         const lock = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
         // Only the run holding the lock releases it (a stale one may have been taken over).
         if (!lock.success || lock.data.runId !== runId) return;
-        tx.set(lockRef, { lastFinishedAt: now, schemaVersion: 1 });
+        // A short holder never counts as a finished scan: it must not start the manual-scan
+        // cooldown, so the previous scan's finish time stays.
+        const finishedAt = isShortHolder(lock.data.holder) ? lock.data.lastFinishedAt : now;
+        tx.set(lockRef, {
+          ...(finishedAt ? { lastFinishedAt: finishedAt } : {}),
+          schemaVersion: 1,
+        });
       });
     },
 
@@ -165,23 +187,34 @@ export function firestoreScanStore(db: Firestore): ScanStore {
       const invalid = new Set<string>();
       const lookups = chunks(keys, SCAN.keyLookupChunk);
       await eachLimited(lookups, SCAN.keyLookupConcurrency, async (chunk) => {
-        const snapshot = await db
-          .collection(COLLECTIONS.jobs)
-          .where('keys', 'array-contains-any', chunk)
-          .select('keys', 'firstSeenAt', 'sources')
-          .get();
+        const spec = jobsByKeysSpec(chunk);
+        const query = spec.filters.reduce<Query>(
+          (found, filter) => found.where(filter.field, filter.op, filter.value),
+          db.collection(spec.collection),
+        );
+        const snapshot = await query.select(...JOBS_BY_KEYS_SELECT).get();
         for (const doc of snapshot.docs) {
           const parsed = JobKeysProjectionSchema.safeParse(timestampsToDates(doc.data()));
           if (!parsed.success) {
             invalid.add(doc.id);
             continue;
           }
-          const { keys: jobKeys, firstSeenAt, sources } = parsed.data;
+          const {
+            keys: jobKeys,
+            firstSeenAt,
+            sources,
+            descriptionKind,
+            next,
+            postedAt,
+          } = parsed.data;
           found.set(doc.id, {
             id: doc.id,
             keys: jobKeys,
             firstSeenAt,
             sourceCount: sources.length,
+            ...(descriptionKind ? { descriptionKind } : {}),
+            ...(next === undefined ? {} : { next }),
+            ...(postedAt ? { postedAt } : {}),
           });
         }
       });
@@ -212,16 +245,37 @@ export function firestoreScanStore(db: Firestore): ScanStore {
       }
       for (const update of plan.updates) {
         const ref: DocumentReference = db.doc(PATHS.job(update.jobId));
+        const { upgrade } = update;
         writes.push({
-          ops: 1,
+          ops: upgrade ? 2 : 1,
           apply: (batch) => {
             batch.update(ref, {
               sources: FieldValue.arrayUnion(
                 ...update.addSources.map((job) => sourceRef(job, now)),
               ),
               ...(update.addKeys.length ? { keys: FieldValue.arrayUnion(...update.addKeys) } : {}),
+              // A merge that brings full text to a job without it replaces the description, fills
+              // a missing posting date and releases a job waiting for one (ADR-048).
+              ...(upgrade
+                ? {
+                    descriptionKind: 'full',
+                    ...(upgrade.postedAt ? { postedAt: upgrade.postedAt } : {}),
+                    ...(upgrade.release
+                      ? { next: 's3', flags: FieldValue.arrayRemove('needs_description') }
+                      : {}),
+                  }
+                : {}),
               updatedAt: now,
             });
+            if (upgrade) {
+              batch.set(db.doc(PATHS.jobDescription(update.jobId)), {
+                text: upgrade.text,
+                kind: 'full',
+                sourceId: upgrade.sourceId,
+                fetchedAt: now,
+                schemaVersion: 1,
+              });
+            }
           },
         });
       }
