@@ -23,7 +23,7 @@ import {
   type SourceRunCounts,
 } from '@hireframe/shared';
 
-import { QUOTAS, SCAN } from '../config.js';
+import { FUNNEL, QUOTAS, SCAN } from '../config.js';
 import type { FunnelOutcome } from '../funnel/run.js';
 import type { HostPause, HttpClient } from '../http/client.js';
 import { errorFields, log } from '../log.js';
@@ -360,7 +360,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     }
     const groups = dedupeBatch(normalised);
     const existing = await store.findJobsByKeys([...new Set(groups.flatMap((g) => g.keys))]);
-    const plan = planIngest(groups, existing);
+    const plan = planIngest(groups, existing, { minUpgradeChars: FUNNEL.minDeepReadChars });
     if (plan.counts.conflicts > 0) log.warn('dedupe.conflict', { count: plan.counts.conflicts });
     const { failedWrites } = await store.writePlan(plan, startedAt);
     if (failedWrites > 0) run.errors.push({ code: 'write_failed' });

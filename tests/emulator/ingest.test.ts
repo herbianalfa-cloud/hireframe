@@ -29,7 +29,7 @@ import {
   WAAS_ALERT,
   WAAS_MODEL_ANSWER,
 } from '../../packages/shared/src/fixtures/alerts.js';
-import { ALERT_LINK_HOSTS, SHORT_LOCK } from '../../functions/src/config.js';
+import { ALERT_LINK_HOSTS, FUNNEL, SHORT_LOCK } from '../../functions/src/config.js';
 import { ingestHandler, type IngestHandlerDeps } from '../../functions/src/ingest/handler.js';
 import { signRequest, type SignedRequest } from '../../functions/src/ingest/hmac.js';
 import { firestoreNonceStore } from '../../functions/src/ingest/nonces.js';
@@ -263,8 +263,38 @@ describe('the description upgrade on merge (ADR-048)', () => {
       timestampsToDates((await db.doc(PATHS.jobDescription(acme.id)).get()).data()),
     );
     expect(description).toMatchObject({ kind: 'full', sourceId: 'greenhouse' });
-    expect(description.text.length).toBeGreaterThan(20);
+    expect(description.text.length).toBeGreaterThanOrEqual(FUNNEL.minDeepReadChars);
   });
+
+  it.each([
+    { snippetChars: 5_000, upgraded: false },
+    { snippetChars: 60, upgraded: true },
+  ])(
+    'a snippet-only job with $snippetChars stored characters: upgraded is $upgraded',
+    async ({ snippetChars, upgraded }) => {
+      await runIngest(ingestDeps(T0), [message('alert-1', LINKEDIN_ALERT)]);
+      const [acme] = await acmeJobs();
+      if (!acme) throw new Error('no job');
+      await db.doc(PATHS.job(acme.id)).update({ descriptionKind: 'snippet', stage: 's2' });
+      await db.doc(PATHS.jobDescription(acme.id)).set({
+        text: 'x'.repeat(snippetChars),
+        kind: 'snippet',
+        sourceId: 'adzuna',
+        fetchedAt: T0,
+        schemaVersion: 1,
+      });
+
+      await runScan(scanDeps(minutes(10)));
+      const after = JobSchema.parse(
+        timestampsToDates((await db.doc(PATHS.job(acme.id)).get()).data()),
+      );
+      const description = JobDescriptionSchema.parse(
+        timestampsToDates((await db.doc(PATHS.jobDescription(acme.id)).get()).data()),
+      );
+      expect(after.descriptionKind).toBe(upgraded ? 'full' : 'snippet');
+      expect(description.text.length === snippetChars).toBe(!upgraded);
+    },
+  );
 
   it('keeps a job waiting when only a snippet-only source merges in', async () => {
     await runIngest(ingestDeps(T0), [message('alert-1', LINKEDIN_ALERT)]);

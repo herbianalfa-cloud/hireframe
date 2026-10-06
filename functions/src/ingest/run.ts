@@ -16,7 +16,7 @@ import {
   type SourceHealth,
 } from '@hireframe/shared';
 
-import { ALERTS } from '../config.js';
+import { ALERTS, FUNNEL } from '../config.js';
 import { DailyCapExceededError, LlmOutputError, SpendCapExceededError } from '../llm/errors.js';
 import { errorFields, log } from '../log.js';
 import type { ScanStore } from '../scan/run.js';
@@ -268,7 +268,7 @@ async function processMessage(
 
   const groups = dedupeBatch(normalised);
   const existing = await store.findJobsByKeys([...new Set(groups.flatMap((group) => group.keys))]);
-  const plan = planIngest(groups, existing);
+  const plan = planIngest(groups, existing, { minUpgradeChars: FUNNEL.minDeepReadChars });
   if (plan.counts.conflicts > 0) log.warn('dedupe.conflict', { count: plan.counts.conflicts });
   const { failedWrites } = await store.writePlan(plan, deps.now());
   // A failed write must not mark the message done: a retry finds what landed and adds the rest.

@@ -66,7 +66,7 @@ export const GREENHOUSE_BOARD = {
       first_published: '2026-09-28T09:00:00-04:00',
       updated_at: '2026-09-29T10:00:00-04:00',
       content:
-        '&lt;p&gt;Acme Analytics builds reporting tools for B2B SaaS teams.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;SQL &amp;amp; dashboards&lt;/li&gt;&lt;li&gt;Work with product managers&lt;/li&gt;&lt;/ul&gt;',
+        '&lt;p&gt;Acme Analytics builds reporting tools for B2B SaaS teams.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;SQL &amp;amp; dashboards&lt;/li&gt;&lt;li&gt;Work with product managers&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;You will own the weekly metrics review, turn product questions into queries, and explain what the numbers say to the people who decide what we build next.&lt;/p&gt;',
     },
     {
       id: 5551299,

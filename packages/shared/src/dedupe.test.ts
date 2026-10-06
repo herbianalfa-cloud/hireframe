@@ -7,7 +7,8 @@ import {
   dedupeKey,
   fnv1a64,
   normaliseRawJob,
-  planIngest,
+  planIngest as planIngestWith,
+  type IngestPlanOptions,
   type NormalisedJob,
 } from './dedupe.js';
 import {
@@ -25,6 +26,14 @@ import {
 import { JobDescriptionSchema, JobSchema, type RawJob } from './jobs.js';
 
 const NOW = new Date('2026-10-01T08:00:00Z');
+
+/** Most fixtures' text is short, so the default minimum for an upgrade is low here. */
+const OPTIONS: IngestPlanOptions = { minUpgradeChars: 10 };
+const planIngest = (
+  groups: Parameters<typeof planIngestWith>[0],
+  existing: Parameters<typeof planIngestWith>[1],
+  options: IngestPlanOptions = OPTIONS,
+) => planIngestWith(groups, existing, options);
 
 function norm(raw: RawJob): NormalisedJob {
   const job = normaliseRawJob(raw);
@@ -384,5 +393,71 @@ describe('description upgrade on merge (ADR-048)', () => {
     );
     const plan = planIngest(dedupeBatch([snippet]), [waiting]);
     expect(plan.updates[0]?.upgrade).toBeUndefined();
+  });
+
+  describe('what counts as an upgrade', () => {
+    const full = (chars: number, patch: Partial<RawJob> = {}) =>
+      norm(
+        rawJob({
+          ...GREENHOUSE_JOB,
+          ...patch,
+          description: { kind: 'full', format: 'text', body: 'a'.repeat(chars) },
+        }),
+      );
+    const MIN = { minUpgradeChars: 200 };
+
+    it('needs the deep read minimum: shorter full text is not a description', () => {
+      const plan = planIngest(dedupeBatch([full(199)]), [waiting], MIN);
+      expect(plan.updates).toHaveLength(1);
+      expect(plan.updates[0]?.upgrade).toBeUndefined();
+      expect(
+        planIngest(dedupeBatch([full(200)]), [waiting], MIN).updates[0]?.upgrade,
+      ).toMatchObject({ release: true });
+    });
+
+    it('never replaces a snippet with less than it holds', () => {
+      const snippet = { ...waiting, descriptionKind: 'snippet' as const, descriptionChars: 300 };
+      expect(planIngest(dedupeBatch([full(250)]), [snippet], MIN).updates[0]?.upgrade).toBe(
+        undefined,
+      );
+      expect(planIngest(dedupeBatch([full(300)]), [snippet], MIN).updates[0]?.upgrade).toBe(
+        undefined,
+      );
+      expect(
+        planIngest(dedupeBatch([full(301)]), [snippet], MIN).updates[0]?.upgrade?.text,
+      ).toHaveLength(301);
+    });
+
+    it('takes the longest full member of the batch, whatever the source order', () => {
+      const short = full(250);
+      const longest = full(900, { sourceId: 'lever', externalId: 'lever-1' });
+      const middle = full(500, { sourceId: 'ashby', externalId: 'ashby-1' });
+      for (const order of [
+        [short, longest, middle],
+        [longest, middle, short],
+        [middle, short, longest],
+      ]) {
+        const plan = planIngest(dedupeBatch(order), [waiting], MIN);
+        expect(plan.updates[0]?.upgrade?.text).toHaveLength(900);
+        expect(plan.updates[0]?.upgrade?.sourceId).toBe('lever');
+      }
+    });
+
+    it('ignores snippets and too-short members when picking', () => {
+      const snippet = norm(
+        rawJob({
+          ...GREENHOUSE_JOB,
+          sourceId: 'adzuna',
+          externalId: 'az-1',
+          description: { kind: 'snippet', format: 'text', body: 'b'.repeat(2_000) },
+        }),
+      );
+      const plan = planIngest(
+        dedupeBatch([snippet, full(210), full(50, { externalId: 'x' })]),
+        [waiting],
+        MIN,
+      );
+      expect(plan.updates[0]?.upgrade?.text).toHaveLength(210);
+    });
   });
 });

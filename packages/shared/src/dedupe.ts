@@ -177,6 +177,8 @@ export interface ExistingJobKeys {
   sourceCount: number;
   /** For the description upgrade on merge (ADR-048); absent means "nothing to upgrade". */
   descriptionKind?: DescriptionKind;
+  /** Length of the stored text of a snippet-only job; absent counts as 0 (nothing to beat). */
+  descriptionChars?: number;
   next?: WaitState | null;
   postedAt?: Date;
 }
@@ -212,6 +214,11 @@ export interface IngestPlan {
   counts: S0Counts;
 }
 
+export interface IngestPlanOptions {
+  /** A description upgrade needs at least this much full text (the deep read's minimum). */
+  minUpgradeChars: number;
+}
+
 /**
  * Decides what each batch group does against the jobs already stored (ADR-030):
  * - no stored job shares a key → create it; its first member is `new`, the rest `merged`;
@@ -223,6 +230,7 @@ export interface IngestPlan {
 export function planIngest(
   groups: readonly BatchGroup[],
   existing: readonly ExistingJobKeys[],
+  options: IngestPlanOptions,
 ): IngestPlan {
   const byKey = new Map<string, ExistingJobKeys[]>();
   for (const job of existing) {
@@ -265,6 +273,7 @@ export function planIngest(
     if (matches.length > 1) plan.counts.conflicts += 1;
     const known = knownKeys.get(target.id) ?? new Set<string>();
     knownKeys.set(target.id, known);
+    const added: NormalisedJob[] = [];
     for (const job of group.jobs) {
       const sources = sourceCounts.get(target.id) ?? 0;
       // A job already at its source limit keeps what it has (Firestore arrays are capped).
@@ -276,16 +285,7 @@ export function planIngest(
       updates.set(target.id, update);
       update.addSources.push(job);
       sourceCounts.set(target.id, sources + 1);
-      const upgradable = target.descriptionKind === 'none' || target.descriptionKind === 'snippet';
-      if (!update.upgrade && upgradable && job.description.kind === 'full') {
-        const gap = target.postedAt === undefined && job.postedAt !== undefined;
-        update.upgrade = {
-          text: job.description.text,
-          sourceId: job.sourceId,
-          ...(gap && job.postedAt ? { postedAt: job.postedAt } : {}),
-          release: target.next === 'description',
-        };
-      }
+      added.push(job);
       // The posting's own source key first, so the cap never drops the key that recognises it.
       for (const key of [job.sourceKey, ...job.keys]) {
         if (!known.has(key) && known.size < JOB_LIMITS.keys) {
@@ -295,9 +295,44 @@ export function planIngest(
       }
       record(job.sourceId, 'merged');
     }
+    const upgrade = descriptionUpgrade(target, added, options.minUpgradeChars);
+    const update = updates.get(target.id);
+    // Two groups can match one stored job: the longer text wins.
+    if (upgrade && update && upgrade.text.length > (update.upgrade?.text.length ?? 0)) {
+      update.upgrade = upgrade;
+    }
   }
   plan.updates = [...updates.values()];
   return plan;
+}
+
+/**
+ * The upgrade a merge brings, if any: a job with no text or only a snippet takes the longest full
+ * description among the members just added, if it has the deep read's minimum and beats what is
+ * stored (ADR-048). Fewer characters than that is no description, and a shorter text never
+ * replaces a longer one.
+ */
+function descriptionUpgrade(
+  target: ExistingJobKeys,
+  added: readonly NormalisedJob[],
+  minChars: number,
+): DescriptionUpgrade | undefined {
+  if (target.descriptionKind !== 'none' && target.descriptionKind !== 'snippet') return undefined;
+  const stored = target.descriptionKind === 'none' ? 0 : (target.descriptionChars ?? 0);
+  let best: NormalisedJob | undefined;
+  for (const job of added) {
+    const { kind, text } = job.description;
+    if (kind !== 'full' || text.length < minChars || text.length <= stored) continue;
+    if (!best || text.length > best.description.text.length) best = job;
+  }
+  if (!best) return undefined;
+  const gap = target.postedAt === undefined && best.postedAt !== undefined;
+  return {
+    text: best.description.text,
+    sourceId: best.sourceId,
+    ...(gap && best.postedAt ? { postedAt: best.postedAt } : {}),
+    release: target.next === 'description',
+  };
 }
 
 export function sourceRef(job: NormalisedJob, seenAt: Date): JobSourceRef {

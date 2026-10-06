@@ -218,6 +218,19 @@ export function firestoreScanStore(db: Firestore): ScanStore {
           });
         }
       });
+      // A snippet-only job's stored text length, so an upgrade only replaces a shorter text.
+      const snippetIds = [...found.values()]
+        .filter((job) => job.descriptionKind === 'snippet')
+        .map((job) => job.id);
+      for (const part of chunks(snippetIds, SCAN.keyLookupChunk)) {
+        const snapshots = await db.getAll(...part.map((id) => db.doc(PATHS.jobDescription(id))));
+        snapshots.forEach((snapshot, index) => {
+          const id = part[index];
+          const job = id === undefined ? undefined : found.get(id);
+          const text: unknown = snapshot.exists ? snapshot.get('text') : undefined;
+          if (job && typeof text === 'string') job.descriptionChars = text.length;
+        });
+      }
       // An unreadable job can't be matched; skipping it may add a duplicate, never lose a job.
       if (invalid.size > 0)
         log.warn('store.invalid_doc', { collection: 'jobs', count: invalid.size });
