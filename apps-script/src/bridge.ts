@@ -24,18 +24,18 @@ export interface BridgeMessage {
 
 export interface BridgeDeps {
   /** Pending message IDs, newest first (Gmail's order); the core takes the oldest. */
-  listPendingIds(): string[];
-  getMessage(id: string): BridgeMessage | null;
+  listPendingIds: () => string[];
+  getMessage: (id: string) => BridgeMessage | null;
   /** Adds `hireframe/done` and removes `hireframe/alerts`. */
-  markDone(id: string): void;
+  markDone: (id: string) => void;
   /** One POST; may throw (network error, timeout). */
-  post(body: string, headers: Record<string, string>): { status: number; body: string };
+  post: (body: string, headers: Record<string, string>) => { status: number; body: string };
   signer: RequestSigner;
   /** UUID v4. */
-  uuid(): string;
+  uuid: () => string;
   /** Epoch ms. */
-  now(): number;
-  log?(event: string, fields: Record<string, number | string>): void;
+  now: () => number;
+  log?: (event: string, fields: Record<string, number | string>) => void;
 }
 
 export interface BridgeSummary {

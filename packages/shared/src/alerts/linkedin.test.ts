@@ -123,8 +123,10 @@ describe('parseLinkedInAlert', () => {
   });
 
   it('keeps at most 30 jobs per email', () => {
+    const [first] = LINKEDIN_CARDS;
+    if (!first) throw new Error('no fixture card');
     const many = Array.from({ length: 40 }, (_, index) => ({
-      ...LINKEDIN_CARDS[0]!,
+      ...first,
       id: String(4_100_000_000 + index),
     }));
     const parsed = parseLinkedInAlert(linkedInAlert(many));

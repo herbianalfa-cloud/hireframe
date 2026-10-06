@@ -49,7 +49,7 @@ async function readConfig(): Promise<
 > {
   const raw = await readAppConfigFromFirestore();
   const parsed = AppConfigSchema.safeParse(raw);
-  if (!parsed.success) log.warn('ingest.refused', { reason: 'config_invalid' });
+  if (!parsed.success) log.warn('ingest.failed', { step: 'config_invalid' });
   const config = parsed.success ? parsed.data : undefined;
   const overrides = AlertOverridesSchema.safeParse(config?.alerts ?? {});
   return {
@@ -84,7 +84,7 @@ export const ingestEmailJobs = onRequest(
         {
           method: request.method,
           contentType: request.header('content-type'),
-          rawBody: request.rawBody ?? Buffer.alloc(0),
+          rawBody: request.rawBody,
           header: (name) => request.header(name),
         },
         {

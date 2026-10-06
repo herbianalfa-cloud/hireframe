@@ -9,7 +9,7 @@ export type ComputeHmac = (value: string, key: string) => number[];
 
 export interface RequestSigner {
   /** The three `X-Hireframe-*` header values for one body. */
-  headers(body: string, timestampSeconds: number, nonce: string): Record<string, string>;
+  headers: (body: string, timestampSeconds: number, nonce: string) => Record<string, string>;
 }
 
 export function createSigner(secret: string, computeHmac: ComputeHmac): RequestSigner {

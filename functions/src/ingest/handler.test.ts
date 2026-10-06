@@ -65,7 +65,7 @@ function setup(
   result: IngestResult = { status: 'done', results: [{ id: 'm1', status: 'processed' }] },
 ) {
   const nonces = memoryNonces();
-  const run = vi.fn((_messages: readonly IngestMessage[]) => Promise.resolve(result));
+  const run = vi.fn<IngestHandlerDeps['run']>(() => Promise.resolve(result));
   const deps: IngestHandlerDeps = { secret: SECRET, nonces, now: () => NOW, run };
   return { nonces, run, deps };
 }

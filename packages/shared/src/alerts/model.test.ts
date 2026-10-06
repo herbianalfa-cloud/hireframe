@@ -35,7 +35,7 @@ describe('modelAlertJobs', () => {
     const normalised = job ? normaliseRawJob(job) : null;
     // No key comes from the unverified link.
     expect(normalised?.keys.filter((key) => !key.startsWith('d:'))).toEqual([
-      `email:${job?.externalId}`,
+      `email:${job?.externalId ?? ''}`,
     ]);
   });
 

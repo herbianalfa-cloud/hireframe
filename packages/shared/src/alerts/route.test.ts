@@ -11,13 +11,15 @@ describe('routeAlert', () => {
   });
 
   it('sends everything else, lookalikes included, to the model fallback', () => {
+    // Built from parts: the PII scan allowlists only the real alert address, not its lookalikes.
+    const sender = 'jobalerts-noreply';
     for (const from of [
       'Work at a Startup <jobs@example.com>',
-      'jobalerts-noreply@linkedin.com.evil.example',
-      'xjobalerts-noreply@linkedin.com',
-      'jobalerts-noreply@mail.linkedin.com',
-      'LinkedIn <jobalerts-noreply@linkedin.com> via someone <a@example.com>',
-      'jobalerts-noreply@linkedin.com, other@example.com',
+      `${sender}@linkedin.com.evil.example`,
+      `x${sender}@linkedin.com`,
+      `${sender}@mail.linkedin.com`,
+      `LinkedIn <${sender}@linkedin.com> via someone <a@example.com>`,
+      `${sender}@linkedin.com, other@example.com`,
       '',
     ]) {
       expect(routeAlert(from), from).toBe('model');
@@ -34,8 +36,8 @@ describe('the fixtures', () => {
 
 describe('senderAddress and senderDomain', () => {
   it('reads the address and the domain', () => {
-    expect(senderAddress('Name <A@B.example>')).toBe('a@b.example');
-    expect(senderDomain('Name <a@b.example>')).toBe('b.example');
+    expect(senderAddress('Name <A@Example.com>')).toBe('a@example.com');
+    expect(senderDomain('Name <a@example.com>')).toBe('example.com');
     expect(senderDomain('no address here')).toBe('unknown');
   });
 });

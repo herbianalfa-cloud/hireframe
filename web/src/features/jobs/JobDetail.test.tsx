@@ -231,10 +231,13 @@ describe('JobDetail', () => {
         ],
       });
       open();
-      const sources = screen.getByRole('heading', { name: 'Sources' }).parentElement;
-      const items = within(sources as HTMLElement).getAllByRole('listitem');
-      expect(within(items[1] as HTMLElement).getByText('Easy Apply on LinkedIn')).toBeDefined();
-      expect(within(items[0] as HTMLElement).queryByText('Easy Apply on LinkedIn')).toBeNull();
+      const itemOf = (name: string): HTMLElement => {
+        const item = screen.getByRole('link', { name }).closest('li');
+        if (!item) throw new Error(`no list item for ${name}`);
+        return item;
+      };
+      expect(within(itemOf('LinkedIn alert')).getByText('Easy Apply on LinkedIn')).toBeDefined();
+      expect(within(itemOf('Greenhouse')).queryByText('Easy Apply on LinkedIn')).toBeNull();
     });
 
     it('marks an off-allowlist link as unverified, with its host', () => {

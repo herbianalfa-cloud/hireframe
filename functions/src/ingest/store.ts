@@ -23,12 +23,13 @@ const EMAIL_SOURCE = 'email';
 export function firestoreIngestStore(db: Firestore): IngestStore {
   const scan = firestoreScanStore(db);
   return {
-    newRunId: scan.newRunId,
-    acquireLock: scan.acquireLock,
-    releaseLock: scan.releaseLock,
-    findJobsByKeys: scan.findJobsByKeys,
-    writePlan: scan.writePlan,
-    watchedCompanies: scan.watchedCompanies,
+    newRunId: () => scan.newRunId(),
+    acquireLock: (runId, now, cooldownMs, holder) =>
+      scan.acquireLock(runId, now, cooldownMs, holder),
+    releaseLock: (runId, now) => scan.releaseLock(runId, now),
+    findJobsByKeys: (keys) => scan.findJobsByKeys(keys),
+    writePlan: (plan, now) => scan.writePlan(plan, now),
+    watchedCompanies: () => scan.watchedCompanies(),
 
     async seenMessages(hashes) {
       const seen = new Set<string>();

@@ -39,16 +39,19 @@ export function offeredLinks(html: string): AlertLink[] {
   return links;
 }
 
-/** A link as the model sees it: its anchor text and host and path, without the query. */
-function linkLine(link: AlertLink, index: number): string {
-  let shown = '';
+/** The host and path of a link, without the query (which can carry tracking tokens). */
+function hostAndPath(href: string): string {
   try {
-    const url = new URL(link.href);
-    shown = `${url.hostname}${url.pathname}`;
+    const url = new URL(href);
+    return `${url.hostname}${url.pathname}`;
   } catch {
-    shown = '';
+    return '';
   }
-  return `[${String(index)}] ${link.text.slice(0, 80)} -> ${shown.slice(0, 120)}`;
+}
+
+/** A link as the model sees it: its anchor text and host and path. */
+function linkLine(link: AlertLink, index: number): string {
+  return `[${String(index)}] ${link.text.slice(0, 80)} -> ${hostAndPath(link.href).slice(0, 120)}`;
 }
 
 export function alertParseUser(
