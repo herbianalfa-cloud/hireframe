@@ -664,6 +664,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   async function runS3(activeLease: RunLease): Promise<void> {
     const began = deps.clock();
     const pacer = createPacer(deps.limits.deepReadRpm, deps.clock, deps.sleep);
+    const { hydrator } = deps;
     // A few extra, in case some have gone stale while queued.
     const queue = await store.queued('s3', deps.limits.s3MaxJobs * 2);
     await loadCompanies(queue);
@@ -683,19 +684,19 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         await write(entry.id, { set: { next: 's2' }, clear: [] });
         return;
       }
-      // No text to read: try the hydrators (Reed details today), else the job waits for a
-      // description. No model call, no slot, no lease (ADR-048).
-      let text = texts.get(entry.id) ?? '';
-      let hydrated = false;
-      if (job.descriptionKind === 'none' || text.length < FUNNEL.minDeepReadChars) {
-        const full = deps.hydrator ? await deps.hydrator.fullText(entry) : null;
-        if (full === null) {
-          s3.needsDescription = (s3.needsDescription ?? 0) + 1;
-          await write(entry.id, needsDescriptionPatch(job));
-          return;
-        }
-        text = full;
-        hydrated = true;
+      // No text to read: with no hydrator the job waits for a description at once (free: no model
+      // call, no slot, no lease; ADR-048). A snippet is text: it gets its snippet_only deep read.
+      const stored = texts.get(entry.id);
+      let text = stored ?? '';
+      const noText =
+        job.descriptionKind === 'none' ||
+        stored === undefined ||
+        stored === '' ||
+        (job.descriptionKind === 'full' && stored.length < FUNNEL.minDeepReadChars);
+      if (noText && !hydrator) {
+        s3.needsDescription = (s3.needsDescription ?? 0) + 1;
+        await write(entry.id, needsDescriptionPatch(job));
+        return;
       }
       if (started >= deps.limits.s3MaxJobs) return;
       if (pastDeadline(FUNNEL.s3StopMs)) {
@@ -703,7 +704,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         return;
       }
       started += 1;
-      // Room first: a job that can't be sent keeps its slot and spends no Reed details call.
+      // Room first: a job that can't be sent keeps its slot and spends no hydrator call.
       if (!(await activeLease.waitForRoom('s3'))) {
         started -= 1;
         errors.stop('run_budget');
@@ -713,10 +714,23 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         started -= 1;
         return;
       }
+      let hydrated = false;
+      if (noText && hydrator) {
+        const full = await hydrator.fullText(entry);
+        if (full === null) {
+          // Nothing found: the slot goes back and the job waits for a description.
+          started -= 1;
+          s3.needsDescription = (s3.needsDescription ?? 0) + 1;
+          await write(entry.id, needsDescriptionPatch(job));
+          return;
+        }
+        text = full;
+        hydrated = true;
+      }
       const extraFlags: JobFlag[] = (job.flags ?? []).filter((flag) => !STALE_FLAGS.includes(flag));
       let snippet = job.descriptionKind === 'snippet' && !hydrated;
-      if (snippet && deps.hydrator) {
-        const full = await deps.hydrator.fullText(entry);
+      if (snippet && hydrator) {
+        const full = await hydrator.fullText(entry);
         if (full !== null) {
           text = full;
           snippet = false;

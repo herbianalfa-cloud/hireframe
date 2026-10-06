@@ -1019,6 +1019,29 @@ describe('back-pressure', () => {
       expect(result.perStage.s3.queued).toBe(1);
     });
 
+    it('spends no hydrator call on a job with no text that cannot be sent', async () => {
+      const store = memoryFunnelStore();
+      for (const id of ['a', 'b', 'c']) {
+        store.add(id, testJob({ title: 'Product Analyst', descriptionKind: 'none' }), '');
+      }
+      const { asked, hydrator } = hydratorSpy();
+      const worst: TokenCounts = {
+        input: 0,
+        output: MODELS.deepRead.maxTokens,
+        cacheRead: 0,
+        cacheWrite: boundOf(9_000),
+      };
+      const t = controlled({ deepTokens: worst });
+      const lease = 3 * C2 + 2.5 * R3 + 0.01;
+      const result = await run(
+        deps(store, { transport: t.transport, hydrator, limits: { runBudgetPence: lease } }),
+      );
+      expect(result.perStage.s3.in).toBe(2);
+      expect(result.budget.stops?.s3).toBe('run_budget');
+      expect(asked).toHaveLength(2);
+      expect(result.perStage.s3.queued).toBe(1);
+    });
+
     it('gives the slot back when a refused job is left queued', async () => {
       const store = memoryFunnelStore();
       snippetJobs(store, ['a', 'b', 'c', 'd']);
@@ -1096,6 +1119,101 @@ describe('needs-description state (ADR-048)', () => {
     await run(deps(store, { transport }));
     expect(store.get('short').next).toBe('description');
     expect(sent).toHaveLength(0);
+  });
+
+  it('routes a missing description document to wait, whatever the kind', async () => {
+    const store = memoryFunnelStore();
+    store.add('gone', atS3({ descriptionKind: 'full' }), null);
+    store.add('gone-snippet', atS3({ descriptionKind: 'snippet' }), null);
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('gone').next).toBe('description');
+    expect(store.get('gone-snippet').next).toBe('description');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('gives a short snippet its deep read, flagged snippet_only, instead of waiting', async () => {
+    const store = memoryFunnelStore();
+    store.add('snippet', atS3({ descriptionKind: 'snippet' }), 'Join our analytics team.');
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('snippet').next).not.toBe('description');
+    expect(store.get('snippet').flags).toContain('snippet_only');
+    expect(store.get('snippet').flags ?? []).not.toContain('needs_description');
+    expect(store.get('snippet').verdict).toBeDefined();
+    expect(sent.filter((r) => r.purpose === 'deepRead')).toHaveLength(1);
+  });
+
+  it('still reads a full description of the minimum length', async () => {
+    const store = memoryFunnelStore();
+    store.add('edge', atS3({ descriptionKind: 'full' }), 'x'.repeat(FUNNEL.minDeepReadChars));
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('edge').next).not.toBe('description');
+    expect(sent.filter((r) => r.purpose === 'deepRead')).toHaveLength(1);
+  });
+
+  describe('hydrators run only for a job that will be sent', () => {
+    function textFor(ids: string[]) {
+      const asked: string[] = [];
+      const hydrator: Hydrator = {
+        fullText: (entry: StoredJob) => {
+          asked.push(entry.id);
+          return Promise.resolve(`Full text. ${TEST_DESCRIPTION}`);
+        },
+        counts: () => ({ attempted: asked.length, ok: asked.length, failed: 0 }),
+        finish: () => Promise.resolve(),
+      };
+      return { asked, hydrator, ids };
+    }
+
+    it('makes no call past the s3MaxJobs cap', async () => {
+      const store = memoryFunnelStore();
+      for (const id of ['a', 'b', 'c']) store.add(id, atS3({ descriptionKind: 'none' }), '');
+      const { asked, hydrator } = textFor(['a', 'b', 'c']);
+      const result = await run(deps(store, { hydrator, limits: { s3MaxJobs: 1 } }));
+      expect(asked).toHaveLength(1);
+      expect(result.perStage.s3.in).toBe(1);
+      expect(result.perStage.s3.queued).toBe(2);
+    });
+
+    it('makes no call once the S3 deadline has passed', async () => {
+      const store = memoryFunnelStore();
+      store.add('a', atS3({ descriptionKind: 'none' }), '');
+      const { asked, hydrator } = textFor(['a']);
+      const result = await run(
+        deps(store, { hydrator, startedAtMs: TEST_NOW.getTime() - FUNNEL.s3StopMs }),
+      );
+      expect(result.budget.stops?.s3).toBe('deadline');
+      expect(asked).toHaveLength(0);
+      expect(store.get('a').next).toBe('s3');
+    });
+
+    it('routes a no-text job to wait without a slot when there is no hydrator at all', async () => {
+      const store = memoryFunnelStore();
+      store.add('a', atS3({ descriptionKind: 'none' }), '');
+      store.add('b', atS3());
+      const { transport } = recordingTransport();
+      const result = await run(deps(store, { transport, limits: { s3MaxJobs: 1 } }));
+      expect(store.get('a').next).toBe('description');
+      expect(store.get('b').verdict).toBeDefined();
+      expect(result.perStage.s3).toMatchObject({ in: 1, needsDescription: 1 });
+    });
+
+    it('counts a hydrator that finds nothing as waiting, with no model call', async () => {
+      const store = memoryFunnelStore();
+      store.add('a', atS3({ descriptionKind: 'none' }), '');
+      const hydrator: Hydrator = {
+        fullText: () => Promise.resolve(null),
+        counts: () => ({ attempted: 1, ok: 0, failed: 1 }),
+        finish: () => Promise.resolve(),
+      };
+      const { transport, sent } = recordingTransport();
+      const result = await run(deps(store, { transport, hydrator, limits: { s3MaxJobs: 1 } }));
+      expect(store.get('a').next).toBe('description');
+      expect(sent.filter((r) => r.purpose === 'deepRead')).toHaveLength(0);
+      expect(result.perStage.s3).toMatchObject({ in: 0, needsDescription: 1 });
+    });
   });
 
   it('tries the hydrators first, and goes on to the deep read when one finds text', async () => {

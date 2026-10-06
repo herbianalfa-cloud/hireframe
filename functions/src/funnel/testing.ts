@@ -102,7 +102,8 @@ export interface MemoryFunnelStore extends FunnelStore {
   companiesById: Map<string, CompanyInfo>;
   facts: FunnelFact[];
   workRights: WorkRightsSetting | null;
-  add(id: string, job: Job, text?: string): void;
+  /** `text` null means the description document is missing. */
+  add(id: string, job: Job, text?: string | null): void;
   get(id: string): Job;
   /** Every patch applied, in order. */
   patches: { jobId: string; patch: JobPatch }[];
@@ -129,7 +130,8 @@ export function memoryFunnelStore(
     patches,
     add(id, job, text = TEST_DESCRIPTION) {
       jobs.set(id, JobSchema.parse(job));
-      texts.set(id, text);
+      if (text === null) texts.delete(id);
+      else texts.set(id, text);
     },
     get(id) {
       const job = jobs.get(id);
