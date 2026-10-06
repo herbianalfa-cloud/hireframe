@@ -26,6 +26,7 @@ import { FAKE_CV_EXTRACTION } from '../../functions/src/fixtures/fake-cv-respons
 import { createReedHydrator } from '../../functions/src/funnel/hydrate.js';
 import { runFunnel, type FunnelDeps } from '../../functions/src/funnel/run.js';
 import { firestoreFunnelStore } from '../../functions/src/funnel/store.js';
+import { TEST_DESCRIPTION } from '../../functions/src/funnel/testing.js';
 import { fakeTransport } from '../../functions/src/llm/fake-transport.js';
 import { firestoreUsageStore } from '../../functions/src/llm/usage-store.js';
 import { testHttpClient } from '../../functions/src/sources/testing.js';
@@ -87,7 +88,7 @@ function job(id: string, patch: Partial<Job> = {}): Job {
   };
 }
 
-async function addJob(id: string, patch: Partial<Job> = {}, text = 'Help the product team.') {
+async function addJob(id: string, patch: Partial<Job> = {}, text = TEST_DESCRIPTION) {
   const value = job(id, patch);
   await db.doc(PATHS.job(id)).set(value);
   await db.doc(PATHS.jobDescription(id)).set({
@@ -156,7 +157,7 @@ describe('the funnel on the emulator', () => {
   it('judges s0 jobs and settles the run lease', async () => {
     await addJob('apply');
     await addJob('senior', { title: 'Senior Product Analyst' });
-    await addJob('rtw', {}, 'Applicants must have indefinite leave to remain.');
+    await addJob('rtw', {}, `Applicants must have indefinite leave to remain. ${TEST_DESCRIPTION}`);
     const result = await runFunnel(deps(), { runId: 'r1' });
 
     expect(await read('apply')).toMatchObject({

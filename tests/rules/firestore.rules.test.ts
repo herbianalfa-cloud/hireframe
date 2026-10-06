@@ -49,7 +49,12 @@ const DATA_MODEL_DOCS = [
   'events/event-1',
   DOCS.scanLock,
   'sources/greenhouse',
+  // The Gmail bridge's health card (M6, ADR-047): owner-readable like every source.
+  'sources/email',
 ];
+
+/** Server-only (ADR-046, ADR-047): denied to every client, the owner included, reads and writes. */
+const SERVER_ONLY_DOCS = ['nonces/3b241101-e2bb-4255-8caf-4136c566a962', 'alertMessages/abc123'];
 
 /** Paths outside the data model must be denied even to the owner. */
 const UNKNOWN_DOCS = [
@@ -79,7 +84,7 @@ function parentCollection(path: string): string {
 async function seed(options: { appConfig: Record<string, unknown> | null }): Promise<void> {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    for (const path of [...DATA_MODEL_DOCS, ...UNKNOWN_DOCS]) {
+    for (const path of [...DATA_MODEL_DOCS, ...UNKNOWN_DOCS, ...SERVER_ONLY_DOCS]) {
       if (path !== DOCS.appConfig) await setDoc(doc(db, path), { seeded: true });
     }
     if (options.appConfig) await setDoc(doc(db, DOCS.appConfig), options.appConfig);
@@ -134,6 +139,18 @@ describe('with an owner configured', () => {
       await expectAllWritesDenied(dbFor(who), path);
     }
   });
+
+  it.each(SERVER_ONLY_DOCS)(
+    'denies the owner, a stranger and anon every read and write on %s',
+    async (path) => {
+      for (const who of ['anon', 'stranger', 'owner'] as const) {
+        const db = dbFor(who);
+        await assertFails(getDoc(doc(db, path)));
+        await assertFails(getDocs(collection(db, parentCollection(path))));
+        await expectAllWritesDenied(db, path);
+      }
+    },
+  );
 
   it('denies the owner schema-valid writes to Admin-only documents', async () => {
     const db = dbFor('owner');
