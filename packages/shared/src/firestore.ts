@@ -14,6 +14,10 @@ export const COLLECTIONS = {
   events: 'events',
   locks: 'locks',
   sources: 'sources',
+  /** Server-only: signed-request nonces for the Gmail bridge (ADR-046). TTL on `expireAt`. */
+  nonces: 'nonces',
+  /** Server-only: one doc per ingested alert email, counts only (ADR-047). TTL on `expireAt`. */
+  alertMessages: 'alertMessages',
 } as const;
 
 /** Region of the callable functions (ADR-017). Lives here, a pure module, so the app shell can import it without pulling in the schemas. */
@@ -53,6 +57,8 @@ export const PATHS = {
   run: (runId: string) => `${COLLECTIONS.runs}/${runId}`,
   source: (sourceId: string) => `${COLLECTIONS.sources}/${sourceId}`,
   company: (companyId: string) => `${COLLECTIONS.companies}/${companyId}`,
+  nonce: (nonce: string) => `${COLLECTIONS.nonces}/${nonce}`,
+  alertMessage: (hash: string) => `${COLLECTIONS.alertMessages}/${hash}`,
 } as const;
 
 /** Cloud Storage object paths (storage.rules). */

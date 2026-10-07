@@ -150,6 +150,67 @@ export function linkedInJobDocuments(now: Date) {
 }
 
 /**
+ * One fake job that came from a LinkedIn alert email and has already been through S1 and S2: S3
+ * sent it to wait for a description, because an alert carries none (M6, ADR-048). System shows it
+ * under "Waiting for a description". Its keys are what the shared dedupe computes
+ * (dev-tools.test.ts).
+ */
+export const DEV_ALERT_WAITING_JOB_ID = 'dev-alert-waiting-job';
+export const DEV_ALERT_WAITING_JOB_KEYS = ['d:083c1ac184e7732d', 'linkedin:4012345680'] as const;
+
+export function alertWaitingJobDocuments(now: Date) {
+  const url = 'https://www.linkedin.com/jobs/view/4012345680';
+  const posted = new Date(now.getTime() - 86_400_000);
+  return {
+    job: {
+      fields: toRestFields({
+        dedupeKey: DEV_ALERT_WAITING_JOB_KEYS[0],
+        keys: [...DEV_ALERT_WAITING_JOB_KEYS],
+        title: 'Customer Solutions Engineer',
+        company: 'Cobalt Systems',
+        location: 'Manchester, England, United Kingdom',
+        city: 'manchester',
+        country: 'GB',
+        remote: 'onsite',
+        url,
+        sources: [
+          { id: 'linkedin-alert', url, externalId: '4012345680', seenAt: posted, easyApply: true },
+        ],
+        salary: { min: 30000, currency: 'GBP', period: 'year' },
+        firstSeenAt: posted,
+        descriptionRef: `jobs/${DEV_ALERT_WAITING_JOB_ID}/description/raw`,
+        descriptionKind: 'none',
+        stage: 's2',
+        next: 'description',
+        sortAt: posted,
+        flags: ['freshness_unknown', 'needs_description'],
+        triage: {
+          lane: 'secondary',
+          seniority: 'junior',
+          blockers: [],
+          pass: true,
+          triageScore: 6,
+          note: 'A customer-facing technical role.',
+        },
+        status: 'new',
+        createdAt: posted,
+        updatedAt: posted,
+        schemaVersion: 1,
+      }),
+    },
+    description: {
+      fields: toRestFields({
+        text: '',
+        kind: 'none',
+        sourceId: 'linkedin-alert',
+        fetchedAt: posted,
+        schemaVersion: 1,
+      }),
+    },
+  };
+}
+
+/**
  * The fake CV's facts (Alex Example) and a work-rights setting, so the funnel has a profile to
  * judge against in `npm run dev` (M4). Uploading the fake CV afterwards finds them unchanged.
  * Each fact gets its v1 snapshot, as parseCv writes it.

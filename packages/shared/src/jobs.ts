@@ -12,6 +12,7 @@ import {
   S2CountsSchema,
   S3CountsSchema,
   VERDICTS,
+  WAIT_STATES,
 } from './funnel.js';
 
 /**
@@ -37,8 +38,12 @@ export const SCAN_SOURCE_IDS = [
 ] as const;
 export type ScanSourceId = (typeof SCAN_SOURCE_IDS)[number];
 
-/** Every source a job can come from: the scan sources plus email alerts (M6). */
-export const JOB_SOURCE_IDS = [...SCAN_SOURCE_IDS, 'linkedin-alert'] as const;
+/**
+ * Every source a job can come from: the scan sources plus email alerts (M6). `linkedin-alert`
+ * is the deterministic LinkedIn parser, `email-alert` any other sender through the model
+ * fallback (ADR-047).
+ */
+export const JOB_SOURCE_IDS = [...SCAN_SOURCE_IDS, 'linkedin-alert', 'email-alert'] as const;
 export type JobSourceId = (typeof JOB_SOURCE_IDS)[number];
 
 export const ATS_TYPES = ['greenhouse', 'lever', 'ashby', 'workable', 'none'] as const;
@@ -51,7 +56,8 @@ export type RemoteMode = (typeof REMOTE_MODES)[number];
 export const COUNTRIES = ['GB', 'other', 'unknown'] as const;
 export type Country = (typeof COUNTRIES)[number];
 
-export const DESCRIPTION_KINDS = ['full', 'snippet'] as const;
+/** `none`: the source gave no description at all (every LinkedIn alert job, ADR-047). */
+export const DESCRIPTION_KINDS = ['full', 'snippet', 'none'] as const;
 export type DescriptionKind = (typeof DESCRIPTION_KINDS)[number];
 
 export const JOB_STAGES = ['s0', 's1', 's2', 's3'] as const;
@@ -117,15 +123,38 @@ export const RawJobSchema = z.object({
   salary: SalarySchema.exactOptional(),
   /** Other job links in the posting (e.g. an HN comment linking a Greenhouse job). */
   extraUrls: z.array(HttpUrl).max(JOB_LIMITS.extraUrls).exactOptional(),
+  /** A LinkedIn "Easy Apply" badge: data about the posting, kept on its source (ADR-047). */
+  easyApply: z.literal(true).exactOptional(),
+  /**
+   * An https link from a model-parsed alert on a host off the allowlist (ADR-047): stored on the
+   * source ref only (marked `unverified`), gives no keys, never followed or logged. `url` is then
+   * a search link.
+   */
+  unverifiedUrl: z
+    .url({ protocol: /^https$/ })
+    .max(JOB_LIMITS.url)
+    .exactOptional(),
+  /** `url` is a LinkedIn search link built from the title and company, not a posting (ADR-047). */
+  searchLink: z.literal(true).exactOptional(),
 });
 export type RawJob = z.infer<typeof RawJobSchema>;
 
-export const JobSourceRefSchema = z.object({
-  id: z.enum(JOB_SOURCE_IDS),
-  url: HttpUrl,
-  externalId: z.string().min(1).max(JOB_LIMITS.externalId),
-  seenAt: z.date(),
-});
+export const JobSourceRefSchema = z
+  .object({
+    id: z.enum(JOB_SOURCE_IDS),
+    url: HttpUrl,
+    externalId: z.string().min(1).max(JOB_LIMITS.externalId),
+    seenAt: z.date(),
+    easyApply: z.literal(true).exactOptional(),
+    /** `url` is an off-allowlist link from a model-parsed alert: shown with its host, never trusted. */
+    unverified: z.literal(true).exactOptional(),
+    /** `url` is a search link, not a posting. */
+    searchLink: z.literal(true).exactOptional(),
+  })
+  .refine((ref) => !ref.unverified || /^https:\/\//i.test(ref.url), {
+    message: 'an unverified link must be https',
+    path: ['url'],
+  });
 export type JobSourceRef = z.infer<typeof JobSourceRefSchema>;
 
 /**
@@ -230,6 +259,16 @@ export const QuotaSchema = z.object({
 });
 export type Quota = z.infer<typeof QuotaSchema>;
 
+/** Per-sender totals on `sources/email` (ADR-047): counts and the sender's domain only. */
+export const SenderStatsSchema = z.object({
+  messages: Count,
+  jobs: Count,
+  unparsed: Count,
+  unverifiedLinks: Count,
+  lastAt: z.date(),
+});
+export type SenderStats = z.infer<typeof SenderStatsSchema>;
+
 /** `sources/{sourceId}`: rolling health for the System screen (ADR-029). */
 export const SourceHealthSchema = z.object({
   status: z.enum(SOURCE_STATUSES),
@@ -246,6 +285,8 @@ export const SourceHealthSchema = z.object({
     .array(z.object({ host: z.string().min(1).max(253), until: z.date() }))
     .max(10)
     .exactOptional(),
+  /** `sources/email` only: totals per sender domain, at most 20 and the rest under `other`. */
+  bySender: z.record(z.string().min(1).max(253), SenderStatsSchema).exactOptional(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),
 });
@@ -306,6 +347,10 @@ export const JobKeysProjectionSchema = z.object({
   keys: z.array(z.string().min(1)).min(1),
   firstSeenAt: z.date(),
   sources: z.array(z.unknown()),
+  /** For the description upgrade on merge (ADR-048). Optional: older jobs may lack them. */
+  descriptionKind: z.enum(DESCRIPTION_KINDS).exactOptional(),
+  next: z.enum(WAIT_STATES).nullable().exactOptional(),
+  postedAt: z.date().exactOptional(),
 });
 
 // ---- Companies (watchlist) ----
@@ -402,11 +447,27 @@ export type RescoreResult = z.infer<typeof RescoreResultSchema>;
 /** Re-score covers jobs first seen this many days ago or less (PRD R3). */
 export const RESCORE_DAYS = 14;
 
-/** `locks/scan`: the single-flight scan lock (ADR-029). `runId` is set only while a scan runs. */
+/**
+ * Who holds `locks/scan`. A scan or re-score holds it for a whole run; `email` (alert ingest) and
+ * `lookup` (M6) hold it briefly, and a scheduled scan waits for them (ADR-048).
+ */
+export const LOCK_HOLDERS = ['scan', 'rescore', 'email', 'lookup'] as const;
+export type LockHolder = (typeof LOCK_HOLDERS)[number];
+
+/** Holders that finish in minutes: a scheduled scan waits for them instead of skipping. */
+export const SHORT_LOCK_HOLDERS: readonly LockHolder[] = ['email', 'lookup'];
+
+/**
+ * `locks/scan`: the single-flight lock (ADR-029). `runId` is set only while someone holds it.
+ * `holder` and `staleAt` are optional, so locks written before M6 still parse: no holder means a
+ * scan, and no `staleAt` means `startedAt` plus the scan timeout.
+ */
 export const ScanLockSchema = z.object({
   runId: z.string().min(1).exactOptional(),
   startedAt: z.date().exactOptional(),
   lastFinishedAt: z.date().exactOptional(),
+  holder: z.enum(LOCK_HOLDERS).exactOptional(),
+  staleAt: z.date().exactOptional(),
   schemaVersion: z.literal(1),
 });
 export type ScanLock = z.infer<typeof ScanLockSchema>;

@@ -3,7 +3,7 @@
  * postings are wrapped in a tag the system prompt names as data, and any copy of that tag inside
  * the text is defused, so the text can't close its own tag and pose as instructions.
  */
-export type UntrustedTag = 'cv_text' | 'note' | 'job_posting';
+export type UntrustedTag = 'cv_text' | 'note' | 'job_posting' | 'email';
 
 export function wrapUntrusted(tag: UntrustedTag, text: string): string {
   const escaped = text.replace(new RegExp(`</?${tag}\\s*>`, 'gi'), (match) =>

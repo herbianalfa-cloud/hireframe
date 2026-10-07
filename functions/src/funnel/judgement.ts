@@ -9,6 +9,7 @@ import {
   type QueueStage,
   type ReviewCode,
   type ScoreResult,
+  type WaitState,
 } from '@hireframe/shared';
 
 import { PROMPT_VERSIONS } from './prompts.js';
@@ -110,8 +111,12 @@ export function requeuePatch(stage: QueueStage, outcome: S1Outcome, now: Date): 
   return { ...patch, set: { ...patch.set, next: stage, rescoreQueuedAt: now } };
 }
 
-/** A queued job went stale before its turn: a free final skip, rule `freshness`. */
-export function expiredPatch(stage: QueueStage, ctx: JudgeContext): JobPatch {
+/**
+ * A queued job went stale before its turn: a free final skip, rule `freshness`. A job waiting for
+ * a description got there through S3, so that is the stage it stopped at.
+ */
+export function expiredPatch(state: WaitState, ctx: JudgeContext): JobPatch {
+  const stage = state === 'description' ? 's3' : state;
   return {
     set: { ...final(ctx), verdict: 'skip', skip: { stage, ruleId: 'freshness' } },
     clear: [...SCORE_FIELDS, 'review', 'rescoreQueuedAt'],
@@ -209,5 +214,16 @@ export function s3Patch(judgement: S3Judgement, ctx: JudgeContext): JobPatch {
       ...(score.shortfall ? [] : (['shortfall'] as const)),
     ],
     ...(judgement.costPence > 0 ? { addCostPence: judgement.costPence } : {}),
+  };
+}
+
+/**
+ * S3 has no text to read (an alert job with no description, or one too short): no model call and
+ * no slot, the job waits for a description (ADR-048). Earlier funnel output stays.
+ */
+export function needsDescriptionPatch(job: Pick<Job, 'flags'>): JobPatch {
+  return {
+    set: { next: 'description', flags: mergeFlags(job.flags, ['needs_description']) },
+    clear: [],
   };
 }

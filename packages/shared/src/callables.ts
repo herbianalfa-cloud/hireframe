@@ -11,6 +11,8 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   resetProfile: 120,
   scanNow: 540,
   rescore: 540,
+  /** An HTTPS function, not a callable: the table is where timeout budgets are checked. */
+  ingestEmailJobs: 120,
 } as const;
 
 export type CallableName = keyof typeof CALLABLE_TIMEOUT_SECONDS;

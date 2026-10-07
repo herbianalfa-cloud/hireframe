@@ -52,6 +52,7 @@ export const FLAG_TEXT: Readonly<Record<JobFlag, string>> = {
   snippet_only: 'Judged from a short snippet, not the full description',
   score_drift: 'The model’s scores differed from the computed ones',
   unsupported_match: 'A claimed match had no supporting fact and was downgraded',
+  needs_description: 'No description to read: an email alert carries none',
 };
 
 export const GAP_LABELS: Readonly<Record<GapType, string>> = {
@@ -75,6 +76,39 @@ export const REVIEW_TEXT: Readonly<Record<ReviewCode, string>> = {
 };
 
 export const STAGE_NAMES = { s1: 'Rules', s2: 'Triage', s3: 'Deep read' } as const;
+
+/**
+ * A LinkedIn job search for the role (built from an alert's title and company when the alert
+ * linked no usable posting, ADR-047): something to click, never a posting.
+ */
+export function isSearchLink(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      /(^|\.)linkedin\.com$/.test(parsed.hostname) && parsed.pathname.startsWith('/jobs/search')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** True for an `https:` URL (and nothing else): the only kind an unverified link may be. */
+export function isHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** The host of an off-allowlist alert link, shown beside the "unverified link" mark. */
+export function linkHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'unknown host';
+  }
+}
 
 /** Why a job was skipped, in words (PRD R6: the stage and, for rules, the rule). */
 export function skipText(skip: JobSkip): string {
@@ -138,6 +172,7 @@ export const SOURCE_NAMES: Readonly<Record<string, string>> = {
   adzuna: 'Adzuna',
   hn: 'HN Who is hiring',
   'linkedin-alert': 'LinkedIn alert',
+  'email-alert': 'Email alert',
 };
 
 /** The agreement line (ADR-038): the rate and its split, since applying is only a quiet 👍. */

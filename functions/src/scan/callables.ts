@@ -21,6 +21,7 @@ import {
   REGION,
   SCAN,
   SCHEDULE,
+  SHORT_LOCK,
   SOURCE_SECRET_NAMES,
 } from '../config.js';
 import { getCurrentCriteria } from '../criteria.js';
@@ -68,8 +69,21 @@ async function scanDeps(config: AppConfig, trigger: 'manual' | 'schedule'): Prom
         },
     seed: fakes ? fakes.FAKE_SEED : WATCHLIST_SEED,
     disabledSources: config.disabledSources ?? [],
-    // A scheduled run always runs unless a scan holds the lock.
+    // A scheduled run always runs unless a scan holds the lock, and it waits for a short holder
+    // (alert ingest) rather than losing its slot to it (ADR-048).
     cooldownMs: trigger === 'schedule' ? 0 : useFakes ? SCAN.emulatorCooldownMs : SCAN.cooldownMs,
+    ...(trigger === 'schedule'
+      ? {
+          waitForShortHolders: {
+            intervalMs: SHORT_LOCK.scheduledWaitIntervalMs,
+            maxMs: SHORT_LOCK.scheduledWaitMaxMs,
+            sleep: (ms: number) =>
+              new Promise<void>((resolve) => {
+                setTimeout(resolve, ms);
+              }),
+          },
+        }
+      : {}),
     trigger,
     now: () => new Date(),
     funnel: funnelFor({

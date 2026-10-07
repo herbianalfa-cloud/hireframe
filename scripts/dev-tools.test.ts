@@ -12,10 +12,12 @@ import { LINKEDIN_ALERT_JOB } from '../packages/shared/src/fixtures/jobs.ts';
 
 import { isCiDeploy } from './assert-ci.ts';
 import {
+  alertWaitingJobDocuments,
   appConfigDocument,
   assertDemoProject,
   criteriaSeedDocuments,
   devJobDocuments,
+  DEV_ALERT_WAITING_JOB_KEYS,
   DEV_LINKEDIN_JOB_KEYS,
   DEV_OWNER,
   linkedInJobDocuments,
@@ -93,6 +95,40 @@ describe('criteria seed documents', () => {
 
   it('encodes fractional numbers as doubles', () => {
     expect(toRestValue(0.5)).toEqual({ doubleValue: 0.5 });
+  });
+});
+
+describe('dev alert job waiting for a description (M6)', () => {
+  const decode = (value: unknown): unknown => {
+    const v = value as Record<string, unknown>;
+    if ('stringValue' in v) return v.stringValue;
+    if ('integerValue' in v) return Number(v.integerValue);
+    if ('doubleValue' in v) return v.doubleValue;
+    if ('booleanValue' in v) return v.booleanValue;
+    if ('timestampValue' in v) return new Date(String(v.timestampValue));
+    if ('arrayValue' in v) return (v.arrayValue as { values: unknown[] }).values.map(decode);
+    if ('mapValue' in v) {
+      const fields = (v.mapValue as { fields: Record<string, unknown> }).fields;
+      return Object.fromEntries(Object.entries(fields).map(([k, inner]) => [k, decode(inner)]));
+    }
+    throw new Error('unexpected value');
+  };
+
+  it('has the keys the shared dedupe computes for the same card', () => {
+    expect(dedupeKey('Cobalt Systems', 'Customer Solutions Engineer', 'manchester')).toBe(
+      DEV_ALERT_WAITING_JOB_KEYS[0],
+    );
+  });
+
+  it('is a valid job at next: description, with an empty description of kind none', () => {
+    const { job, description } = alertWaitingJobDocuments(new Date('2026-10-01T08:00:00Z'));
+    const parsed = JobSchema.parse(decode({ mapValue: job }));
+    expect(parsed).toMatchObject({ next: 'description', descriptionKind: 'none', stage: 's2' });
+    expect(parsed.flags).toContain('needs_description');
+    expect(JobDescriptionSchema.parse(decode({ mapValue: description }))).toMatchObject({
+      kind: 'none',
+      text: '',
+    });
   });
 });
 

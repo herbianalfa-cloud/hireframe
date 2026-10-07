@@ -1,0 +1,13 @@
+{
+  "name": "@hireframe/apps-script",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../scripts/build-apps-script.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@google/clasp": "3.4.1"
+  }
+}

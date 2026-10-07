@@ -131,6 +131,83 @@ export function staleReservationIds(
     .map(([id]) => id);
 }
 
+// ---- Daily caps (M6, ADR-047) ----
+
+/** Purposes with their own daily cap besides the monthly one: `alertParse` now, `lookup` in 6B. */
+export const DAILY_CAP_KEYS = ['alertParse', 'lookup'] as const;
+export type DailyCapKey = (typeof DAILY_CAP_KEYS)[number];
+
+/** A reservation belongs to a daily-capped purpose when its ID starts with `<key>-`. */
+export function dailyReservationPrefix(key: string): string {
+  return `${key}-`;
+}
+
+/** `YYYY-MM-DD` for `date` in Europe/London: the day a daily cap counts in. */
+export function dayKey(date: Date, timeZone = 'Europe/London'): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return `${parts.year ?? ''}-${parts.month ?? ''}-${parts.day ?? ''}`;
+}
+
+export const DailySpendSchema = z.object({
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  spendPence: z.number().min(0),
+});
+export type DailySpend = z.infer<typeof DailySpendSchema>;
+export type DailyUsage = Readonly<Record<string, DailySpend>>;
+
+/** Pence settled today for `key`; a record from an earlier day counts as nothing. */
+export function dailySpentPence(daily: DailyUsage | undefined, key: string, today: string): number {
+  const entry = daily?.[key];
+  return entry?.day === today ? entry.spendPence : 0;
+}
+
+/** `pence` added to today's total for `key`, starting a new day's total when the day changed. */
+export function addDailySpend(
+  daily: DailyUsage | undefined,
+  key: string,
+  today: string,
+  pence: number,
+): Record<string, DailySpend> {
+  return {
+    ...daily,
+    [key]: { day: today, spendPence: dailySpentPence(daily, key, today) + pence },
+  };
+}
+
+/**
+ * Whether a call fits under the daily cap for `key`: today's settled spend, plus the live
+ * reservations of that purpose (IDs starting `<key>-`), plus this call (ADR-047).
+ */
+export function checkDailyCap(input: {
+  daily: DailyUsage | undefined;
+  key: string;
+  reservations: Readonly<Record<string, Reservation>>;
+  capPence: number;
+  requestPence: number;
+  now: Date;
+  ttlMs?: number;
+}): CapCheck {
+  const prefix = dailyReservationPrefix(input.key);
+  const live = Object.fromEntries(
+    Object.entries(input.reservations).filter(([id]) => id.startsWith(prefix)),
+  );
+  return checkCap({
+    spendPence: dailySpentPence(input.daily, input.key, dayKey(input.now)),
+    reservations: live,
+    capPence: input.capPence,
+    requestPence: input.requestPence,
+    now: input.now,
+    ...(input.ttlMs === undefined ? {} : { ttlMs: input.ttlMs }),
+  });
+}
+
 const TokenCountsSchema = z.object({
   input: z.number().min(0),
   output: z.number().min(0),
@@ -145,6 +222,8 @@ export const UsageSchema = z.object({
   calls: z.record(z.string(), z.number().min(0)),
   tokens: z.record(z.string(), TokenCountsSchema),
   byPurpose: z.record(z.string(), z.number().min(0)),
+  /** Today's settled spend per daily-capped purpose. Optional, so older documents still parse. */
+  daily: z.record(z.string(), DailySpendSchema).exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),

@@ -31,6 +31,7 @@ export type LogEvent =
   | 'scan.started'
   | 'scan.done'
   | 'scan.refused'
+  | 'scan.waiting'
   | 'scan.failed'
   | 'source.done'
   | 'source.failed'
@@ -51,7 +52,13 @@ export type LogEvent =
   | 'funnel.overrides_invalid'
   | 'hydrate.failed'
   | 'rescore.started'
-  | 'rescore.done';
+  | 'rescore.done'
+  | 'ingest.refused'
+  | 'ingest.started'
+  | 'ingest.done'
+  | 'ingest.failed'
+  | 'ingest.message'
+  | 'ingest.parse_failed';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

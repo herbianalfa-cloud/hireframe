@@ -4,14 +4,18 @@ import { describe, expect, it } from 'vitest';
 import {
   API_TERMS_HOSTS,
   defaultRunBudgetPence,
+  ALERT_LINK_HOSTS,
+  ALERTS,
   FUNNEL,
   funnelLimits,
+  HMAC,
   hostPolicy,
   LLM,
   MODELS,
   PURPOSE_CALLABLE,
   RUNTIME_SERVICE_ACCOUNT,
   SCAN,
+  SHORT_LOCK,
   type LlmPurpose,
 } from './config.js';
 
@@ -82,5 +86,59 @@ describe('source host policies (ADR-025, ADR-027)', () => {
     });
     expect(hostPolicy('api.adzuna.com').intervalMs).toBe(3_000);
     expect([...API_TERMS_HOSTS].sort()).toEqual(['api.adzuna.com', 'www.reed.co.uk']);
+  });
+});
+
+describe('Gmail bridge limits (ADR-046, ADR-047, ADR-048)', () => {
+  it('keeps a nonce at least twice as long as the allowed skew, so a replay is always caught', () => {
+    expect(HMAC.nonceTtlSeconds).toBeGreaterThanOrEqual(2 * HMAC.maxSkewSeconds);
+    expect(HMAC.maxSkewSeconds).toBe(300);
+    expect(HMAC.nonceTtlSeconds).toBe(600);
+  });
+
+  it('answers the script inside its 60 s UrlFetchApp limit: last call start plus its budget is 50 s at most', () => {
+    expect(ALERTS.modelWindowMs + MODELS.alertParse.budgetMs).toBeLessThanOrEqual(50_000);
+    expect(ALERTS.modelWindowMs).toBe(15_000);
+    // The function's own timeout still covers the whole request.
+    expect(ALERTS.modelWindowMs + MODELS.alertParse.budgetMs).toBeLessThanOrEqual(
+      CALLABLE_TIMEOUT_SECONDS.ingestEmailJobs * 1000,
+    );
+    expect(CALLABLE_TIMEOUT_SECONDS.ingestEmailJobs).toBe(120);
+    expect(ALERTS.maxBodyBytes).toBe(1_000_000);
+    expect(ALERTS.maxMessagesPerRequest).toBe(5);
+  });
+
+  it('holds an ingest lock for its timeout plus a margin, and a scheduled scan waits 4 min in 15 s steps', () => {
+    expect(SHORT_LOCK.emailStaleMs).toBeGreaterThan(
+      CALLABLE_TIMEOUT_SECONDS.ingestEmailJobs * 1000,
+    );
+    expect(SHORT_LOCK.emailStaleMs).toBe(3 * 60_000);
+    expect(SHORT_LOCK.emailStaleMs).toBeLessThan(SCAN.lockStaleMs);
+    expect(SHORT_LOCK.scheduledWaitIntervalMs).toBe(15_000);
+    expect(SHORT_LOCK.scheduledWaitMaxMs).toBe(4 * 60_000);
+  });
+
+  it('caps alert parsing at 10p a day by default, which is about 30 emails', () => {
+    expect(ALERTS.dailyCapPence).toBe(10);
+  });
+
+  it('lists only the ATS hosts and the alert boards as trusted link hosts', () => {
+    expect([...ALERT_LINK_HOSTS].sort()).toEqual(
+      [
+        'adzuna.co.uk',
+        'ashbyhq.com',
+        'escapethecity.org',
+        'greenhouse.io',
+        'indeed.co.uk',
+        'indeed.com',
+        'lever.co',
+        'linkedin.com',
+        'reed.co.uk',
+        'welcometothejungle.com',
+        'wellfound.com',
+        'workable.com',
+        'workatastartup.com',
+      ].sort(),
+    );
   });
 });

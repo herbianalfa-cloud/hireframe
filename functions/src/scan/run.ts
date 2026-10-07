@@ -5,11 +5,13 @@ import {
   planIngest,
   RawJobSchema,
   SCAN_SOURCE_IDS,
+  SHORT_LOCK_HOLDERS,
   type Company,
   type CompanySeed,
   type CriteriaContent,
   type ExistingJobKeys,
   type IngestPlan,
+  type LockHolder,
   type NormalisedJob,
   type Quota,
   type Run,
@@ -21,7 +23,7 @@ import {
   type SourceRunCounts,
 } from '@hireframe/shared';
 
-import { QUOTAS, SCAN } from '../config.js';
+import { FUNNEL, QUOTAS, SCAN } from '../config.js';
 import type { FunnelOutcome } from '../funnel/run.js';
 import type { HostPause, HttpClient } from '../http/client.js';
 import { errorFields, log } from '../log.js';
@@ -45,7 +47,7 @@ import type {
 export type LockResult =
   /** `recovered`: the ID of a killed run whose stale lock this scan took over (now failed). */
   | { ok: true; recovered?: string }
-  | { ok: false; reason: 'running' }
+  | { ok: false; reason: 'running'; holder?: LockHolder }
   | { ok: false; reason: 'recent'; lastFinishedAt: Date };
 
 export interface StoredCompany {
@@ -55,7 +57,13 @@ export interface StoredCompany {
 
 export interface ScanStore {
   newRunId(): string;
-  acquireLock(runId: string, now: Date, cooldownMs: number): Promise<LockResult>;
+  /** `holder` defaults to `scan`; email ingest (and, in 6B, lookup) take it briefly (ADR-048). */
+  acquireLock(
+    runId: string,
+    now: Date,
+    cooldownMs: number,
+    holder?: LockHolder,
+  ): Promise<LockResult>;
   releaseLock(runId: string, now: Date): Promise<void>;
   createRun(runId: string, run: Run): Promise<void>;
   finishRun(runId: string, run: Run): Promise<void>;
@@ -90,11 +98,16 @@ export interface ScanDeps {
   cooldownMs: number;
   trigger: Run['trigger'];
   now: () => Date;
+  /**
+   * A scheduled scan waits for a short holder (email ingest) instead of skipping, so the 07:30
+   * run is never lost to a 30-minute ingest; a scan holder still makes it skip (ADR-048).
+   */
+  waitForShortHolders?: { intervalMs: number; maxMs: number; sleep: (ms: number) => Promise<void> };
   /** The funnel, run after ingest while the lock is held (M4). */
-  funnel?: (input: { runId: string; startedAt: Date }) => Promise<FunnelOutcome>;
+  funnel?: (input: { runId: string; invokedAt: Date }) => Promise<FunnelOutcome>;
 }
 
-export type ScanResult = ScanNowResult | { status: 'busy' };
+export type ScanResult = ScanNowResult | { status: 'busy'; holder?: LockHolder };
 
 const QUOTA_SOURCES: Partial<Record<ScanSourceId, keyof typeof QUOTAS>> = {
   reed: 'reed',
@@ -188,13 +201,38 @@ function sourceCode(error: unknown): string {
 
 export async function runScan(deps: ScanDeps): Promise<ScanResult> {
   const { store } = deps;
-  const startedAt = deps.now();
+  // Function timeouts and the funnel's deadlines count from invocation, not from when the lock
+  // was taken after a wait for an email ingest; `startedAt` is the latter (the run document's).
+  const invokedAt = deps.now();
+  let startedAt = invokedAt;
   const runId = store.newRunId();
 
-  const lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
+  let lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
+  const wait = deps.waitForShortHolders;
+  if (wait) {
+    const giveUpAt = invokedAt.getTime() + wait.maxMs;
+    while (
+      !lock.ok &&
+      lock.reason === 'running' &&
+      lock.holder !== undefined &&
+      SHORT_LOCK_HOLDERS.includes(lock.holder) &&
+      deps.now().getTime() < giveUpAt
+    ) {
+      log.info('scan.waiting', { holder: lock.holder });
+      await wait.sleep(wait.intervalMs);
+      // The run's own start (not its deadlines) moves to when it has the lock.
+      startedAt = deps.now();
+      lock = await store.acquireLock(runId, startedAt, deps.cooldownMs);
+    }
+  }
   if (!lock.ok) {
-    log.info('scan.refused', { reason: lock.reason });
-    if (lock.reason === 'running') return { status: 'busy' };
+    log.info('scan.refused', {
+      reason: lock.reason,
+      ...(lock.reason === 'running' && lock.holder ? { holder: lock.holder } : {}),
+    });
+    if (lock.reason === 'running') {
+      return { status: 'busy', ...(lock.holder ? { holder: lock.holder } : {}) };
+    }
     const waitMs = lock.lastFinishedAt.getTime() + deps.cooldownMs - startedAt.getTime();
     return {
       status: 'skipped_recent',
@@ -233,7 +271,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     const companies = stored.map((entry) => entry.company);
 
     // ---- Fetch every source in parallel ----
-    const deadline = startedAt.getTime() + SCAN.fetchBudgetMs;
+    const deadline = invokedAt.getTime() + SCAN.fetchBudgetMs;
     const sources = deps.createSources();
     const disabled = new Set(deps.disabledSources);
     const outcomes = await Promise.all(
@@ -322,7 +360,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     }
     const groups = dedupeBatch(normalised);
     const existing = await store.findJobsByKeys([...new Set(groups.flatMap((g) => g.keys))]);
-    const plan = planIngest(groups, existing);
+    const plan = planIngest(groups, existing, { minUpgradeChars: FUNNEL.minDeepReadChars });
     if (plan.counts.conflicts > 0) log.warn('dedupe.conflict', { count: plan.counts.conflicts });
     const { failedWrites } = await store.writePlan(plan, startedAt);
     if (failedWrites > 0) run.errors.push({ code: 'write_failed' });
@@ -384,7 +422,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
     let funnel: FunnelOutcome | null = null;
     if (deps.funnel) {
       try {
-        funnel = await deps.funnel({ runId, startedAt });
+        funnel = await deps.funnel({ runId, invokedAt });
         if (funnel.failedWrites > 0) run.errors.push({ code: 'funnel_write_failed' });
         if (funnel.sweepFailed) run.errors.push({ code: 'funnel_sweep_failed' });
       } catch (error) {

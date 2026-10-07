@@ -8,6 +8,7 @@ rules_version = '2';
 //   M2.1 lets the owner mark an upload removed (ADR-023). M3 adds read-only `sources` (ADR-029).
 //   M4 lets the owner set their work rights on `profile/main` (ADR-033) and lane points on
 //   criteria versions (ADR-034).
+//   M6 (Gmail bridge) adds server-only `nonces` and `alertMessages`, denied to every client.
 //   M5 lets the owner act on jobs (status, applied stamps, 👍/👎) and append `events` (ADR-038).
 //   Everything else, including every write by the Admin SDK paths, stays client-deny.
 //   Unknown paths fall through to the default deny.
@@ -377,9 +378,20 @@ service cloud.firestore {
       allow read: if isOwner();
     }
 
-    // Source health for the System screen (ADR-029); written by the Admin SDK only.
+    // Source health for the System screen (ADR-029); written by the Admin SDK only. `email` is
+    // the Gmail bridge's (ADR-047).
     match /sources/{sourceId} {
       allow read: if isOwner();
+    }
+
+    // Server-only (ADR-046, ADR-047): signed-request nonces and ingested-alert records. Default
+    // deny already covers them; stated so no later wildcard can open them by accident.
+    match /nonces/{nonce} {
+      allow read, write: if false;
+    }
+
+    match /alertMessages/{hash} {
+      allow read, write: if false;
     }
   }
 }

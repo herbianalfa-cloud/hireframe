@@ -9,6 +9,10 @@ interface Endpoint {
   timeoutSeconds?: number;
   callableTrigger?: object;
   secretEnvironmentVariables?: { key: string }[];
+  httpsTrigger?: object;
+  availableMemoryMb?: number | string;
+  maxInstances?: number | string;
+  concurrency?: number | string;
 }
 
 const endpoints = Object.entries(deployed).map(
@@ -62,10 +66,28 @@ describe('deployed functions (ADR-017)', () => {
     ['scanNow', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['scheduledScan', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
+    ['ingestEmailJobs', ['ANTHROPIC_API_KEY', 'INGEST_HMAC_SECRET']],
   ])('%s mounts %j', (name, secrets) => {
     const endpoint = endpoints.find(([exported]) => exported === name)?.[1];
     expect(endpoint).toBeDefined();
     const mounted = (endpoint?.secretEnvironmentVariables ?? []).map((secret) => secret.key);
     expect(mounted.sort()).toEqual(secrets);
+  });
+});
+
+describe('ingestEmailJobs (ADR-046)', () => {
+  const endpoint = endpoints.find(([name]) => name === 'ingestEmailJobs')?.[1];
+
+  it('is an HTTPS function, not a callable, with the shared 120 s timeout', () => {
+    expect(endpoint?.httpsTrigger).toBeDefined();
+    expect(endpoint?.callableTrigger).toBeUndefined();
+    expect(endpoint?.timeoutSeconds).toBe(CALLABLE_TIMEOUT_SECONDS.ingestEmailJobs);
+    expect(endpoint?.timeoutSeconds).toBe(120);
+  });
+
+  it('states one instance and one request at a time, so ingests never run in parallel', () => {
+    expect(endpoint?.maxInstances).toBe(1);
+    // 2nd gen defaults to 80 concurrent requests per instance: one instance alone isn't enough.
+    expect(endpoint?.concurrency).toBe(1);
   });
 });

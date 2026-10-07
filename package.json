@@ -6,7 +6,8 @@
   "workspaces": [
     "packages/*",
     "functions",
-    "web"
+    "web",
+    "apps-script"
   ],
   "engines": {
     "node": ">=22.18 <23"
@@ -20,6 +21,7 @@
     "scan:pii": "node scripts/check-pii.ts",
     "check": "npm run lint && npm run typecheck && npm run test && npm run scan:pii && npm run eval",
     "build": "npm run build --workspaces --if-present",
+    "build:apps-script": "node scripts/build-apps-script.ts",
     "check:bundle": "node scripts/check-bundle.ts",
     "eval": "node scripts/eval.ts",
     "dev": "HIREFRAME_DEV_BUNDLE=1 npm run build -w @hireframe/functions && node scripts/prepare-dev-functions.ts && firebase emulators:exec --only auth,firestore,storage,functions --project demo-hireframe --ui \"node scripts/dev.ts\"",

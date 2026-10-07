@@ -7,7 +7,8 @@ import {
   dedupeKey,
   fnv1a64,
   normaliseRawJob,
-  planIngest,
+  planIngest as planIngestWith,
+  type IngestPlanOptions,
   type NormalisedJob,
 } from './dedupe.js';
 import {
@@ -25,6 +26,14 @@ import {
 import { JobDescriptionSchema, JobSchema, type RawJob } from './jobs.js';
 
 const NOW = new Date('2026-10-01T08:00:00Z');
+
+/** Most fixtures' text is short, so the default minimum for an upgrade is low here. */
+const OPTIONS: IngestPlanOptions = { minUpgradeChars: 10 };
+const planIngest = (
+  groups: Parameters<typeof planIngestWith>[0],
+  existing: Parameters<typeof planIngestWith>[1],
+  options: IngestPlanOptions = OPTIONS,
+) => planIngestWith(groups, existing, options);
 
 function norm(raw: RawJob): NormalisedJob {
   const job = normaliseRawJob(raw);
@@ -245,5 +254,210 @@ describe('cappedKeys (JOB_LIMITS.keys)', () => {
     };
     const plan = planIngest(dedupeBatch([norm(LINKEDIN_ALERT_JOB)]), [nearlyFull]);
     expect(plan.updates[0]?.addKeys).toEqual(['linkedin:4012345678']);
+  });
+});
+
+describe('Easy Apply and alert links on the source ref (ADR-047)', () => {
+  const alert = rawJob({
+    ...LINKEDIN_ALERT_JOB,
+    description: { kind: 'none', format: 'text', body: '' },
+    easyApply: true,
+  });
+
+  it('carries easyApply from the posting to the source ref of a new job', () => {
+    const [group] = dedupeBatch([norm(alert)]);
+    if (!group) throw new Error('no group');
+    const { job } = buildNewJob(group, 'jobs/x/description/raw', NOW);
+    expect(job.sources[0]).toMatchObject({ id: 'linkedin-alert', easyApply: true });
+  });
+
+  it('keeps easyApply on its own source when merged into an ATS job', () => {
+    const groups = dedupeBatch([norm(alert)]);
+    const existing = [
+      {
+        id: 'job-gh',
+        keys: ['greenhouse:5551234', ...norm(GREENHOUSE_JOB).keys],
+        firstSeenAt: NOW,
+        sourceCount: 1,
+      },
+    ];
+    const plan = planIngest(groups, existing);
+    expect(plan.updates).toHaveLength(1);
+    const added = plan.updates[0]?.addSources[0];
+    expect(added?.easyApply).toBe(true);
+    expect(added && sourceRefOf(added)).toMatchObject({ id: 'linkedin-alert', easyApply: true });
+  });
+
+  it('marks an unverified link on the source ref only, and gives it no keys of its own', () => {
+    const raw = rawJob({
+      sourceId: 'email-alert',
+      externalId: 'abcd1234abcd1234',
+      url: 'https://www.linkedin.com/jobs/search/?keywords=quill',
+      unverifiedUrl: 'https://click.example.net/c/9f8e7d',
+    });
+    const job = norm(raw);
+    expect(job.unverifiedUrl).toBe('https://click.example.net/c/9f8e7d');
+    expect(job.keys.filter((key) => !key.startsWith('d:'))).toEqual(['email:abcd1234abcd1234']);
+    expect(sourceRefOf(job)).toMatchObject({
+      id: 'email-alert',
+      url: 'https://click.example.net/c/9f8e7d',
+      unverified: true,
+    });
+    expect(buildJobUrl(job)).toBe('https://www.linkedin.com/jobs/search?keywords=quill');
+  });
+});
+
+function buildJobUrl(job: NormalisedJob) {
+  const [group] = dedupeBatch([job]);
+  if (!group) throw new Error('no group');
+  return buildNewJob(group, 'jobs/x/description/raw', NOW).job.url;
+}
+
+function sourceRefOf(job: NormalisedJob) {
+  const [group] = dedupeBatch([job]);
+  if (!group) throw new Error('no group');
+  return buildNewJob(group, 'jobs/x/description/raw', NOW).job.sources[0];
+}
+
+describe('description upgrade on merge (ADR-048)', () => {
+  const alert = norm(
+    rawJob({
+      ...LINKEDIN_ALERT_JOB,
+      description: { kind: 'none', format: 'text', body: '' },
+      postedAt: undefined as never,
+    }),
+  );
+  const greenhouse = norm(GREENHOUSE_JOB);
+  const waiting = {
+    id: 'job-alert',
+    keys: alert.keys,
+    firstSeenAt: NOW,
+    sourceCount: 1,
+    descriptionKind: 'none' as const,
+    next: 'description' as const,
+  };
+
+  it('writes the full text, the posting date and releases the job to S3', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [waiting]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0]?.upgrade).toEqual({
+      text: greenhouse.description.text,
+      sourceId: 'greenhouse',
+      postedAt: greenhouse.postedAt,
+      release: true,
+    });
+  });
+
+  it('does not release a job that is not waiting for a description', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [{ ...waiting, next: 's2' as const }]);
+    expect(plan.updates[0]?.upgrade).toMatchObject({ release: false });
+  });
+
+  it('keeps a posting date the job already has', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [
+      { ...waiting, postedAt: new Date('2026-09-01T00:00:00Z') },
+    ]);
+    expect(plan.updates[0]?.upgrade?.postedAt).toBeUndefined();
+  });
+
+  it('upgrades a snippet-only job too', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [
+      { ...waiting, descriptionKind: 'snippet' },
+    ]);
+    expect(plan.updates[0]?.upgrade).toBeDefined();
+  });
+
+  it('leaves a job that already has full text alone (the other order)', () => {
+    const plan = planIngest(dedupeBatch([alert]), [
+      {
+        id: 'job-gh',
+        keys: greenhouse.keys,
+        firstSeenAt: NOW,
+        sourceCount: 1,
+        descriptionKind: 'full' as const,
+        next: 's2' as const,
+      },
+    ]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0]?.upgrade).toBeUndefined();
+    expect(plan.updates[0]?.addSources[0]?.sourceId).toBe('linkedin-alert');
+  });
+
+  it('keeps a waiting job waiting when the new source is snippet-only', () => {
+    const snippet = norm(
+      rawJob({
+        sourceId: 'adzuna',
+        externalId: '99',
+        description: { kind: 'snippet', format: 'text', body: 'A snippet.' },
+      }),
+    );
+    const plan = planIngest(dedupeBatch([snippet]), [waiting]);
+    expect(plan.updates[0]?.upgrade).toBeUndefined();
+  });
+
+  describe('what counts as an upgrade', () => {
+    const full = (chars: number, patch: Partial<RawJob> = {}) =>
+      norm(
+        rawJob({
+          ...GREENHOUSE_JOB,
+          ...patch,
+          description: { kind: 'full', format: 'text', body: 'a'.repeat(chars) },
+        }),
+      );
+    const MIN = { minUpgradeChars: 200 };
+
+    it('needs the deep read minimum: shorter full text is not a description', () => {
+      const plan = planIngest(dedupeBatch([full(199)]), [waiting], MIN);
+      expect(plan.updates).toHaveLength(1);
+      expect(plan.updates[0]?.upgrade).toBeUndefined();
+      expect(
+        planIngest(dedupeBatch([full(200)]), [waiting], MIN).updates[0]?.upgrade,
+      ).toMatchObject({ release: true });
+    });
+
+    it('never replaces a snippet with less than it holds', () => {
+      const snippet = { ...waiting, descriptionKind: 'snippet' as const, descriptionChars: 300 };
+      expect(planIngest(dedupeBatch([full(250)]), [snippet], MIN).updates[0]?.upgrade).toBe(
+        undefined,
+      );
+      expect(planIngest(dedupeBatch([full(300)]), [snippet], MIN).updates[0]?.upgrade).toBe(
+        undefined,
+      );
+      expect(
+        planIngest(dedupeBatch([full(301)]), [snippet], MIN).updates[0]?.upgrade?.text,
+      ).toHaveLength(301);
+    });
+
+    it('takes the longest full member of the batch, whatever the source order', () => {
+      const short = full(250);
+      const longest = full(900, { sourceId: 'lever', externalId: 'lever-1' });
+      const middle = full(500, { sourceId: 'ashby', externalId: 'ashby-1' });
+      for (const order of [
+        [short, longest, middle],
+        [longest, middle, short],
+        [middle, short, longest],
+      ]) {
+        const plan = planIngest(dedupeBatch(order), [waiting], MIN);
+        expect(plan.updates[0]?.upgrade?.text).toHaveLength(900);
+        expect(plan.updates[0]?.upgrade?.sourceId).toBe('lever');
+      }
+    });
+
+    it('ignores snippets and too-short members when picking', () => {
+      const snippet = norm(
+        rawJob({
+          ...GREENHOUSE_JOB,
+          sourceId: 'adzuna',
+          externalId: 'az-1',
+          description: { kind: 'snippet', format: 'text', body: 'b'.repeat(2_000) },
+        }),
+      );
+      const plan = planIngest(
+        dedupeBatch([snippet, full(210), full(50, { externalId: 'x' })]),
+        [waiting],
+        MIN,
+      );
+      expect(plan.updates[0]?.upgrade?.text).toHaveLength(210);
+    });
   });
 });

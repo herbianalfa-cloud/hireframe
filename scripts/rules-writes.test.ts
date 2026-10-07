@@ -42,7 +42,7 @@ function allowedWrites(rules: string): Record<string, string[]> {
 }
 
 describe('client-writable paths', () => {
-  it('firestore.rules opens only the M2, M2.1, M4 and M5 writes', () => {
+  it('firestore.rules opens only the M2, M2.1, M4 and M5 writes (M6 adds none: nonces and alertMessages are server-only)', () => {
     expect(allowedWrites(readFileSync('firestore.rules', 'utf8'))).toEqual({
       '/criteria/current': ['create', 'update'],
       '/criteria/{versionId}': ['create'],

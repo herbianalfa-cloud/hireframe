@@ -1,5 +1,10 @@
 import {
+  addDailySpend,
   checkCap,
+  checkDailyCap,
+  DAILY_CAP_KEYS,
+  dailyReservationPrefix,
+  dayKey,
   liveReservedPence,
   PATHS,
   staleReservationIds,
@@ -11,7 +16,7 @@ import {
 import type { Firestore } from 'firebase-admin/firestore';
 
 import { timestampsToDates } from '../timestamps.js';
-import { SpendCapExceededError } from './errors.js';
+import { DailyCapExceededError, SpendCapExceededError } from './errors.js';
 
 /**
  * `usage/{yyyy-mm}` reservations and settlement (ADR-016). Both run in Firestore transactions,
@@ -23,6 +28,8 @@ export interface ReserveInput {
   pence: number;
   capPence: number;
   now: Date;
+  /** Also check the purpose's daily cap in the same transaction (ADR-047). */
+  daily?: { key: string; capPence: number };
 }
 
 export interface SettleInput {
@@ -33,6 +40,8 @@ export interface SettleInput {
   purpose: string;
   tokens: TokenCounts;
   costPence: number;
+  /** Add the actual cost to this purpose's daily total (ADR-047). */
+  dailyKey?: string;
 }
 
 export interface UsageStore {
@@ -105,6 +114,17 @@ export function applyReserve(current: Usage, input: ReserveInput): Usage {
     now: input.now,
   });
   if (!check.ok) throw new SpendCapExceededError();
+  if (input.daily) {
+    const day = checkDailyCap({
+      daily: base.daily,
+      key: input.daily.key,
+      reservations: base.reservations,
+      capPence: input.daily.capPence,
+      requestPence: input.pence,
+      now: input.now,
+    });
+    if (!day.ok) throw new DailyCapExceededError();
+  }
   return {
     ...base,
     capPence: input.capPence,
@@ -134,8 +154,17 @@ export function chargeStale(current: Usage, now: Date, ownId?: string): Usage {
   const stale = staleReservationIds(current.reservations, now, ownId);
   if (stale.length === 0) return current;
   const pence = stale.reduce((sum, id) => sum + (current.reservations[id]?.pence ?? 0), 0);
+  // A stale reservation of a daily-capped purpose counts against today too (ADR-047).
+  let daily = current.daily;
+  for (const key of DAILY_CAP_KEYS) {
+    const mine = stale
+      .filter((id) => id.startsWith(dailyReservationPrefix(key)))
+      .reduce((sum, id) => sum + (current.reservations[id]?.pence ?? 0), 0);
+    if (mine > 0) daily = addDailySpend(daily, key, dayKey(now), round(mine));
+  }
   return {
     ...current,
+    ...(daily ? { daily } : {}),
     reservations: without(current.reservations, stale),
     spendPence: round(current.spendPence + pence),
     byPurpose: {
@@ -172,7 +201,32 @@ export function applySettle(previous: Usage, input: SettleInput): Usage {
       ...current.byPurpose,
       [input.purpose]: round((current.byPurpose[input.purpose] ?? 0) + input.costPence),
     },
+    ...(input.dailyKey
+      ? { daily: addDailySpend(current.daily, input.dailyKey, dayKey(input.now), input.costPence) }
+      : {}),
     updatedAt: input.now,
+  };
+}
+
+/**
+ * A `UsageStore` that also holds `key` to a daily cap, checked in the same reserve transaction as
+ * the month's (ADR-047). Reservation IDs must start `<key>-` so the day's live reservations can be
+ * told apart; `llmCall` takes them from its `newId`.
+ */
+export function dailyCapped(store: UsageStore, key: string, dailyCapPence: number): UsageStore {
+  const prefix = dailyReservationPrefix(key);
+  const checked = (id: string) => {
+    if (!id.startsWith(prefix)) throw new Error(`daily-capped reservations must start ${prefix}`);
+  };
+  return {
+    reserve(input) {
+      checked(input.id);
+      return store.reserve({ ...input, daily: { key, capPence: dailyCapPence } });
+    },
+    settle(input) {
+      checked(input.id);
+      return store.settle({ ...input, dailyKey: key });
+    },
   };
 }
 

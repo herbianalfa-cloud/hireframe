@@ -17,6 +17,7 @@ const NODE_CONDITIONS = ['node'];
 const workspaces = {
   shared: 'packages/shared',
   functions: 'functions',
+  'apps-script': 'apps-script',
 };
 
 export default defineConfig({

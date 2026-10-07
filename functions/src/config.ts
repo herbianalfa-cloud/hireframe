@@ -1,4 +1,9 @@
-import { FUNCTIONS_REGION, type CallableName, type ModelPrice } from '@hireframe/shared';
+import {
+  FUNCTIONS_REGION,
+  INGEST_WIRE,
+  type CallableName,
+  type ModelPrice,
+} from '@hireframe/shared';
 import { z } from 'zod';
 
 /**
@@ -18,10 +23,13 @@ export const RUNTIME_SERVICE_ACCOUNT = 'hireframe-fns@hireframe-f6b03.iam.gservi
 /** Secret Manager secret name read through `defineSecret` (docs/RUNBOOK.md Part C). */
 export const ANTHROPIC_SECRET_NAME = 'ANTHROPIC_API_KEY';
 
+/** Secret Manager name of the Gmail bridge's HMAC secret (docs/RUNBOOK.md Part G). */
+export const INGEST_HMAC_SECRET_NAME = 'INGEST_HMAC_SECRET';
+
 /** Deliberately high, so costs in pence are overstated rather than understated. */
 export const DEFAULT_FX_USD_TO_GBP = 0.85;
 
-export type LlmPurpose = 'parseCv' | 'addFact' | 'triage' | 'deepRead';
+export type LlmPurpose = 'parseCv' | 'addFact' | 'triage' | 'deepRead' | 'alertParse';
 
 export interface ModelConfig {
   id: string;
@@ -61,6 +69,8 @@ export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
     timeoutMs: 40_000,
     budgetMs: 60_000,
   },
+  /** Alert emails from senders with no deterministic parser (ADR-047). */
+  alertParse: { id: 'claude-haiku-4-5', maxTokens: 3_000, timeoutMs: 15_000, budgetMs: 35_000 },
 };
 
 /** The callable whose timeout bounds each purpose's calls. */
@@ -69,6 +79,7 @@ export const PURPOSE_CALLABLE = {
   addFact: 'addFact',
   triage: 'scanNow',
   deepRead: 'scanNow',
+  alertParse: 'ingestEmailJobs',
 } as const satisfies Record<LlmPurpose, CallableName>;
 
 export const LLM = {
@@ -239,6 +250,11 @@ export const FUNNEL = {
   /** From this share of the monthly cap S3 pauses; S2 continues until the cap (PRD R11). */
   deepPauseAtFraction: 0.9,
   s1MaxJobs: 2_000,
+  /**
+   * A job whose description is shorter than this (or has none) is never deep-read: it waits for a
+   * description instead, free (M6, ADR-048).
+   */
+  minDeepReadChars: 200,
   /** Queued jobs past `freshness_days` the expiry sweep reads per stage and run (free). */
   expireMaxJobs: 2_000,
   s2MaxJobs: 300,
@@ -306,6 +322,77 @@ export function funnelLimits(monthlyCapPence: number, overrides: FunnelOverrides
     reedHydratePerRun: overrides.reedHydratePerRun ?? FUNNEL.reedHydratePerRun,
   };
 }
+
+// ---- Gmail bridge (M6, ADR-046, ADR-047, ADR-048) ----
+
+/** Request signing: the nonce outlives the skew twice over, so a replay is always caught. */
+export const HMAC = {
+  /** A signed request is accepted when its timestamp is within this of the server's clock. */
+  maxSkewSeconds: 300,
+  /** A nonce is remembered this long (a TTL policy on `nonces.expireAt` deletes it). */
+  nonceTtlSeconds: 600,
+} as const;
+
+export const ALERTS = {
+  /** Messages per request, and the wire limits the script truncates to (shared with it). */
+  maxMessagesPerRequest: INGEST_WIRE.messagesPerRequest,
+  maxBodyBytes: INGEST_WIRE.serverMaxBytes,
+  /**
+   * Model calls start only within this of the request starting. UrlFetchApp gives up at ~60 s, so
+   * this plus the `alertParse` budget stays within 50 s (config.test.ts).
+   */
+  modelWindowMs: 15_000,
+  /** `alertMessages` documents are kept this long (a TTL policy on `expireAt`). */
+  messageTtlDays: 30,
+  /** Daily spend on alert parsing; `config/app.alerts.dailyCapPence` overrides it. */
+  dailyCapPence: 10,
+  /** Senders listed individually in `sources/email.bySender`; the rest count under `other`. */
+  maxSenderDomains: 20,
+  /** Jobs the model may return for one email. */
+  maxModelJobs: 30,
+  /** Links offered to the model, numbered. */
+  maxModelLinks: 60,
+  /** Characters of email text sent to the model. */
+  maxModelChars: 20_000,
+} as const;
+
+/** The email-ingest lock: a killed ingest blocks scans for this long, not the scan's 12 min. */
+export const SHORT_LOCK = {
+  /** The ingest function's timeout plus a margin. */
+  emailStaleMs: 3 * 60_000,
+  /** A scheduled scan waits this often, and this long, for an `email` or `lookup` holder. */
+  scheduledWaitIntervalMs: 15_000,
+  scheduledWaitMaxMs: 4 * 60_000,
+} as const;
+
+/**
+ * Link hosts an alert may point at and still be trusted for keys and the job's own URL: the ATS
+ * hosts, LinkedIn, Reed, Adzuna, Indeed, Wellfound, Work at a Startup, Escape the City, WTTJ.
+ * Any other https link keeps the job but is stored unverified, on the source ref only.
+ */
+export const ALERT_LINK_HOSTS = [
+  'greenhouse.io',
+  'lever.co',
+  'ashbyhq.com',
+  'workable.com',
+  'linkedin.com',
+  'reed.co.uk',
+  'adzuna.co.uk',
+  'indeed.com',
+  'indeed.co.uk',
+  'wellfound.com',
+  'workatastartup.com',
+  'escapethecity.org',
+  'welcometothejungle.com',
+] as const;
+
+/**
+ * Optional `config/app.alerts` override, parsed on its own like `config/app.funnel` so a typo
+ * can't fail the owner check: an invalid object is ignored.
+ */
+export const AlertOverridesSchema = z
+  .object({ dailyCapPence: z.number().min(0).max(200) })
+  .partial();
 
 /** PRD R4: 07:30 and 17:30 on weekdays, UK time (Cloud Scheduler handles the clock change). */
 export const SCHEDULE = {

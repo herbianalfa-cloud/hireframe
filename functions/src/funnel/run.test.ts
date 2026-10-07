@@ -22,6 +22,7 @@ import {
   memoryLeaseStore,
   testCriteria,
   testJob,
+  TEST_DESCRIPTION,
   TEST_NOW,
   type MemoryFunnelStore,
   type MemoryLeaseStore,
@@ -326,7 +327,7 @@ describe('runFunnel', () => {
   });
 
   it('skips on right-to-work wording from the profile setting, and flags it when unset', async () => {
-    const text = 'You must have indefinite leave to remain in the UK.';
+    const text = `You must have indefinite leave to remain in the UK. ${TEST_DESCRIPTION}`;
     const limited = memoryFunnelStore({ workRights: { workRights: 'time_limited' } });
     limited.add('a', testJob(), text);
     await run(deps(limited));
@@ -1018,6 +1019,29 @@ describe('back-pressure', () => {
       expect(result.perStage.s3.queued).toBe(1);
     });
 
+    it('spends no hydrator call on a job with no text that cannot be sent', async () => {
+      const store = memoryFunnelStore();
+      for (const id of ['a', 'b', 'c']) {
+        store.add(id, testJob({ title: 'Product Analyst', descriptionKind: 'none' }), '');
+      }
+      const { asked, hydrator } = hydratorSpy();
+      const worst: TokenCounts = {
+        input: 0,
+        output: MODELS.deepRead.maxTokens,
+        cacheRead: 0,
+        cacheWrite: boundOf(9_000),
+      };
+      const t = controlled({ deepTokens: worst });
+      const lease = 3 * C2 + 2.5 * R3 + 0.01;
+      const result = await run(
+        deps(store, { transport: t.transport, hydrator, limits: { runBudgetPence: lease } }),
+      );
+      expect(result.perStage.s3.in).toBe(2);
+      expect(result.budget.stops?.s3).toBe('run_budget');
+      expect(asked).toHaveLength(2);
+      expect(result.perStage.s3.queued).toBe(1);
+    });
+
     it('gives the slot back when a refused job is left queued', async () => {
       const store = memoryFunnelStore();
       snippetJobs(store, ['a', 'b', 'c', 'd']);
@@ -1051,5 +1075,198 @@ describe('back-pressure', () => {
       expect(result.perStage.s3.queued).toBe(1);
       expect(result.budget.stops).toBeUndefined();
     });
+  });
+});
+
+describe('needs-description state (ADR-048)', () => {
+  const TRIAGE: JobTriage = {
+    lane: 'primary',
+    seniority: 'junior',
+    blockers: [],
+    pass: true,
+    triageScore: 5,
+    note: 'A fit.',
+  };
+  const atS3 = (patch: Partial<Job> = {}) =>
+    testJob({
+      stage: 's2',
+      next: 's3',
+      sortAt: daysAgo(1),
+      triage: TRIAGE,
+      inputs: { s2: 'a'.repeat(64) },
+      ...patch,
+    });
+
+  it('sends a job with no description to wait for one: no model call, no slot', async () => {
+    const store = memoryFunnelStore();
+    store.add('alert', atS3({ descriptionKind: 'none' }), '');
+    store.add('normal', atS3());
+    const { transport, sent } = recordingTransport();
+    const result = await run(deps(store, { transport, limits: { s3MaxJobs: 1 } }));
+    expect(store.get('alert')).toMatchObject({ next: 'description', stage: 's2' });
+    expect(store.get('alert').flags).toContain('needs_description');
+    expect(store.get('alert').verdict).toBeUndefined();
+    // The one S3 slot went to the job that has text.
+    expect(store.get('normal').verdict).toBeDefined();
+    expect(sent.filter((r) => r.purpose === 'deepRead')).toHaveLength(1);
+    expect(result.perStage.s3).toMatchObject({ in: 1, needsDescription: 1 });
+  });
+
+  it('treats text under the minimum as no description, whatever its kind', async () => {
+    const store = memoryFunnelStore();
+    store.add('short', atS3({ descriptionKind: 'full' }), 'Join us.');
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('short').next).toBe('description');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('routes a missing description document to wait, whatever the kind', async () => {
+    const store = memoryFunnelStore();
+    store.add('gone', atS3({ descriptionKind: 'full' }), null);
+    store.add('gone-snippet', atS3({ descriptionKind: 'snippet' }), null);
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('gone').next).toBe('description');
+    expect(store.get('gone-snippet').next).toBe('description');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('gives a short snippet its deep read, flagged snippet_only, instead of waiting', async () => {
+    const store = memoryFunnelStore();
+    store.add('snippet', atS3({ descriptionKind: 'snippet' }), 'Join our analytics team.');
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('snippet').next).not.toBe('description');
+    expect(store.get('snippet').flags).toContain('snippet_only');
+    expect(store.get('snippet').flags ?? []).not.toContain('needs_description');
+    expect(store.get('snippet').verdict).toBeDefined();
+    expect(sent.filter((r) => r.purpose === 'deepRead')).toHaveLength(1);
+  });
+
+  it('still reads a full description of the minimum length', async () => {
+    const store = memoryFunnelStore();
+    store.add('edge', atS3({ descriptionKind: 'full' }), 'x'.repeat(FUNNEL.minDeepReadChars));
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('edge').next).not.toBe('description');
+    expect(sent.filter((r) => r.purpose === 'deepRead')).toHaveLength(1);
+  });
+
+  describe('hydrators run only for a job that will be sent', () => {
+    function textFor(ids: string[]) {
+      const asked: string[] = [];
+      const hydrator: Hydrator = {
+        fullText: (entry: StoredJob) => {
+          asked.push(entry.id);
+          return Promise.resolve(`Full text. ${TEST_DESCRIPTION}`);
+        },
+        counts: () => ({ attempted: asked.length, ok: asked.length, failed: 0 }),
+        finish: () => Promise.resolve(),
+      };
+      return { asked, hydrator, ids };
+    }
+
+    it('makes no call past the s3MaxJobs cap', async () => {
+      const store = memoryFunnelStore();
+      for (const id of ['a', 'b', 'c']) store.add(id, atS3({ descriptionKind: 'none' }), '');
+      const { asked, hydrator } = textFor(['a', 'b', 'c']);
+      const result = await run(deps(store, { hydrator, limits: { s3MaxJobs: 1 } }));
+      expect(asked).toHaveLength(1);
+      expect(result.perStage.s3.in).toBe(1);
+      expect(result.perStage.s3.queued).toBe(2);
+    });
+
+    it('makes no call once the S3 deadline has passed', async () => {
+      const store = memoryFunnelStore();
+      store.add('a', atS3({ descriptionKind: 'none' }), '');
+      const { asked, hydrator } = textFor(['a']);
+      const result = await run(
+        deps(store, { hydrator, startedAtMs: TEST_NOW.getTime() - FUNNEL.s3StopMs }),
+      );
+      expect(result.budget.stops?.s3).toBe('deadline');
+      expect(asked).toHaveLength(0);
+      expect(store.get('a').next).toBe('s3');
+    });
+
+    it('routes a no-text job to wait without a slot when there is no hydrator at all', async () => {
+      const store = memoryFunnelStore();
+      store.add('a', atS3({ descriptionKind: 'none' }), '');
+      store.add('b', atS3());
+      const { transport } = recordingTransport();
+      const result = await run(deps(store, { transport, limits: { s3MaxJobs: 1 } }));
+      expect(store.get('a').next).toBe('description');
+      expect(store.get('b').verdict).toBeDefined();
+      expect(result.perStage.s3).toMatchObject({ in: 1, needsDescription: 1 });
+    });
+
+    it('counts a hydrator that finds nothing as waiting, with no model call', async () => {
+      const store = memoryFunnelStore();
+      store.add('a', atS3({ descriptionKind: 'none' }), '');
+      const hydrator: Hydrator = {
+        fullText: () => Promise.resolve(null),
+        counts: () => ({ attempted: 1, ok: 0, failed: 1 }),
+        finish: () => Promise.resolve(),
+      };
+      const { transport, sent } = recordingTransport();
+      const result = await run(deps(store, { transport, hydrator, limits: { s3MaxJobs: 1 } }));
+      expect(store.get('a').next).toBe('description');
+      expect(sent.filter((r) => r.purpose === 'deepRead')).toHaveLength(0);
+      expect(result.perStage.s3).toMatchObject({ in: 0, needsDescription: 1 });
+    });
+  });
+
+  it('tries the hydrators first, and goes on to the deep read when one finds text', async () => {
+    const store = memoryFunnelStore();
+    store.add('reed', atS3({ descriptionKind: 'none' }), '');
+    store.add('other', atS3({ descriptionKind: 'none' }), '');
+    const hydrator: Hydrator = {
+      fullText: (entry: StoredJob) =>
+        Promise.resolve(entry.id === 'reed' ? `Full text. ${TEST_DESCRIPTION}` : null),
+      counts: () => ({ attempted: 2, ok: 1, failed: 0 }),
+      finish: () => Promise.resolve(),
+    };
+    const { transport } = recordingTransport();
+    await run(deps(store, { transport, hydrator }));
+    expect(store.get('reed').verdict).toBeDefined();
+    expect(store.get('reed').flags ?? []).not.toContain('needs_description');
+    expect(store.get('other').next).toBe('description');
+  });
+
+  it('drops the needs_description flag when a job is finally judged', async () => {
+    const store = memoryFunnelStore();
+    store.add('later', atS3({ flags: ['needs_description', 'freshness_unknown'] }));
+    await run(deps(store));
+    expect(store.get('later').flags ?? []).not.toContain('needs_description');
+    expect(store.get('later').flags).toContain('freshness_unknown');
+  });
+
+  it('runs S2 on a job with no text (title, company and location are enough)', async () => {
+    const store = memoryFunnelStore();
+    store.add(
+      'alert',
+      testJob({ stage: 's1', next: 's2', sortAt: daysAgo(1), descriptionKind: 'none' }),
+      '',
+    );
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(sent.some((r) => r.purpose === 'triage')).toBe(true);
+    expect(store.get('alert').triage).toBeDefined();
+  });
+
+  it('expires jobs that waited for a description past freshness_days, free', async () => {
+    const store = memoryFunnelStore();
+    store.add('stale', atS3({ next: 'description', sortAt: daysAgo(30), postedAt: daysAgo(30) }));
+    store.add('fresh', atS3({ next: 'description', sortAt: daysAgo(2), postedAt: daysAgo(2) }));
+    const { transport, sent } = recordingTransport();
+    const result = await run(deps(store, { transport }));
+    expect(store.get('stale')).toMatchObject({
+      verdict: 'skip',
+      skip: { stage: 's3', ruleId: 'freshness' },
+      next: null,
+    });
+    expect(store.get('fresh').next).toBe('description');
+    expect(result.perStage.s3.expired).toBe(1);
+    expect(sent).toHaveLength(0);
   });
 });

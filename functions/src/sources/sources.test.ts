@@ -33,7 +33,7 @@ describe('ATS sources on fixtures', () => {
     const [first] = jobs;
     if (!first) throw new Error('no job');
     expect(normaliseRawJob(first)?.description.text).toBe(
-      'Acme Analytics builds reporting tools for B2B SaaS teams.\n\n• SQL & dashboards\n• Work with product managers',
+      'Acme Analytics builds reporting tools for B2B SaaS teams.\n\n• SQL & dashboards\n• Work with product managers\n\nYou will own the weekly metrics review, turn product questions into queries, and explain what the numbers say to the people who decide what we build next.',
     );
     expect(source.health()).toMatchObject({
       status: 'degraded',

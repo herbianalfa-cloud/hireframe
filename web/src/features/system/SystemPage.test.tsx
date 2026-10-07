@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   countJobs,
+  countWaitingForDescription,
   scanErrorMessage,
   scanNow,
   watchBrokenBoards,
+  watchEmailHealth,
   watchRecentRuns,
   watchSources,
   type BoardView,
@@ -24,7 +26,9 @@ vi.mock('@/services/system', () => ({
   watchSources: vi.fn(),
   watchRecentRuns: vi.fn(),
   watchBrokenBoards: vi.fn(),
+  watchEmailHealth: vi.fn(),
   countJobs: vi.fn(),
+  countWaitingForDescription: vi.fn(),
   scanNow: vi.fn(),
   scanErrorMessage: vi.fn(() => 'A scan is already running.'),
 }));
@@ -109,6 +113,13 @@ function givenBrokenBoards(data: BoardView[]) {
   });
 }
 
+function givenEmail(data: SourceHealth | null) {
+  vi.mocked(watchEmailHealth).mockImplementation((callback) => {
+    callback({ status: 'ready', data, invalid: 0 });
+    return () => undefined;
+  });
+}
+
 function card(cards: HTMLElement[], index: number): HTMLElement {
   const found = cards[index];
   if (!found) throw new Error(`no card ${String(index)}`);
@@ -120,7 +131,9 @@ beforeEach(() => {
   givenSources(SOURCES);
   givenRuns([{ id: 'run-1', run: RUN }]);
   givenBrokenBoards([]);
+  givenEmail(null);
   vi.mocked(countJobs).mockResolvedValue(57);
+  vi.mocked(countWaitingForDescription).mockResolvedValue(4);
   vi.mocked(watchSpend).mockImplementation((_now, callback) => {
     callback({
       status: 'ready',
@@ -385,6 +398,111 @@ describe('System screen', () => {
     givenSources([]);
     render(<SystemPage />);
     expect(screen.getByText('No scans yet. Run Scan now.')).toBeDefined();
+  });
+});
+
+describe('System: Gmail alerts and jobs waiting for a description (M6)', () => {
+  const EMAIL_AT = new Date('2026-10-07T09:30:00Z');
+
+  it('says when no alert has been ingested yet', () => {
+    render(<SystemPage />);
+    expect(screen.getByText(/No alert emails yet/)).toBeDefined();
+  });
+
+  it('shows the last ingest, its counts and the counts per sender', () => {
+    givenEmail(
+      health({
+        lastRunAt: EMAIL_AT,
+        lastOkAt: EMAIL_AT,
+        lastCounts: {
+          ...counts,
+          requests: 3,
+          fetched: 9,
+          new: 5,
+          merged: 1,
+          duplicate: 3,
+          invalid: 1,
+        },
+        bySender: {
+          'linkedin.com': {
+            messages: 40,
+            jobs: 210,
+            unparsed: 1,
+            unverifiedLinks: 0,
+            lastAt: EMAIL_AT,
+          },
+          'example.com': {
+            messages: 6,
+            jobs: 17,
+            unparsed: 0,
+            unverifiedLinks: 2,
+            lastAt: EMAIL_AT,
+          },
+        },
+      }),
+    );
+    render(<SystemPage />);
+    const sources = screen.getByRole('region', { name: 'Sources' });
+    expect(within(sources).getByRole('heading', { name: 'Gmail alerts' })).toBeDefined();
+    expect(within(sources).getByText('Emails').nextSibling?.textContent).toBe('3');
+    // The counts come before the table, whose headers repeat some labels.
+    expect(within(sources).getAllByText('Jobs')[0]?.nextSibling?.textContent).toBe('9');
+    expect(within(sources).getAllByText('Unread')[0]?.nextSibling?.textContent).toBe('1');
+    expect(within(sources).getByText(/Last ingest 7 Oct/)).toBeDefined();
+    const table = within(sources).getByRole('table', { name: /per sender/ });
+    const rows = within(table).getAllByRole('row');
+    const cells = (row: HTMLElement | undefined) =>
+      row
+        ? [
+            within(row).getByRole('rowheader').textContent,
+            ...within(row)
+              .getAllByRole('cell')
+              .map((cell) => cell.textContent),
+          ]
+        : [];
+    // Busiest sender first: received, jobs, unread, unverified links.
+    expect(cells(rows[1])).toEqual(['linkedin.com', '40', '210', '1', '0']);
+    expect(cells(rows[2])).toEqual(['example.com', '6', '17', '0', '2']);
+  });
+
+  it('shows a stale or failing bridge with its reason', () => {
+    givenEmail(health({ status: 'failing', lastErrorCode: 'unparsed' }));
+    render(<SystemPage />);
+    const sources = screen.getByRole('region', { name: 'Sources' });
+    expect(within(sources).getByText(/some alert emails could not be read/)).toBeDefined();
+    expect(within(sources).getAllByText('Failing').length).toBeGreaterThan(0);
+  });
+
+  it('shows the jobs waiting for a description next to the job count', async () => {
+    render(<SystemPage />);
+    expect(await screen.findByText(/Waiting for a description: 4/)).toBeDefined();
+  });
+
+  it('adds the waiting count to a run line', () => {
+    const run: Run = {
+      ...RUN,
+      perStage: {
+        ...RUN.perStage,
+        s3: {
+          in: 2,
+          apply: 0,
+          near_miss: 0,
+          wildcard: 0,
+          skip: 2,
+          expired: 0,
+          review: 0,
+          queued: 0,
+          drift: 0,
+          recomputed: 0,
+          needsDescription: 3,
+          costPence: 1,
+          durationMs: 10,
+        },
+      },
+    };
+    givenRuns([{ id: 'run-1', run }]);
+    render(<SystemPage />);
+    expect(screen.getByText(/3 waiting for a description/)).toBeDefined();
   });
 });
 

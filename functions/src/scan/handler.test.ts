@@ -64,3 +64,16 @@ describe('fakes outside the emulator (ADR-017, ADR-029)', () => {
     await expect(loadDevFakes()).rejects.toThrow(/no dev fakes/);
   });
 });
+
+describe('busy wording (ADR-048)', () => {
+  it('names a short holder, and keeps the scan wording for a scan or an unknown holder', async () => {
+    const busy = (holder?: 'email' | 'lookup' | 'scan') => () =>
+      Promise.resolve({ status: 'busy' as const, ...(holder ? { holder } : {}) });
+    const message = async (holder?: 'email' | 'lookup' | 'scan') =>
+      ((await scanNowHandler({}, busy(holder)).catch((e: unknown) => e)) as Error).message;
+    expect(await message('email')).toBe('Importing alerts, try again in a minute.');
+    expect(await message('lookup')).toBe('Adding a job from Lookup, try again in a minute.');
+    expect(await message('scan')).toBe('A scan is already running.');
+    expect(await message()).toBe('A scan is already running.');
+  });
+});

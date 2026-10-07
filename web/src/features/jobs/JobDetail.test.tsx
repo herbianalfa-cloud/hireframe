@@ -209,6 +209,124 @@ describe('JobDetail', () => {
     expect(screen.getByRole('img', { name: 'Adzuna' })).toBeDefined();
   });
 
+  describe('email alert jobs (M6)', () => {
+    const SEEN = new Date('2026-10-07T09:00:00Z');
+
+    it('shows Easy Apply on the LinkedIn source it came from, and on no other', () => {
+      show({
+        sources: [
+          {
+            id: 'greenhouse',
+            url: 'https://jobs.example.test/gh/1',
+            externalId: '1',
+            seenAt: SEEN,
+          },
+          {
+            id: 'linkedin-alert',
+            url: 'https://www.linkedin.com/jobs/view/4012345678',
+            externalId: '4012345678',
+            seenAt: SEEN,
+            easyApply: true,
+          },
+        ],
+      });
+      open();
+      const itemOf = (name: string): HTMLElement => {
+        const item = screen.getByRole('link', { name }).closest('li');
+        if (!item) throw new Error(`no list item for ${name}`);
+        return item;
+      };
+      expect(within(itemOf('LinkedIn alert')).getByText('Easy Apply on LinkedIn')).toBeDefined();
+      expect(within(itemOf('Greenhouse')).queryByText('Easy Apply on LinkedIn')).toBeNull();
+    });
+
+    it('shows an off-allowlist link by its host, marked unverified', () => {
+      show({
+        sources: [
+          {
+            id: 'email-alert',
+            url: 'https://click.example.net/c/9f8e7d',
+            externalId: 'abcd1234abcd1234',
+            seenAt: SEEN,
+            unverified: true,
+            searchLink: true,
+          },
+        ],
+      });
+      open();
+      const link = screen.getByRole('link', { name: 'click.example.net' });
+      expect(link.getAttribute('href')).toBe('https://click.example.net/c/9f8e7d');
+      // The source's name is not the link text: the link says where it goes.
+      expect(screen.queryByRole('link', { name: 'Email alert' })).toBeNull();
+      expect(link.closest('li')?.textContent).toContain('Email alert');
+      expect(link.closest('li')?.textContent).toContain('unverified link');
+    });
+
+    it('never renders a non-https unverified link as a link', () => {
+      show({
+        sources: [
+          {
+            id: 'email-alert',
+            url: 'http://click.example.net/c/9f8e7d',
+            externalId: 'abcd1234abcd1234',
+            seenAt: SEEN,
+            unverified: true,
+          },
+          {
+            id: 'email-alert',
+            url: 'javascript:alert(1)',
+            externalId: 'efgh5678efgh5678',
+            seenAt: SEEN,
+            unverified: true,
+          },
+        ],
+      });
+      open();
+      expect(screen.queryByRole('link', { name: 'click.example.net' })).toBeNull();
+      expect(screen.getByText('click.example.net')).toBeDefined();
+      expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+      expect(screen.getAllByText(/unverified link/)).toHaveLength(2);
+    });
+
+    it('labels a LinkedIn search URL as a search link, not a posting', () => {
+      show({
+        url: 'https://www.linkedin.com/jobs/search?keywords=Operations%20Analyst%20Ridge%20Labs',
+        sources: [
+          {
+            id: 'email-alert',
+            url: 'https://www.linkedin.com/jobs/search?keywords=Operations%20Analyst%20Ridge%20Labs',
+            externalId: 'abcd1234abcd1234',
+            seenAt: SEEN,
+            searchLink: true,
+          },
+        ],
+      });
+      open();
+      expect(screen.getByRole('link', { name: 'Search link' })).toBeDefined();
+      expect(screen.queryByRole('link', { name: 'Open posting' })).toBeNull();
+      expect(screen.getByText(/· search link/)).toBeDefined();
+    });
+
+    it('says a job at next: description needs a description, not that it is queued', () => {
+      show({
+        stage: 's2',
+        next: 'description',
+        descriptionKind: 'none',
+        flags: ['needs_description'],
+      });
+      open();
+      expect(screen.getByRole('heading', { name: 'Needs a description' })).toBeDefined();
+      expect(screen.queryByRole('heading', { name: 'Queued' })).toBeNull();
+      expect(screen.getByText(/No description to read: an email alert carries none/)).toBeDefined();
+    });
+
+    it('keeps "Open posting" for a real posting', () => {
+      show();
+      open();
+      expect(screen.getByRole('link', { name: 'Open posting' })).toBeDefined();
+    });
+  });
+
   it('marks a job applied and tells the page', async () => {
     const view = show();
     const { onCommitted } = open();

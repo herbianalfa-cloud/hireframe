@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  addDailySpend,
   checkCap,
+  checkDailyCap,
   costPence,
+  dailySpentPence,
+  dayKey,
   liveReservedPence,
   monthKey,
   RESERVATION_TTL_MS,
@@ -118,5 +122,70 @@ describe('UsageSchema', () => {
     };
     expect(UsageSchema.parse(doc)).toEqual(doc);
     expect(UsageSchema.safeParse({ ...doc, spendPence: -1 }).success).toBe(false);
+  });
+});
+
+describe('daily caps (ADR-047)', () => {
+  const today = dayKey(NOW);
+  const daily = { alertParse: { day: today, spendPence: 6 } };
+
+  it('keys the day in Europe/London', () => {
+    expect(dayKey(new Date('2026-07-01T23:30:00Z'))).toBe('2026-07-02');
+    expect(dayKey(new Date('2026-12-01T23:30:00Z'))).toBe('2026-12-01');
+  });
+
+  it("counts only today's total", () => {
+    expect(dailySpentPence(daily, 'alertParse', today)).toBe(6);
+    expect(dailySpentPence(daily, 'alertParse', '2020-01-01')).toBe(0);
+    expect(dailySpentPence(undefined, 'alertParse', today)).toBe(0);
+  });
+
+  it('adds to today and restarts on a new day', () => {
+    expect(addDailySpend(daily, 'alertParse', today, 1.5).alertParse).toEqual({
+      day: today,
+      spendPence: 7.5,
+    });
+    expect(addDailySpend(daily, 'alertParse', '2030-01-01', 2).alertParse).toEqual({
+      day: '2030-01-01',
+      spendPence: 2,
+    });
+  });
+
+  it('checks spend + live reservations of that purpose + this call against the cap', () => {
+    const reservations = {
+      'alertParse-a': { pence: 2, at: NOW },
+      'lookup-b': { pence: 50, at: NOW },
+    };
+    const check = (requestPence: number) =>
+      checkDailyCap({
+        daily,
+        key: 'alertParse',
+        reservations,
+        capPence: 10,
+        requestPence,
+        now: NOW,
+      });
+    expect(check(2).ok).toBe(true); // 6 + 2 + 2 = 10
+    expect(check(2.5).ok).toBe(false);
+    expect(check(2).availablePence).toBe(2);
+  });
+
+  it('parses a usage document with and without the daily field', () => {
+    const doc = {
+      spendPence: 1,
+      capPence: 1500,
+      reservations: {},
+      calls: {},
+      tokens: {},
+      byPurpose: {},
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+    };
+    expect(UsageSchema.safeParse(doc).success).toBe(true);
+    expect(UsageSchema.safeParse({ ...doc, daily }).success).toBe(true);
+    expect(
+      UsageSchema.safeParse({ ...doc, daily: { alertParse: { day: 'x', spendPence: 1 } } }).success,
+    ).toBe(false);
   });
 });

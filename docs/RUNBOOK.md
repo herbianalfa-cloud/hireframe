@@ -5,12 +5,12 @@
 2. **Firebase:** new project → upgrade to Blaze → GCP Billing budget alerts at £5 and £10. Enable Google sign-in. Then follow **Firebase setup** below.
 3. **Anthropic:** create API key at console.anthropic.com, set a monthly spend limit (e.g. £20).
 4. **Reed:** free Jobseeker API key. **Adzuna:** free developer app_id + app_key.
-5. **Gmail:** create labels `hireframe/alerts` and `hireframe/done`; filters that label job-alert senders (LinkedIn, Wellfound, Work at a Startup, Welcome to the Jungle, Reed, Indeed alerts).
+5. **Gmail:** create labels `hireframe/alerts` and `hireframe/done` in the primary account; filters that label job-alert senders (LinkedIn, Wellfound, Work at a Startup, Escape the City, Welcome to the Jungle, Reed, Indeed alerts) `hireframe/alerts`. Keep the second account's filter that auto-forwards `from:jobalerts-noreply@linkedin.com` to the primary; Gmail keeps the original sender, so the primary's filter labels the forwarded copies too. Part G installs the bridge.
 6. **Job alerts:** set up LinkedIn/Wellfound/WaaS/WTTJ alerts for the lane titles in `FUNNEL.md`, UK/London, daily.
 7. Secrets go into Secret Manager via `firebase functions:secrets:set`. Never paste them into chat or code.
 
 ## Firebase setup
-Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2); Part D adds the job sources (M3); Part E adds the funnel and the schedule (M4); Part F adds the dashboard data (M5). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
+Project `hireframe-f6b03`, region **europe-west2 (London)**. Part A and Part B are M1; Part C adds Cloud Functions (M2); Part D adds the job sources (M3); Part E adds the funnel and the schedule (M4); Part F adds the dashboard data (M5); Part G adds the Gmail bridge (M6). Design: ADR-011 (owner allowlist), ADR-014 (deploy), ADR-017 (functions).
 
 ### Part A: before the first deploy
 1. **Create Firestore.**
@@ -165,11 +165,11 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
 28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
     ```bash
-    for FN in parseCv addFact resetProfile scanNow rescore; do
+    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs; do
       gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers --project=hireframe-f6b03
     done
     ```
-    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list.
+    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `ingestEmailJobs` (M6) is an HTTPS function, not a callable: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
 29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` (and `scanNow` from M3) are listed in `europe-west2`.
 30. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
 31. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
@@ -299,6 +299,41 @@ Before the `v0.5.0` deploy. Design: ADR-038 (job actions, feedback, agreement), 
 74. *(Optional)* **Choose the agreement window and target.** The defaults are 14 days and 85% (`AGREEMENT_DAYS`, `AGREEMENT_TARGET` in `packages/shared/src/metrics.ts`). Tell Claude if you want different ones.
 75. **Before the `v0.5.0` deploy**, the six new `jobs` indexes build after deploy; the dashboard queries fail with "requires an index" until each says **Enabled** (Firestore → Indexes). The screens' own steps follow in the next session.
 
+### Part G: Gmail bridge (M6, PR 6A)
+Design: ADR-046 (transport and signing), ADR-047 (parsing), ADR-048 (the lock and needs-description). Do 76 to 78 before the `v0.6.0` tag, which is merged only **after the Wed 7 Oct 17:30 scheduled run has finished** (System shows it), so that run still measures the intake without alert volume. The rest follow the deploy.
+
+76. **Create the HMAC secret** (G1), in Cloud Shell. Generate it there; never paste it into chat or a file in the repo:
+    ```bash
+    gcloud config set project hireframe-f6b03
+    printf '%s' "$(openssl rand -hex 32)" | gcloud secrets create INGEST_HMAC_SECRET --data-file=- --replication-policy=automatic
+    ```
+    Then let only the runtime account read it, and the deployer see it (the Part C pattern):
+    ```bash
+    gcloud secrets add-iam-policy-binding INGEST_HMAC_SECRET --member=serviceAccount:hireframe-fns@hireframe-f6b03.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+    gcloud secrets add-iam-policy-binding INGEST_HMAC_SECRET --member=serviceAccount:github-deployer@hireframe-f6b03.iam.gserviceaccount.com --role=roles/secretmanager.viewer
+    ```
+77. **Check the invoker on `scheduledScan`** (G2). The bundle changes, so the deploy rewrites the invoker unless it is exact (Recovery, and Part E step 68):
+    ```bash
+    gcloud scheduler jobs describe firebase-schedule-scheduledScan-europe-west2 --location=europe-west2 --format='value(schedule,timeZone,httpTarget.oidcToken.serviceAccountEmail)'
+    gcloud run services get-iam-policy scheduledscan --region=europe-west2 --flatten='bindings[].members' --filter='bindings.role:roles/run.invoker' --format='value(bindings.members)'
+    ```
+    The first must print `30 7,17 * * 1-5`, `Europe/London` and `hireframe-fns@…`; the second **only** `serviceAccount:hireframe-fns@…`. Otherwise fix it with Recovery first.
+78. **Merge and deploy** (G3), not before the Wed 7 Oct 17:30 run has finished: merge 6A, push `v0.6.0`, approve the deploy (Part C step 27).
+79. **TTL policies** (G4). Firestore → **TTL** shows `nonces.expireAt` and `alertMessages.expireAt` as **Serving**. If either is missing (the deploy account can't always apply `fieldOverrides`):
+    ```bash
+    gcloud firestore fields ttls update expireAt --collection-group=nonces --enable-ttl
+    gcloud firestore fields ttls update expireAt --collection-group=alertMessages --enable-ttl
+    ```
+    Until they exist, spent nonces and old message records accumulate; they are tiny and harmless (an expired nonce is rejected by its timestamp anyway).
+80. **Invoker binding** (G5) for the new HTTPS function: Part C step 28's loop now includes `ingestEmailJobs`. Run it, or just this one:
+    ```bash
+    gcloud functions add-invoker-policy-binding ingestEmailJobs --region=europe-west2 --member=allUsers --project=hireframe-f6b03
+    ```
+    If the deploy failed with "Failed to set invoker function ingestEmailJobs", run this and re-run the deploy.
+81. **Apps Script** (G6). In the repo folder: `npm run build:apps-script`, then `npm exec -w apps-script clasp login` (your Google account), `npm exec -w apps-script clasp -- create --type standalone --rootDir apps-script/build` once (it writes the gitignored `apps-script/.clasp.json`; the committed `.clasp.json.example` shows its shape), then `npm exec -w apps-script clasp -- push`. In the Apps Script editor: **Services → Gmail API** on. **Project Settings → Script Properties:** `HIREFRAME_INGEST_URL` (the function URL, from the Firebase console → Functions) and `HIREFRAME_HMAC_SECRET`. For the secret, in Cloud Shell run `gcloud secrets versions access latest --secret=INGEST_HMAC_SECRET` and copy it straight into the property; don't paste it anywhere else. Run `setup` once and accept the scopes (read and change mail labels, send to external services, manage triggers). Run `run` once by hand.
+82. **Gmail labels and filters** (G7). The labels `hireframe/alerts` and `hireframe/done` exist in the primary account (One-time setup step 5). A filter `from:jobalerts-noreply@linkedin.com` → apply `hireframe/alerts`, plus one for each other alert sender you use. On the second account, keep the filter that auto-forwards LinkedIn alerts to the primary.
+83. **Check it** (G8). First, in Gmail's search box, type `label:hireframe/alerts` and confirm it lists the messages you labelled: `hireframe/alerts` is a nested label (a `hireframe` parent), and the script's query is exactly that text, so if the search finds nothing the script will find nothing either. Then label one real alert `hireframe/alerts`, choosing one whose text contains a `·` or a `£` (most LinkedIn and Wellfound alerts do): the signed bytes and the sent bytes must agree on non-ASCII text, and only a real alert proves it end to end. Run `run` in the editor. **System → Sources → Gmail alerts** shows the ingest (emails, jobs new and merged), and the message is under `hireframe/done`. After the next scan, those jobs have been through S1 and S2, and the LinkedIn ones end at **Waiting for a description** (the count is on System next to Jobs stored). If a message stays under `hireframe/alerts`, see Recovery.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -314,7 +349,10 @@ Before the `v0.5.0` deploy. Design: ADR-038 (job actions, feedback, agreement), 
 - **The Storage rules deploy asks to grant `firebaserules.firestoreServiceAgent`, or the owner gets "permission denied" on uploads:** do the Part C step 25 check.
 - **A source card shows Failing or Degraded:** its "Why" line names the cause. `a board no longer exists`: fix that company's `ats.token` in `companies/{id}` or set `watch` to false (boards missing 3 scans in a row are listed under **Broken job boards**). `the site asked us to slow down`: wait for the next scan; Adzuna's daily quota resets at midnight UK time. `robots.txt does not allow it` or a changed response shape: switch the source off with `disabledSources` and open an issue.
 - **A source card says "Paused until <time>":** that site sent a long Retry-After (a rate limit), so scans skip it until then and it resumes on its own. If it keeps happening, switch the source off with `disabledSources` for a while.
-- **Scan now says "A scan is already running"** long after the last one: a scan that died leaves `locks/scan` for 12 minutes, then the next scan takes over.
+- **Scan now says "A scan is already running"** long after the last one: a scan that died leaves `locks/scan` for 12 minutes, then the next scan takes over. "Importing alerts, try again in a minute" is the Gmail bridge holding the lock, which a killed ingest keeps for at most 3 minutes.
+- **The Gmail bridge isn't ingesting** (System → Gmail alerts shows an old "Last ingest", or none): open the Apps Script project → **Executions**. A `run` that failed with a Script Property error is a missing `HIREFRAME_INGEST_URL` or `HIREFRAME_HMAC_SECRET` (Part G step 81); "label does not exist" is a missing Gmail label. A **403** from the function means the invoker binding is missing (step 80). A **401** means the secrets differ: set the script property to the secret's current value (`gcloud secrets versions access latest --secret=INGEST_HMAC_SECRET` in Cloud Shell); a 401 only on some runs can also be the trigger's clock being more than 5 minutes off. A **503 `busy`** is a scan or another ingest holding the lock; the next trigger retries, nothing is lost. The 30-minute trigger is gone after a project copy: run `setup` again.
+- **System shows "Gmail alerts" Failing or Degraded, "some alert emails could not be read":** a sender changed its layout (the Unread count and the sender table say which). LinkedIn emails with job links but no readable card are counted, relabelled `hireframe/done` and not guessed. Send Claude a real alert with the values replaced by fake ones (never the raw email) so the parser and its fixture can be updated.
+- **"…waiting for the daily AI limit":** alert emails from senders other than LinkedIn are read with the cheap model, capped at 10p a day (`config/app.alerts.dailyCapPence` overrides it). Over the cap they stay under `hireframe/alerts` and are tried again on the next trigger, so they catch up the next day.
 - **Deploy fails with 403 on a Reed or Adzuna secret:** Part D step 39 hasn't run.
 - **`scheduledScan` never runs, or Cloud Scheduler shows `PERMISSION_DENIED`:** the scheduler's service account can't invoke the function. Do Part E step 68. If the deploy failed creating the schedule, do Part E step 54 and re-run the deploy.
 - **A new scheduled function has no schedule after its first deploy** (the deploy said "Failed to set invoker function <fn>", and a re-run says "Skipped (No changes detected)"). The Firebase CLI sets the function's invoker before it creates the Cloud Scheduler job. The deploy account can't set IAM, so the job is never created, and later deploys skip the unchanged function. In Cloud Shell:

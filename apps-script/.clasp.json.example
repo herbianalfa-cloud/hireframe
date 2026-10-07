@@ -1,0 +1,4 @@
+{
+  "scriptId": "<your Apps Script project's script ID, from `npm exec -w apps-script clasp -- create`>",
+  "rootDir": "build"
+}

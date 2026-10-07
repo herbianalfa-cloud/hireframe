@@ -14,6 +14,7 @@ import {
 } from '@hireframe/shared';
 import {
   collection,
+  doc,
   getCountFromServer,
   limit,
   onSnapshot,
@@ -26,6 +27,7 @@ import { httpsCallable } from 'firebase/functions';
 import { getFirebase, getFunctionsClient } from './firebase';
 import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
+import { specConstraints, type QuerySpec } from './query-spec';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
 
@@ -54,6 +56,9 @@ export interface BoardView {
 const isScanSource = (id: string): id is ScanSourceId =>
   (SCAN_SOURCE_IDS as readonly string[]).includes(id);
 
+/** The Gmail bridge's health doc (M6); it has its own card, so the scan sources skip it. */
+const EMAIL_SOURCE = 'email';
+
 export function watchSources(callback: (state: LiveState<SourceView[]>) => void): Unsubscribe {
   callback({ status: 'loading' });
   return listen(
@@ -66,6 +71,7 @@ export function watchSources(callback: (state: LiveState<SourceView[]>) => void)
           let invalid = 0;
           for (const item of snapshot.docs) {
             const parsed = SourceHealthSchema.safeParse(timestampsToDates(item.data()));
+            if (item.id === EMAIL_SOURCE) continue;
             if (parsed.success && isScanSource(item.id)) {
               sources.push({ id: item.id, health: parsed.data });
             } else invalid++;
@@ -146,6 +152,63 @@ export function watchBrokenBoards(callback: (state: LiveState<BoardView[]>) => v
       callback({ status: 'error', message });
     },
   );
+}
+
+/** `sources/email`: the Gmail bridge's health, or null before the first ingest (ADR-047). */
+export function watchEmailHealth(
+  callback: (state: LiveState<SourceHealth | null>) => void,
+): Unsubscribe {
+  callback({ status: 'loading' });
+  return listen(
+    async () => {
+      const { db } = await getFirebase();
+      return onSnapshot(
+        doc(db, COLLECTIONS.sources, EMAIL_SOURCE),
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            callback({ status: 'ready', data: null, invalid: 0 });
+            return;
+          }
+          const parsed = SourceHealthSchema.safeParse(timestampsToDates(snapshot.data()));
+          callback(
+            parsed.success
+              ? { status: 'ready', data: parsed.data, invalid: 0 }
+              : { status: 'error', message: "Couldn't read the Gmail alerts status." },
+          );
+        },
+        (error) => {
+          logError('system.email_failed', { code: error.code });
+          callback({ status: 'error', message: "Couldn't load the Gmail alerts status." });
+        },
+      );
+    },
+    (message) => {
+      callback({ status: 'error', message });
+    },
+  );
+}
+
+/** Jobs S3 sent to wait for a description: alert jobs have none (ADR-048). */
+export const needsDescriptionCountSpec: QuerySpec = {
+  collection: COLLECTIONS.jobs,
+  filters: [{ field: 'next', op: '==', value: 'description' }],
+  orderBy: [],
+};
+
+export async function countWaitingForDescription(): Promise<number> {
+  const { db } = await getFirebase();
+  const snapshot = await withRetry(
+    () =>
+      withTimeout(
+        getCountFromServer(
+          query(collection(db, COLLECTIONS.jobs), ...specConstraints(needsDescriptionCountSpec)),
+        ),
+        10_000,
+        'waiting for description',
+      ),
+    { label: 'system.count_waiting', isRetryable: isTransient },
+  );
+  return snapshot.data().count;
 }
 
 /** How many jobs are stored (one aggregation read per 1,000 jobs). */

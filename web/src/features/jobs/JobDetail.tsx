@@ -29,6 +29,9 @@ import {
   GAP_LABELS,
   LEVEL_LABELS,
   MATCH_LABELS,
+  isHttpsUrl,
+  isSearchLink,
+  linkHost,
   postedText,
   REVIEW_TEXT,
   salaryText,
@@ -210,7 +213,7 @@ function Actions({
         <Button asChild variant="secondary">
           <a href={job.url} target="_blank" rel="noopener noreferrer">
             <ExternalLink aria-hidden="true" />
-            Open posting
+            {isSearchLink(job.url) ? 'Search link' : 'Open posting'}
           </a>
         </Button>
         <StatusToggle
@@ -352,6 +355,13 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
             {REVIEW_TEXT[job.review.code]}. Read it yourself; a re-score may retry it.
           </p>
         </Section>
+      ) : job.next === 'description' ? (
+        <Section title="Needs a description">
+          <p>
+            This job came from an email alert, which carries no description, so there is nothing to
+            read yet. A later scan may find the posting on the company&apos;s job board.
+          </p>
+        </Section>
       ) : job.next ? (
         <Section title="Queued">
           <p>Waiting for the {STAGE_NAMES[job.next]} step in a later run.</p>
@@ -406,18 +416,42 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
         <ul className="space-y-1">
           {job.sources.map((source) => (
             <li key={`${source.id}:${source.externalId}`}>
-              <a
-                href={source.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline underline-offset-4"
-              >
-                {SOURCE_NAMES[source.id] ?? source.id}
-              </a>
+              {source.unverified ? (
+                <>
+                  <span>{SOURCE_NAMES[source.id] ?? source.id}: </span>
+                  {/* An off-allowlist link: its host is the text, and only https is ever a link. */}
+                  {isHttpsUrl(source.url) ? (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-4"
+                    >
+                      {linkHost(source.url)}
+                    </a>
+                  ) : (
+                    <span>{linkHost(source.url)}</span>
+                  )}
+                </>
+              ) : (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4"
+                >
+                  {SOURCE_NAMES[source.id] ?? source.id}
+                </a>
+              )}
               <span className="text-xs text-muted-foreground">
-                {' '}
-                · seen {formatDate(source.seenAt)}
+                {source.searchLink && !source.unverified ? ' · search link' : ''}
+                {source.unverified ? ' · unverified link' : ''} · seen {formatDate(source.seenAt)}
               </span>
+              {source.easyApply ? (
+                <Badge variant="accent" className="ml-2">
+                  Easy Apply on LinkedIn
+                </Badge>
+              ) : null}
             </li>
           ))}
         </ul>

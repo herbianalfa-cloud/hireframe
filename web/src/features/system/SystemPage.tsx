@@ -26,7 +26,14 @@ import {
 import { AgreementLine } from '@/features/jobs/AgreementLine';
 import { SpendMeter } from '@/features/today/SpendMeter';
 
-import { useBrokenBoards, useJobCount, useRecentRuns, useSources } from './hooks';
+import {
+  useBrokenBoards,
+  useEmailHealth,
+  useJobCount,
+  useRecentRuns,
+  useSources,
+  useWaitingForDescription,
+} from './hooks';
 import {
   errorText,
   funnelText,
@@ -267,6 +274,98 @@ function Sources() {
   );
 }
 
+/** The Gmail bridge (M6, ADR-047): the last ingest, its counts and the counts per sender. */
+function EmailAlerts() {
+  const state = useEmailHealth();
+  if (state.status === 'loading') {
+    return (
+      <div role="status" aria-label="Loading Gmail alerts" className="mt-3">
+        <Skeleton className="h-28" />
+      </div>
+    );
+  }
+  if (state.status === 'error') {
+    return (
+      <p role="alert" className="mt-3 text-sm text-danger">
+        {state.message}
+      </p>
+    );
+  }
+  const health = state.data;
+  if (!health) {
+    return (
+      <p className="mt-3 text-sm text-muted-foreground">
+        No alert emails yet. They appear here once the Gmail bridge has run.
+      </p>
+    );
+  }
+  const counts = health.lastCounts;
+  const reason = errorText(health.lastErrorCode);
+  const senders = Object.entries(health.bySender ?? {}).sort(
+    ([, a], [, b]) => b.messages - a.messages,
+  );
+  return (
+    <div className="mt-3 rounded-lg border bg-surface p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">Gmail alerts</h3>
+        <StatusBadge status={health.status} />
+      </div>
+      <dl className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
+        <Count label="Emails" value={counts.requests} />
+        <Count label="Jobs" value={counts.fetched} />
+        <Count label="New" value={counts.new} />
+        <Count label="Merged" value={counts.merged} />
+        <Count label="Known" value={counts.duplicate} />
+        <Count label="Unread" value={counts.invalid} />
+      </dl>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Last ingest {TIME_FORMAT.format(health.lastRunAt)}
+        {health.lastOkAt ? ` · last OK ${TIME_FORMAT.format(health.lastOkAt)}` : ' · never OK'}
+      </p>
+      {health.status !== 'ok' && reason ? (
+        <p className="mt-1 text-xs text-muted-foreground">Why: {reason}</p>
+      ) : null}
+      {senders.length > 0 ? (
+        <table className="mt-3 w-full text-left text-xs">
+          <caption className="sr-only">Alert emails per sender, all time</caption>
+          <thead className="text-muted-foreground">
+            <tr>
+              <th scope="col" className="py-1 pr-2 font-normal">
+                Sender
+              </th>
+              <th scope="col" className="px-2 py-1 text-right font-normal">
+                Received
+              </th>
+              <th scope="col" className="px-2 py-1 text-right font-normal">
+                Jobs
+              </th>
+              <th scope="col" className="px-2 py-1 text-right font-normal">
+                Unread
+              </th>
+              <th scope="col" className="py-1 pl-2 text-right font-normal">
+                Unverified links
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {senders.map(([domain, stats]) => (
+              <tr key={domain} className="border-t">
+                <th scope="row" className="py-1 pr-2 font-normal">
+                  {domain}
+                </th>
+                <td className="px-2 py-1 text-right tabular-nums">{stats.messages}</td>
+                <td className="px-2 py-1 text-right tabular-nums">{stats.jobs}</td>
+                <td className="px-2 py-1 text-right tabular-nums">{stats.unparsed}</td>
+                <td className="py-1 pl-2 text-right tabular-nums">{stats.unverifiedLinks}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </div>
+  );
+}
+
 function BrokenBoards() {
   const state = useBrokenBoards();
   if (state.status === 'error') {
@@ -434,6 +533,7 @@ const S2SkipReasons = lazy(() =>
 export function SystemPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const jobCount = useJobCount(refreshKey);
+  const waiting = useWaitingForDescription(refreshKey);
   return (
     <section aria-labelledby="page-title" className="mx-auto max-w-5xl">
       <h1 id="page-title" className="text-xl font-semibold tracking-tight">
@@ -445,7 +545,13 @@ export function SystemPage() {
         }}
       />
       <p className="mt-4 text-sm text-muted-foreground">
-        {jobCount === null ? 'Jobs stored: …' : `Jobs stored: ${String(jobCount)}`}
+        <span>{jobCount === null ? 'Jobs stored: …' : `Jobs stored: ${String(jobCount)}`}</span>
+        {' · '}
+        <span>
+          {waiting === null
+            ? 'Waiting for a description: …'
+            : `Waiting for a description: ${String(waiting)}`}
+        </span>
       </p>
       <Alerts />
       <section aria-labelledby="spend-title" className="mt-8">
@@ -464,6 +570,7 @@ export function SystemPage() {
           Sources
         </h2>
         <Sources />
+        <EmailAlerts />
       </section>
       <BrokenBoards />
       <section aria-labelledby="runs-title" className="mt-8">

@@ -160,7 +160,7 @@ describe('runScan on the Firestore emulator', () => {
 
   it('refuses a scan while one runs, takes over a stale lock, and applies the cooldown', async () => {
     await db.doc(DOCS.scanLock).set({ runId: 'other', startedAt: T0, schemaVersion: 1 });
-    await expect(runScan(deps(minutes(5)))).resolves.toEqual({ status: 'busy' });
+    await expect(runScan(deps(minutes(5)))).resolves.toEqual({ status: 'busy', holder: 'scan' });
 
     // 13 minutes later the lock is stale: the dead scan never released it.
     const taken = await runScan(deps(minutes(13)));

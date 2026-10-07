@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 
 import type { LiveState } from '@/services/profile';
+import type { SourceHealth } from '@hireframe/shared';
 import {
   countJobs,
+  countWaitingForDescription,
   watchBrokenBoards,
+  watchEmailHealth,
   watchRecentRuns,
   watchSources,
   type BoardView,
@@ -35,6 +38,32 @@ export function useJobCount(refreshKey: number): number | null {
   useEffect(() => {
     let cancelled = false;
     countJobs().then(
+      (value) => {
+        if (!cancelled) setCount(value);
+      },
+      () => {
+        if (!cancelled) setCount(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+  return count;
+}
+
+export function useEmailHealth(): LiveState<SourceHealth | null> {
+  const [state, setState] = useState<LiveState<SourceHealth | null>>({ status: 'loading' });
+  useEffect(() => watchEmailHealth(setState), []);
+  return state;
+}
+
+/** Jobs waiting for a description, re-read whenever `refreshKey` changes. */
+export function useWaitingForDescription(refreshKey: number): number | null {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    countWaitingForDescription().then(
       (value) => {
         if (!cancelled) setCount(value);
       },
