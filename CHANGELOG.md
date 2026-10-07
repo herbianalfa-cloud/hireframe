@@ -2,6 +2,10 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [Unreleased]
+### Fixed
+- **Gmail bridge: "Could not decode string".** The Advanced Gmail service's `payload.body.data` can be a byte array, unpadded base64url or standard base64, not only padded base64url. Decoding now reads bytes as UTF-8 directly, tries `base64DecodeWebSafe`, then standard base64 (`-_` mapped to `+/`, padded), and honours the part's charset (UTF-8 by default). `readMessage` never throws: an undecodable part is skipped, a message with no readable part stays under `hireframe/alerts` and is counted as `unreadable` in the run summary, and the other messages are still sent. Logs carry only a fixed code, `typeof data` and the branch that worked. RUNBOOK G6 uses `--rootDir build` and says to open the project by its script ID, and notes the temporary `roles/cloudfunctions.admin` grant a new non-callable HTTPS function needs on its first deploy.
+
 ## [0.6.0]
 ### Added
 - **M6 PR 6A: the Gmail bridge** (ADR-046, ADR-047, ADR-048). LinkedIn, Work at a Startup, Escape the City and the other alert-only boards now reach Hireframe through your own Gmail:

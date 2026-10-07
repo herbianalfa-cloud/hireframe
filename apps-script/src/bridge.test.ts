@@ -292,7 +292,13 @@ describe('relabelling', () => {
 
   it('does nothing when there is nothing pending', () => {
     const h = harness({}, { listed: [] });
-    expect(runBridge(h.deps)).toEqual({ listed: 0, sent: 0, posts: 0, relabelled: 0 });
+    expect(runBridge(h.deps)).toEqual({
+      listed: 0,
+      sent: 0,
+      posts: 0,
+      relabelled: 0,
+      unreadable: 0,
+    });
     expect(h.posts).toHaveLength(0);
   });
 });

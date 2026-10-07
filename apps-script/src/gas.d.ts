@@ -5,7 +5,7 @@
 interface GmailPayload {
   mimeType?: string;
   headers?: { name: string; value: string }[];
-  body?: { data?: string };
+  body?: { data?: string | number[] };
   parts?: GmailPayload[];
 }
 
@@ -59,6 +59,7 @@ declare const Utilities: {
   computeHmacSha256Signature(value: number[], key: number[]): number[];
   getUuid(): string;
   base64DecodeWebSafe(data: string): number[];
+  base64Decode(data: string): number[];
   newBlob(bytes: number[]): { getDataAsString(charset: string): string };
 };
 
