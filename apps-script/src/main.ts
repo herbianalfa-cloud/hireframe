@@ -1,5 +1,6 @@
 import { runBridge, LABELS, PENDING_QUERY, type BridgeMessage } from './bridge.js';
 import { toSignedBytes } from '../../packages/shared/src/signing.js';
+import { readMessage, type ReadRuntime } from './read.js';
 import { createSigner } from './sign.js';
 
 /**
@@ -24,37 +25,23 @@ function labelId(name: string): string {
   return found.id;
 }
 
-function decode(data: string | undefined): string {
-  if (!data) return '';
-  return Utilities.newBlob(Utilities.base64DecodeWebSafe(data)).getDataAsString('UTF-8');
-}
+const runtime: ReadRuntime = {
+  base64DecodeWebSafe: (data) => Utilities.base64DecodeWebSafe(data),
+  base64Decode: (data) => Utilities.base64Decode(data),
+  newBlob: (bytes) => Utilities.newBlob(bytes),
+};
 
-/** The first text/plain and text/html parts, walking multipart messages. */
-function bodies(payload: GmailPayload | undefined): { text: string; html: string } {
-  const found = { text: '', html: '' };
-  const walk = (part: GmailPayload) => {
-    if (part.mimeType === 'text/plain' && found.text === '') found.text = decode(part.body?.data);
-    else if (part.mimeType === 'text/html' && found.html === '') {
-      found.html = decode(part.body?.data);
-    }
-    for (const child of part.parts ?? []) walk(child);
-  };
-  if (payload) walk(payload);
-  return found;
-}
+const log = (event: string, fields: Record<string, number | string>) => {
+  Logger.log(`${event} ${JSON.stringify(fields)}`);
+};
 
-function readMessage(id: string): BridgeMessage | null {
-  const message = Gmail.Users.Messages.get('me', id, { format: 'full' });
-  const from = message.payload?.headers?.find((header) => header.name.toLowerCase() === 'from');
-  const internal = Number(message.internalDate);
-  if (!from || !Number.isFinite(internal)) return null;
-  // Only `From` is read: not Subject, To, Cc, Delivered-To or any other header.
-  return {
-    id,
-    receivedAt: new Date(internal).toISOString(),
-    from: from.value,
-    ...bodies(message.payload),
-  };
+function readGmailMessage(id: string): BridgeMessage | null {
+  try {
+    return readMessage(runtime, id, Gmail.Users.Messages.get('me', id, { format: 'full' }), log);
+  } catch {
+    log('bridge.read_failed', { code: 'get_error' });
+    return null;
+  }
 }
 
 export function run(): void {
@@ -78,7 +65,7 @@ export function run(): void {
       }
       return ids;
     },
-    getMessage: readMessage,
+    getMessage: readGmailMessage,
     markDone(id) {
       Gmail.Users.Messages.modify({ addLabelIds: [done], removeLabelIds: [alerts] }, 'me', id);
     },
@@ -98,9 +85,7 @@ export function run(): void {
     ),
     uuid: () => Utilities.getUuid(),
     now: () => Date.now(),
-    log: (event, fields) => {
-      Logger.log(`${event} ${JSON.stringify(fields)}`);
-    },
+    log,
   });
   Logger.log(`bridge.done ${JSON.stringify(summary)}`);
 }

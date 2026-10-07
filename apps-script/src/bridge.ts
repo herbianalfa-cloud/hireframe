@@ -49,6 +49,8 @@ export interface BridgeSummary {
   sent: number;
   posts: number;
   relabelled: number;
+  /** Listed messages that could not be read: left labelled, tried again next trigger. */
+  unreadable: number;
   /** Why the run stopped early, if it did. */
   stopped?: 'busy' | 'http_error' | 'network_error' | 'bad_response';
 }
@@ -163,7 +165,13 @@ export function runBridge(deps: BridgeDeps): BridgeSummary {
     const message = deps.getMessage(id);
     if (message) messages.push(message);
   }
-  const summary: BridgeSummary = { listed: ids.length, sent: 0, posts: 0, relabelled: 0 };
+  const summary: BridgeSummary = {
+    listed: ids.length,
+    sent: 0,
+    posts: 0,
+    relabelled: 0,
+    unreadable: ids.length - messages.length,
+  };
 
   for (const batch of batchByBytes(messages)) {
     // Encoded once: the signature covers these bytes and they are what is sent.
