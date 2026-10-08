@@ -21,6 +21,19 @@ export function staleQueuedSpec(state: WaitState, before: Date): QuerySpec {
   };
 }
 
+/**
+ * Jobs with a description claim older than `before` (ADR-049): a `describe` that died after
+ * claiming the job. Ordered by the one field it filters, so the automatic index serves it; jobs
+ * without `describingAt` are left out by Firestore, which is exactly the filter.
+ */
+export function staleDescribingSpec(before: Date): QuerySpec {
+  return {
+    collection: COLLECTIONS.jobs,
+    filters: [{ field: 'describingAt', op: '<', value: before }],
+    orderBy: [{ field: 'describingAt', direction: 'asc' }],
+  };
+}
+
 /** The fields a key lookup reads from stored jobs (a `select` projection). */
 export const JOBS_BY_KEYS_SELECT = [
   'keys',

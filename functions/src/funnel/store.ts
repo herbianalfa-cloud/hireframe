@@ -26,7 +26,12 @@ import type { WatchedCompany } from '../sources/types.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 import type { JobPatch } from './judgement.js';
-import { addedQueuedSpec, staleQueuedSpec, watchedCompaniesSpec } from './queries.js';
+import {
+  addedQueuedSpec,
+  staleDescribingSpec,
+  staleQueuedSpec,
+  watchedCompaniesSpec,
+} from './queries.js';
 import { planAttachment } from './attach.js';
 import type { CompanyInfo, FunnelStore, StoredJob } from './run.js';
 
@@ -167,6 +172,20 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
     staleQueued(stage, before, limit) {
       if (limit <= 0) return Promise.resolve([]);
       const spec = staleQueuedSpec(stage, before);
+      const filtered = spec.filters.reduce<Query>(
+        (query, filter) => query.where(filter.field, filter.op, filter.value),
+        jobs,
+      );
+      const ordered = spec.orderBy.reduce(
+        (query, order) => query.orderBy(order.field, order.direction),
+        filtered,
+      );
+      return read(ordered.limit(limit));
+    },
+
+    staleDescribing(before, limit) {
+      if (limit <= 0) return Promise.resolve([]);
+      const spec = staleDescribingSpec(before);
       const filtered = spec.filters.reduce<Query>(
         (query, filter) => query.where(filter.field, filter.op, filter.value),
         jobs,

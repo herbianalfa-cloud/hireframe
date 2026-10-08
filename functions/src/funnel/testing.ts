@@ -162,6 +162,14 @@ export function memoryFunnelStore(
           .sort((a, b) => time(b.job.sortAt) - time(a.job.sortAt))
           .slice(0, limit),
       ),
+    staleDescribing: (before, limit) =>
+      Promise.resolve(
+        list(
+          (job) => job.describingAt !== undefined && job.describingAt.getTime() < before.getTime(),
+        )
+          .sort((a, b) => time(a.job.describingAt) - time(b.job.describingAt))
+          .slice(0, limit),
+      ),
     recentJobs: (since, limit) =>
       Promise.resolve(
         list((job) => job.firstSeenAt.getTime() >= since.getTime())

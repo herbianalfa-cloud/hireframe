@@ -8,6 +8,7 @@ import {
   addedQueuedSpec,
   JOBS_BY_KEYS_SELECT,
   jobsByKeysSpec,
+  staleDescribingSpec,
   staleQueuedSpec,
   watchedCompaniesSpec,
 } from './queries.js';
@@ -62,6 +63,14 @@ describe('funnel query specs', () => {
       expect(indexServes(spec, [])).toBe(false);
     },
   );
+
+  it('serves the stale describe claims read from the automatic index', () => {
+    const spec = staleDescribingSpec(new Date('2026-10-01T10:00:00Z'));
+    expect(spec.filters).toEqual([
+      { field: 'describingAt', op: '<', value: new Date('2026-10-01T10:00:00Z') },
+    ]);
+    expect(indexServes(spec, [])).toBe(true);
+  });
 
   it('serves the watched companies read without a composite', () => {
     expect(indexServes(watchedCompaniesSpec(), [])).toBe(true);

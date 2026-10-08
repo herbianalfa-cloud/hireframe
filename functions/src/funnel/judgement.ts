@@ -229,6 +229,11 @@ export function needsDescriptionPatch(job: Pick<Job, 'flags'>): JobPatch {
   };
 }
 
+/** A dead `describe` claim released: the job waits for a description again (ADR-049). */
+export function releasedClaimPatch(job: Pick<Job, 'flags'>): JobPatch {
+  return { ...needsDescriptionPatch(job), clear: ['describingAt'] };
+}
+
 /**
  * The job as it will be once `patch` is written: fields set, fields cleared, spend added. The
  * store writes the same patch to Firestore; Lookup uses this to build a new job's first state.

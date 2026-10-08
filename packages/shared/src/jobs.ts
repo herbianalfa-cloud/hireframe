@@ -201,8 +201,6 @@ export const JobSchema = JobFunnelFieldsSchema.extend({
   status: z.enum(JOB_STATUSES),
   /** Server time Lookup added the job, set once; only jobs added from Lookup have it (ADR-049). */
   addedAt: z.date().exactOptional(),
-  /** Claim time while a pasted description is being judged; cleared when done (ADR-049). */
-  describingAt: z.date().exactOptional(),
   /** Set with `status: 'applied'` (server time) and removed on leaving it (ADR-038). */
   appliedAt: z.date().exactOptional(),
   /** The job's verdict when it was marked applied. */

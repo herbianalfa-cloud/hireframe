@@ -26,7 +26,7 @@ import {
   type WorkRightsSetting,
 } from '@hireframe/shared';
 
-import { FUNNEL, type FunnelLimits } from '../config.js';
+import { FUNNEL, LOOKUP, type FunnelLimits } from '../config.js';
 import type { LlmCallDeps } from '../llm/call.js';
 import { LlmOutputError, RunBudgetExceededError, SpendCapExceededError } from '../llm/errors.js';
 import { createRunLease, type LeaseStage, type RunLease } from '../llm/lease.js';
@@ -38,6 +38,7 @@ import {
   expiredPatch,
   mergeFlags,
   needsDescriptionPatch,
+  releasedClaimPatch,
   requeuePatch,
   reviewPatch,
   s1PassPatch,
@@ -85,6 +86,11 @@ export interface FunnelStore {
    * Served by the `(next, sortAt desc)` index for all three wait states.
    */
   staleQueued(state: WaitState, before: Date, limit: number): Promise<StoredJob[]>;
+  /**
+   * Jobs whose `describingAt` claim is older than `before`, oldest first (the sweep releases the
+   * ones that never got a verdict, ADR-049).
+   */
+  staleDescribing(before: Date, limit: number): Promise<StoredJob[]>;
   /** Jobs first seen at or after `since` (re-score). */
   recentJobs(since: Date, limit: number): Promise<StoredJob[]>;
   /** Description text by job ID (missing descriptions are left out). */
@@ -420,6 +426,21 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       log.error('funnel.failed', { step: 'sweep', stage, ...errorFields(error) });
       sweepFailed = true;
     }
+  }
+
+  // A `describe` that died after claiming its job leaves it at `next: null` with `describingAt`
+  // set and no verdict: nothing queued it, so it goes back to waiting for a description.
+  try {
+    const claimedBefore = new Date(deps.now().getTime() - LOOKUP.describeClaimStaleMs);
+    const abandoned = (
+      await store.staleDescribing(claimedBefore, deps.limits.expireMaxJobs)
+    ).filter(({ job }) => (job.next ?? null) === null && !job.verdict && !job.judgedAt);
+    for (const entry of abandoned) await write(entry.id, releasedClaimPatch(entry.job));
+    await flush();
+    if (abandoned.length > 0) log.warn('funnel.describe_released', { jobs: abandoned.length });
+  } catch (error) {
+    log.error('funnel.failed', { step: 'describe_sweep', ...errorFields(error) });
+    sweepFailed = true;
   }
 
   // ---- The run's spend lease (ADR-032) ----

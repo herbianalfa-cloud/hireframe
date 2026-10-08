@@ -419,6 +419,28 @@ describe('expiry sweep', () => {
     expect(result.summary.s3.skip).toBeGreaterThanOrEqual(2);
   });
 
+  it('releases a describe claim older than 10 minutes with no verdict, and no other', async () => {
+    const store = memoryFunnelStore();
+    const minutesAgo = (minutes: number) => new Date(TEST_NOW.getTime() - minutes * 60_000);
+    const claimed = (describingAt: Date, extra: Parameters<typeof testJob>[0] = {}) =>
+      testJob({ stage: 's2', next: null, describingAt, flags: ['needs_description'], ...extra });
+    store.add('dead', claimed(minutesAgo(11)));
+    store.add('live', claimed(minutesAgo(3)));
+    store.add('judged', claimed(minutesAgo(30), { verdict: 'skip', judgedAt: minutesAgo(29) }));
+    store.add('queued', claimed(minutesAgo(30), { next: 's3', triage: TRIAGE }));
+    await run(deps(store, { limits: { s2MaxJobs: 0, s3MaxJobs: 0 } }));
+    const dead = store.get('dead');
+    expect(dead.next).toBe('description');
+    expect(dead.describingAt).toBeUndefined();
+    expect(dead.flags).toContain('needs_description');
+    expect(store.get('live')).toMatchObject({ next: null, describingAt: minutesAgo(3) });
+    expect(store.get('judged').next ?? null).toBeNull();
+    expect(store.get('queued').next).toBe('s3');
+    // Back in the waiting list, so a second run leaves it alone.
+    await run(deps(store, { limits: { s2MaxJobs: 0, s3MaxJobs: 0 } }));
+    expect(store.get('dead').next).toBe('description');
+  });
+
   it('leaves the overflow past the sweep limit for the next run', async () => {
     const store = memoryFunnelStore();
     for (let i = 0; i < 5; i++) store.add(`stale${String(i)}`, queuedS2(20 + i));

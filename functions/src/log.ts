@@ -49,6 +49,7 @@ export type LogEvent =
   | 'funnel.review'
   | 'funnel.score_drift'
   | 'funnel.sweep_drift'
+  | 'funnel.describe_released'
   | 'funnel.unsupported_match'
   | 'funnel.overrides_invalid'
   | 'hydrate.failed'
