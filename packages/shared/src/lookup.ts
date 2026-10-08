@@ -157,7 +157,7 @@ const NOISE = [
   /^(\d+ )?results?$/i,
   /^\d+ (new )?jobs?\b/i,
 ];
-/** "£40K/yr", "31K GBP/yr - 48K GBP/yr", "£15 per hour". */
+/** "£40K/yr", "27K GBP/yr - 48K GBP/yr", "£15 per hour". */
 const SALARY_LINE =
   /^(?:[£$€]\s?\d|\d[\d,.]*\s?k?\s?(?:gbp|usd|eur)\b).*(\/(yr|hr|mo)|per (year|hour|month|annum|day)|\bk\b)/i;
 /**

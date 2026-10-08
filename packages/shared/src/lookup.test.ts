@@ -143,7 +143,7 @@ describe('parseResultsPage', () => {
   it('reads a title with brackets of its own and a doubled age', () => {
     const [row] = parseResultsPage(
       [
-        'Lead Data Analyst (6 Month FTC) (Verified job)Lead Data Analyst (6 Month FTC) ',
+        'Insights Lead (9 Month FTC) (Verified job)Insights Lead (9 Month FTC) ',
         'Example Co',
         'London (Hybrid)',
         '3 school alumni work here',
@@ -151,7 +151,7 @@ describe('parseResultsPage', () => {
       ].join('\n\n'),
     );
     expect(row).toEqual({
-      title: 'Lead Data Analyst (6 Month FTC)',
+      title: 'Insights Lead (9 Month FTC)',
       company: 'Example Co',
       location: 'London',
       age: 'Posted 2 weeks ago',
@@ -199,7 +199,7 @@ describe('parseResultsPage', () => {
     const text = [
       'Product Analyst',
       'Cut Off Co',
-      'Harlow',
+      'Carrowby',
       'Posted 2 weeks ago2 weeks ago',
       'Data AnalystData Analyst',
       'No Location Co',
