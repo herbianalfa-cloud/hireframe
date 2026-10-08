@@ -127,6 +127,11 @@ lookup add:  dedupe ─► create (lock, short) ─► S1 ─► S2 ─► ATS b
 - **Races:** model calls run outside the lock, so every write after one is a precondition transaction on the job's `stage`, `next` and `judgedAt`; if a scan moved the job, Lookup's write is dropped and counted.
 - **Never fetched:** LinkedIn (and Indeed, Wellfound, Glassdoor): the HTTP client refuses those hosts before any request. Job-board URLs (Greenhouse, Lever, Ashby, Workable) are read from the official board APIs; any other URL is never fetched.
 
+**The screens** (all lazy, `web/src/features/lookup/`, `web/src/services/lookup.ts`):
+- **Lookup** (`/lookup`): one paste box and **Check**. Links are matched in the browser (`keys array-contains-any`, then `url ==`); a pasted LinkedIn results page is read by `parseResultsPage` (the real copy format: doubled title line, company, location, badges, a doubled age), with job IDs from the HTML's anchors (`pasteAnchors.ts`, `DOMParser` only, never inserted into the page). Seen rows show verdict or state, stage and dates; new rows are previewed and added with one `lookup` call. Below, **Waiting for a description** lists `next == 'description'` jobs (from Lookup or an email alert) with Open on LinkedIn and Paste description.
+- **Today** shows **Added by you** (newest 5 by `addedAt`, a live query mounted after `hf:usable`); **Jobs** has an **Added by you** filter that stands alone; the **job sheet** shows the paste control for a job that needs a description (lazy import of `PasteDescription`).
+- The callable client never retries (`lookupAdd`, `lookupDescribe`, `lookupParse`); all job changes go through the callable, so there are no new client writes or rules.
+
 ## Environments
 - `local`: emulators on the `demo-hireframe` project (can't reach real resources), fake data seeded by `npm run dev`, no real API calls unless `LIVE=1` (ADR-013).
 - `prod`: single Firebase project `hireframe-f6b03`, region `europe-west2`. (Staging not worth it for one user; guarded by emulator tests + eval gate + tagged deploys.)

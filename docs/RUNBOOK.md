@@ -345,7 +345,7 @@ Design: ADR-046 (transport and signing), ADR-047 (parsing), ADR-048 (the lock an
 
 ### Part H: Lookup (M6, PR 6B)
 
-84. **Before the tag, repeat the invoker check on `scheduledScan`** (Part G step 77, H1): the bundle changes, so the deploy rewrites the invoker unless it is exact. Only then merge and tag.
+84. **Before the tag, repeat the invoker check on `scheduledScan`** (Part G step 77, H1): the bundle changes, so the deploy rewrites the invoker unless it is exact. Only then merge and tag `v0.6.2` (`v0.6.1` was funnel intake PR B).
 85. **Invoker binding for `lookup`** (H3), after its first deploy: Part C step 28's loop includes it. Or just this one:
     ```bash
     gcloud functions add-invoker-policy-binding lookup --region=europe-west2 --member=allUsers --project=hireframe-f6b03
@@ -353,7 +353,9 @@ Design: ADR-046 (transport and signing), ADR-047 (parsing), ADR-048 (the lock an
     Public invocation is safe: the callable enforces App Check and the owner check.
 86. **The new index** (H4). Firestore → Indexes: `jobs (next, addedAt desc)` says **Enabled** before the next scheduled run. Until it does, the user-added-first read fails; the stage logs `funnel.failed` with `step: queued_added` and reads the usual order instead.
 87. **Optional: the daily Lookup cap** (H7). Lookup spends at most 25p a day by default. To change it, add `lookup: { dailyCapPence: 40 }` to `config/app` in the console (like `funnel` and `alerts`; a typo is ignored and the default applies).
-88. **Locally**, `npm run dev` seeds two Lookup-added jobs (one with a verdict, one waiting for a description). The Lookup screen and the steps that need it (pasting on the phone, `hf:usable`, Lighthouse) come with the web session.
+88. **On your phone** (H5). Open **Lookup** and paste a LinkedIn link from one of your alerts, then **Check**: it says **Seen**, with the verdict (or its state), the stage it stopped at and the dates; **Open job** opens the sheet. Now open a LinkedIn search results page on your laptop, select all, copy, and paste it into the same box: the preview lists the jobs (the ones Hireframe has seen are marked and can't be ticked) and **Add n jobs** judges the ticked ones at once. Open the posting of one that says it needs a description (**Open on LinkedIn** under **Waiting for a description**), copy its text, **Paste description** → **Judge**: it ends with a verdict. **Today** now shows **Added by you** under the three lists, and **Jobs → Added by you** lists them all. If the preview shows 0 jobs from a page you copied, send Claude the page with the company names and titles replaced by fake ones (never the raw copy), so the parser can be fixed.
+89. **Speed and accessibility** (H6), on your laptop in Chrome, signed in. **DevTools** (⌥⌘I) → **Network** → **Fast 4G**; **Performance** → ⚙️ → CPU **4× slowdown**. With **Disable cache** off, reload **Today** 3 times; after each, run `performance.getEntriesByName('hf:usable')[0].duration` in the Console. The median must be ≤ 2000 ms. Added by you loads after that mark, so it should not move the number; if it does, compare with Today when nothing has been added. Then **Lighthouse** (Mobile, **Accessibility** only, **Clear storage** off) on **Lookup**, **Today** and **Jobs**: each ≥ 95. Paste the numbers in the chat.
+90. **Locally**, `npm run dev` seeds two Lookup-added jobs (one with a verdict, one waiting for a description), so Today shows **Added by you** and Lookup lists one job under **Waiting for a description**. Paste `https://www.linkedin.com/jobs/view/4012345678` (the seeded LinkedIn alert job) to see **Seen**, and `https://www.linkedin.com/jobs/view/4012345680` (the seeded alert job without a description) to see it waiting. Judging a pasted description uses the fake LLM unless `LIVE=1`.
 
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
