@@ -20,9 +20,10 @@ import {
   type CriteriaVersion,
   type IngestMessage,
   type Job,
+  type QuerySpec,
 } from '@hireframe/shared';
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
-import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { getFirestore, type Firestore, type Query } from 'firebase-admin/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { LINKEDIN_ALERT } from '../../packages/shared/src/fixtures/alerts.js';
@@ -44,6 +45,7 @@ import { FAKE_SEED } from '../../functions/src/sources/fixtures.js';
 import { testHttpClient } from '../../functions/src/sources/testing.js';
 import { normaliseRawJob } from '@hireframe/shared';
 import { timestampsToDates } from '../../functions/src/timestamps.js';
+import { lookupKeysSpec, lookupUrlSpec } from '../../web/src/services/lookup.js';
 
 const NOW = new Date('2026-10-08T12:00:00Z');
 const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000);
@@ -305,6 +307,24 @@ describe('queries (ADR-049)', () => {
     expect(await store.queuedAdded('s2', 0)).toEqual([]);
   });
 
+  it('reads dead describe claims, oldest first, and no live or finished ones', async () => {
+    await put('dead', {
+      stage: 's2',
+      next: null,
+      describingAt: new Date(NOW.getTime() - 3_600_000),
+    });
+    await put('older', {
+      stage: 's2',
+      next: null,
+      describingAt: new Date(NOW.getTime() - 7_200_000),
+    });
+    await put('live', { stage: 's2', next: null, describingAt: new Date(NOW.getTime() - 60_000) });
+    await put('plain', { stage: 's2', next: 'description' });
+    const before = new Date(NOW.getTime() - 600_000);
+    const found = await firestoreFunnelStore(db).staleDescribing(before, 10);
+    expect(found.map((entry) => entry.id)).toEqual(['older', 'dead']);
+  });
+
   it('reads watched companies that have a board, and no others', async () => {
     const watched = await firestoreFunnelStore(db).watchedCompanies();
     expect(watched.map((company) => company.id).sort()).toEqual(
@@ -459,6 +479,12 @@ describe('R8 by ID: a LinkedIn alert job is found by every URL form', () => {
       },
       [message()],
     );
+    // The alert job is judged later, the way a scan would leave it.
+    const judgedAt = new Date(NOW.getTime() + 60_000);
+    const [ingested] = (await db.collection('jobs').get()).docs.filter((doc) =>
+      (doc.get('keys') as string[]).includes('linkedin:4012345678'),
+    );
+    await ingested?.ref.update({ stage: 's3', verdict: 'apply', judgedAt });
     const forms = [
       'https://www.linkedin.com/jobs/view/4012345678/',
       'https://www.linkedin.com/jobs/view/4012345678/?trackingId=x&refId=y',
@@ -466,20 +492,26 @@ describe('R8 by ID: a LinkedIn alert job is found by every URL form', () => {
       'https://www.linkedin.com/jobs/view/product-analyst-at-acme-analytics-4012345678',
       'https://www.linkedin.com/jobs/search/?keywords=a&currentJobId=4012345678',
     ];
+    // The web app's own specs, run here with the Admin SDK (same filters and ordering).
+    const runSpec = async (spec: QuerySpec) => {
+      const filtered = spec.filters.reduce<Query>(
+        (query, filter) => query.where(filter.field, filter.op, filter.value),
+        db.collection(spec.collection),
+      );
+      return spec.orderBy
+        .reduce((query, order) => query.orderBy(order.field, order.direction), filtered)
+        .get();
+    };
     for (const form of forms) {
       const [target] = parseLookupInput(form);
-      const spec = jobsByKeysSpec(target?.keys ?? []);
-      const snapshot = await db
-        .collection(spec.collection)
-        .where('keys', 'array-contains-any', target?.keys ?? [])
-        .get();
+      const snapshot = await runSpec(lookupKeysSpec(target?.keys ?? []));
       expect(snapshot.docs, form).toHaveLength(1);
-      expect(JobSchema.parse(timestampsToDates(snapshot.docs[0]?.data()))).toMatchObject({
-        stage: 's0',
-        status: 'new',
-      });
+      const job = JobSchema.parse(timestampsToDates(snapshot.docs[0]?.data()));
+      expect(job, form).toMatchObject({ stage: 's3', verdict: 'apply', status: 'new' });
+      expect(job.firstSeenAt, form).toEqual(NOW);
+      expect(job.judgedAt, form).toEqual(judgedAt);
       // And by canonical URL, the way the browser's second query matches a job with no key.
-      const byUrl = await db.collection('jobs').where('url', '==', target?.url).get();
+      const byUrl = await runSpec(lookupUrlSpec(target?.url ?? ''));
       expect(byUrl.docs, form).toHaveLength(form.includes('currentJobId') ? 0 : 1);
     }
     // Lookup would not add it again.

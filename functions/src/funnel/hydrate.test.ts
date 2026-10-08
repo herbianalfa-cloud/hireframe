@@ -124,6 +124,26 @@ describe('ATS hydrator', () => {
     expect(hydrator.counts()).toEqual({ attempted: 1, ok: 1, failed: 0 });
   });
 
+  it('counts a failure and attaches nothing when the run deadline has passed', async () => {
+    const attached: string[] = [];
+    const hydrator = createAtsHydrator({
+      search: createAtsSearch({
+        // The test client's clock starts at 2026-10-01T08:00Z; its deadline is a minute earlier.
+        http: testHttpClient({ deadline: Date.parse('2026-10-01T07:59:00Z') }),
+        watched: () => Promise.resolve(FAKE_WATCHLIST),
+        maxBoards: 5,
+      }),
+      attach: (entry) => {
+        attached.push(entry.id);
+        return Promise.resolve();
+      },
+      now: () => TEST_NOW,
+    });
+    expect(await hydrator.fullText({ id: 'j1', job: alertJob() })).toBeNull();
+    expect(attached).toEqual([]);
+    expect(hydrator.counts()).toEqual({ attempted: 1, ok: 0, failed: 1 });
+  });
+
   it('is silent for a company that is not on the watchlist (not an attempt)', async () => {
     const { hydrator, attached } = atsSetup();
     expect(

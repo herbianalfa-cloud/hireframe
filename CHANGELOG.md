@@ -20,6 +20,13 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - **Query specs and indexes:** `lookupKeysSpec`, `lookupUrlSpec`, `needsDescriptionSpec` and `addedByYouSpec`, checked against `firestore.indexes.json` ("serves every Lookup query"). No new client writes, rules or index.
   - **Bundle:** initial JS 292.9 → 293.1 kB gzip (limit 300); Lookup (5.2 kB), its paste control (5.1 kB with the Functions SDK) and the job sheet (5.7 kB, now shared) are lazy chunks.
 
+### Fixed
+- **Review of PR 6B.**
+  - **The HTTP client checks every redirect.** It follows at most 3 hops by hand and refuses a hop to a forbidden host (`forbidden_host`) before any request. The forbidden list is now the default for every client (the watchlist detector included) and covers `angel.co`, `lnkd.in` and the Indeed and Glassdoor country domains.
+  - **Board host pauses are carried and saved** for the scan's ATS hydrator and for Lookup: a Retry-After beyond the cap is honoured by the next scan and Lookup, on the ATS source's health record.
+  - **A dead `describe` no longer strands a job.** The expiry sweep returns a claim older than 10 minutes with no verdict to `next: 'description'` (`funnel.describe_released`); `describingAt` joins the funnel fields.
+  - Tests: redirects and the default list, the hydrator's wiring and deadline, the sweep, the unretried Lookup call, and the R8 match through the web specs with verdict and dates. Invented title, town and salary replace strings that looked copied from a real paste.
+
 ### Changed
 - **The results-page parser reads the real LinkedIn copy format.** A card is its title twice on one line (a verified job has ` (Verified job)` between the copies), then the company, the location (a bare town, or with `(Hybrid)` / `(Remote)` / `(On-site)`), badges and alumni lines, a salary such as `27K GBP/yr`, `Viewed`, and an age that is also doubled (`Posted 1 week ago1 week ago`). Cards are found by the doubled title, so bare towns work; the age is read once. The assumed format and its fixture are replaced (fake values only). A copy that begins mid-card loses that card.
 - The Lookup nav entry's text no longer says "Coming soon".
