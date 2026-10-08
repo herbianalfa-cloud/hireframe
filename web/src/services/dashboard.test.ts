@@ -2,7 +2,10 @@ import { DEFAULT_MONTHLY_CAP_PENCE } from '@hireframe/shared';
 import { getCountFromServer, getDocs, onSnapshot } from 'firebase/firestore';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Run } from '@hireframe/shared';
+
 import { hfMarks, resetMarksForTest } from '@/lib/perf';
+import type { LiveState } from './profile';
 
 import {
   loadAgreement,
@@ -11,6 +14,7 @@ import {
   lastRunSpec,
   resolveCapPence,
   spendViewFrom,
+  watchLastRun,
   watchTodayList,
 } from './dashboard';
 
@@ -192,5 +196,41 @@ describe('summary bar queries', () => {
       filters: [],
       orderBy: [{ field: 'startedAt', direction: 'desc' }],
     });
+  });
+});
+
+describe('watchLastRun', () => {
+  const VALID_RUN = {
+    trigger: 'schedule',
+    status: 'succeeded',
+    startedAt: NOW,
+    perSource: {},
+    perStage: {},
+    costPence: 0,
+    errors: [],
+    schemaVersion: 1,
+  };
+
+  async function lastRunStates(docs: Record<string, unknown>[]) {
+    const states: LiveState<Run | null>[] = [];
+    vi.mocked(onSnapshot).mockImplementation(((_q: unknown, next: (s: unknown) => void) => {
+      next({ docs: docs.map((data, i) => ({ id: `r${String(i)}`, data: () => data })) });
+      return () => undefined;
+    }) as never);
+    watchLastRun((state) => states.push(state));
+    await vi.waitFor(() => {
+      expect(states.length).toBeGreaterThan(1);
+    });
+    return states.at(-1);
+  }
+
+  it('is ready with the run, or ready with null when there is none', async () => {
+    expect(await lastRunStates([VALID_RUN])).toMatchObject({ status: 'ready', invalid: 0 });
+    expect(await lastRunStates([])).toEqual({ status: 'ready', data: null, invalid: 0 });
+  });
+
+  it('is an error, not "no runs yet", when the newest run document is invalid', async () => {
+    const state = await lastRunStates([{ trigger: 'schedule' }]);
+    expect(state?.status).toBe('error');
   });
 });

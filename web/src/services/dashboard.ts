@@ -88,8 +88,9 @@ export function todayListSpec(list: TodayListId): QuerySpec {
 }
 
 /**
- * The summary bar's counts (ADR-051). Near miss and wildcard are separate: each is served by
- * `(verdict, status, judgedAt desc)`. The applied count carries an explicit descending order so
+ * The summary bar's counts (ADR-051). Apply, near miss and wildcard are separate equality-only
+ * counts with no orderBy, so Firestore serves them by merging the single-field indexes on
+ * `verdict` and `status`; they need no composite index. The applied count carries an explicit descending order so
  * its descending index serves it; unordered, a range query scans ascending and needs its own.
  */
 export function summarySpecs(now: Date) {
@@ -263,11 +264,13 @@ export function watchLastRun(callback: (state: LiveState<Run | null>) => void): 
             return;
           }
           const parsed = RunSchema.safeParse(timestampsToDates(first.data()));
-          callback({
-            status: 'ready',
-            data: parsed.success ? parsed.data : null,
-            invalid: parsed.success ? 0 : 1,
-          });
+          if (!parsed.success) {
+            // An unreadable run is not "no runs yet": the bar says "Unavailable".
+            logError('dashboard.last_run_invalid', {});
+            callback({ status: 'error', message: "The last run couldn't be read." });
+            return;
+          }
+          callback({ status: 'ready', data: parsed.data, invalid: 0 });
         },
         (error) => {
           logError('dashboard.last_run_failed', { code: error.code });
