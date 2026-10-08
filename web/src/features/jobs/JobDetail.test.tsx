@@ -346,6 +346,16 @@ describe('JobDetail', () => {
       expect(await screen.findByText('Judged: Apply')).toBeDefined();
     });
 
+    it('hides the Description section for a job with no stored description', () => {
+      show({ descriptionKind: 'none' });
+      open();
+      expect(screen.queryByRole('button', { name: 'Show description' })).toBeNull();
+      cleanup();
+      show({ descriptionKind: 'full' });
+      open();
+      expect(screen.getByRole('button', { name: 'Show description' })).toBeDefined();
+    });
+
     it('does not offer the paste control for a judged or queued job', () => {
       show();
       open();

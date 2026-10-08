@@ -6,6 +6,7 @@ import {
   type LookupOutcome,
   type LookupRow,
   type LookupTarget,
+  linkedInJobId,
   type PasteLink,
 } from '@hireframe/shared';
 import { Loader2, Search } from 'lucide-react';
@@ -36,6 +37,8 @@ import { WaitingList } from './WaitingList';
 interface Checked {
   targets: { target: LookupTarget; view: JobView | null }[];
   rows: PreviewRow[];
+  /** Distinct job-view links in the paste, to show how many the card reader missed. */
+  linkCount: number;
   /** A long paste neither parser could read: the owner may ask the model once. */
   unreadable: boolean;
 }
@@ -56,6 +59,11 @@ type AddState =
       entries: { label: string; outcome: LookupOutcome }[];
       note: string | null;
     };
+
+/** How many different LinkedIn jobs the pasted page links to (a card can link twice). */
+function distinctJobLinks(links: readonly PasteLink[]): number {
+  return new Set(links.map((link) => linkedInJobId(link.href))).size;
+}
 
 /** A paste this long that no parser reads is worth one cheap model call. */
 const UNREADABLE_MIN_CHARS = 200;
@@ -113,6 +121,7 @@ export function LookupPage() {
         checked: {
           targets: targets.map((target, index) => ({ target, view: targetViews[index] ?? null })),
           rows: rows.map((row, index) => ({ row, view: rowViews[index] ?? null })),
+          linkCount: distinctJobLinks(links),
           unreadable:
             targets.length === 0 && rows.length === 0 && text.length >= UNREADABLE_MIN_CHARS,
         },
@@ -137,6 +146,7 @@ export function LookupPage() {
         checked: {
           targets: [],
           rows: parsed.rows.map((row, index) => ({ row, view: views[index] ?? null })),
+          linkCount: 0,
           unreadable: false,
         },
       });
@@ -300,6 +310,7 @@ export function LookupPage() {
       {ready && ready.rows.length > 0 ? (
         <RowsPreview
           rows={ready.rows}
+          linkCount={ready.linkCount}
           picked={picked}
           adding={add.status === 'adding'}
           onPick={(index, on) => {

@@ -427,7 +427,7 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
         </Section>
       ) : null}
 
-      <Description jobId={view.id} />
+      {job.descriptionKind === 'none' ? null : <Description jobId={view.id} />}
 
       <Section title="Sources">
         <ul className="space-y-1">

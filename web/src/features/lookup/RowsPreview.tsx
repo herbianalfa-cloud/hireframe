@@ -19,6 +19,7 @@ export interface PreviewRow {
  */
 export function RowsPreview({
   rows,
+  linkCount = 0,
   picked,
   adding,
   onPick,
@@ -26,19 +27,22 @@ export function RowsPreview({
   onAdd,
 }: {
   rows: readonly PreviewRow[];
+  /** Distinct LinkedIn job-view links in the paste; more than the rows read means cards were missed. */
+  linkCount?: number;
   picked: ReadonlySet<number>;
   adding: boolean;
   onPick: (index: number, on: boolean) => void;
   onOpen: (jobId: string) => void;
   onAdd: () => void;
 }) {
+  const unread = Math.max(0, linkCount - rows.length);
   const fresh = rows.filter((item) => item.view === null).length;
   return (
     <section aria-labelledby="preview-title" className="mt-6">
       <h2 id="preview-title" className="text-sm font-medium">
         Jobs on this page
         <span className="ml-2 font-mono text-xs text-muted-foreground tabular-nums">
-          {rows.length} read · {fresh} new
+          {rows.length} read · {fresh} new{unread > 0 ? ` · ${String(unread)} not read` : ''}
         </span>
       </h2>
       <ul
