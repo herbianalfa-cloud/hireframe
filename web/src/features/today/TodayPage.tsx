@@ -21,6 +21,7 @@ import { TODAY_LISTS, TODAY_LIST_SIZE, type TodayListId } from '@/services/dashb
 
 import { useTodayKpis, useTodayList, type KpiState } from './hooks';
 import { SpendMeter } from './SpendMeter';
+import { AddedByYou } from './AddedByYou';
 import { useTodaySort } from './sortPreference';
 
 const GAP_OPTIONS = GAP_FILTERS.map((value) => ({ value, label: GAP_LABELS[value] }));
@@ -235,6 +236,8 @@ export function TodayPage() {
     criteria.status === 'ready' ? criteria.criteria.weekly_target : CRITERIA_SEED_V1.weekly_target;
   const kpis = useTodayKpis(refreshKey);
   const [applyReady, setApplyReady] = useState(false);
+  // Set once `hf:usable` is marked; later reads (Added by you) start only after it.
+  const [usable, setUsable] = useState(false);
   const measured = useRef(false);
   const [now] = useState(() => new Date());
 
@@ -249,6 +252,7 @@ export function TodayPage() {
     } catch {
       // Measuring is a convenience; Today works without it.
     }
+    setUsable(true);
   }, [kpis.status, applyReady]);
 
   const changed = useCallback(() => {
@@ -279,6 +283,7 @@ export function TodayPage() {
           {...(list === 'apply' ? { onReady: markApplyReady } : {})}
         />
       ))}
+      {usable ? <AddedByYou now={now} onOpen={open} onCommitted={changed} /> : null}
       {jobId ? (
         <JobDetail
           jobId={jobId}

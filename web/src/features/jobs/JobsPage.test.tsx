@@ -104,6 +104,52 @@ describe('JobsPage', () => {
     expect(screen.getByLabelText<HTMLSelectElement>('Verdict').disabled).toBe(true);
   });
 
+  it('shows only jobs added from Lookup when asked, standing alone like Needs review', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha']));
+    const probe = setup('?verdict=apply');
+    await screen.findByText('Alpha');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Added by you' }));
+    await waitFor(() => {
+      expect(loadJobsPage).toHaveBeenLastCalledWith({ addedByYou: true });
+    });
+    expect(probe.location()).toBe('/jobs?added=1');
+    expect(screen.getByLabelText<HTMLSelectElement>('Verdict').disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLSelectElement>('Status').disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLSelectElement>(/^Sort/).disabled).toBe(true);
+    // Paged from Firestore, never the 300-job window.
+    expect(loadJobsWindow).not.toHaveBeenCalled();
+  });
+
+  it('turns Needs review off when Added by you is turned on, and the other way round', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page(['Alpha']));
+    setup('?review=1');
+    await screen.findByText('Alpha');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Added by you' }));
+    await waitFor(() => {
+      expect(loadJobsPage).toHaveBeenLastCalledWith({ addedByYou: true });
+    });
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'Needs review' }).checked).toBe(
+      false,
+    );
+  });
+
+  it('pages jobs added from Lookup with the cursor', async () => {
+    const cursor = { id: 'cursor' };
+    vi.mocked(loadJobsPage)
+      .mockResolvedValueOnce(page(['Alpha'], cursor))
+      .mockResolvedValueOnce(page(['Beta']));
+    setup('?added=1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+    expect(await screen.findByText('Beta')).toBeDefined();
+    expect(loadJobsPage).toHaveBeenLastCalledWith({ addedByYou: true }, cursor);
+  });
+
+  it('has its own empty state', async () => {
+    vi.mocked(loadJobsPage).mockResolvedValue(page([]));
+    setup('?added=1');
+    expect(await screen.findByText('Nothing added from Lookup yet')).toBeDefined();
+  });
+
   it('loads more with the cursor and appends', async () => {
     const cursor = { id: 'cursor' };
     vi.mocked(loadJobsPage)
