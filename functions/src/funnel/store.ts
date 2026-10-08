@@ -21,6 +21,7 @@ import { FieldValue, type Firestore, type Query } from 'firebase-admin/firestore
 
 import { SCAN } from '../config.js';
 import type { HostPause } from '../http/client.js';
+import { ATS_SOURCE_IDS, mergePauses, pausesBySource } from '../sources/ats-pauses.js';
 import type { WatchedCompany } from '../sources/types.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
@@ -69,6 +70,18 @@ export interface FirestoreFunnelStore extends FunnelStore {
   /** Hosts Reed's last scan was told to stay away from (a long Retry-After). */
   reedPauses(): Promise<HostPause[]>;
   saveReedQuota(quota: Quota): Promise<void>;
+  /** Hosts the ATS sources' last scans were told to stay away from (still in force). */
+  atsPauses(now: Date): Promise<HostPause[]>;
+  /** Saves pauses the ATS search was given, on the source that owns each host (ADR-049). */
+  saveAtsPauses(pauses: readonly HostPause[], now: Date): Promise<void>;
+}
+
+/** `sources/{id}.pausedHosts` as pauses; anything invalid reads as none. */
+function storedPauses(value: unknown): HostPause[] {
+  const parsed = SourceHealthSchema.shape.pausedHosts.safeParse(timestampsToDates(value));
+  return parsed.success
+    ? parsed.data.map(({ host, until }) => ({ host, until: until.getTime() }))
+    : [];
 }
 
 export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
@@ -303,12 +316,34 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
 
     async reedPauses() {
       const snapshot = await db.doc(PATHS.source('reed')).get();
-      const parsed = SourceHealthSchema.shape.pausedHosts.safeParse(
-        timestampsToDates(snapshot.get('pausedHosts')),
+      return storedPauses(snapshot.get('pausedHosts'));
+    },
+
+    async atsPauses(now) {
+      const snapshots = await db.getAll(...ATS_SOURCE_IDS.map((id) => db.doc(PATHS.source(id))));
+      return mergePauses(
+        snapshots.flatMap((snapshot) => storedPauses(snapshot.get('pausedHosts'))),
+        [],
+        now.getTime(),
       );
-      return parsed.success
-        ? parsed.data.map(({ host, until }) => ({ host, until: until.getTime() }))
-        : [];
+    },
+
+    async saveAtsPauses(pauses, now) {
+      for (const [id, fresh] of pausesBySource(pauses)) {
+        const ref = db.doc(PATHS.source(id));
+        await db.runTransaction(async (tx) => {
+          const merged = mergePauses(
+            storedPauses((await tx.get(ref)).get('pausedHosts')),
+            fresh,
+            now.getTime(),
+          );
+          tx.set(
+            ref,
+            { pausedHosts: merged.map(({ host, until }) => ({ host, until: new Date(until) })) },
+            { merge: true },
+          );
+        });
+      }
     },
 
     async saveReedQuota(quota) {

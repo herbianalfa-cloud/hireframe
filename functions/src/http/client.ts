@@ -207,7 +207,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       if (!REDIRECT_STATUS.has(response.status)) return response;
       void response.body?.cancel().catch(() => undefined);
       const location = response.headers.get('location');
-      let next: URL | null = null;
+      let next: URL | null;
       try {
         next = location ? new URL(location, target) : null;
       } catch {

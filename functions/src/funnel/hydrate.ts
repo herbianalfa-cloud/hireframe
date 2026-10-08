@@ -83,6 +83,8 @@ export interface AtsHydratorDeps {
   /** Saves the posting's text, source and keys on the job. */
   attach: (entry: StoredJob, match: AtsMatch, now: Date) => Promise<void>;
   now: () => Date;
+  /** Called once when the run ends: saves the host pauses the search was given. */
+  savePauses?: () => Promise<void>;
 }
 
 /**
@@ -122,7 +124,7 @@ export function createAtsHydrator(deps: AtsHydratorDeps): Hydrator {
       return text;
     },
     counts: () => ({ ...counts }),
-    finish: () => Promise.resolve(),
+    finish: () => deps.savePauses?.() ?? Promise.resolve(),
   };
 }
 

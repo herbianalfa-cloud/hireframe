@@ -22,6 +22,7 @@ import {
 } from '../config.js';
 import { getCurrentCriteria } from '../criteria.js';
 import { safeHandler } from '../errors.js';
+import { errorFields, log } from '../log.js';
 import { firestoreFunnelStore } from '../funnel/store.js';
 import { scanHttpClient } from '../http/scan-client.js';
 import { anthropicTransport } from '../llm/transport.js';
@@ -47,41 +48,57 @@ export const lookup = onCall(
   safeHandler('lookup', async (request): Promise<LookupResult> => {
     const config = await requireOwner(request);
     const startedAtMs = Date.now();
-    return lookupHandler(request.data, async () => {
-      const firestore = db();
-      const fakes = useFakes ? await loadDevFakes() : null;
-      const fetchImpl = fakes ? (fakes.fakeFetch as typeof fetch) : fetch;
-      const overrides = LookupOverridesSchema.safeParse(config.lookup ?? {});
-      const dailyCapPence =
-        (overrides.success ? overrides.data.dailyCapPence : undefined) ?? LOOKUP.dailyCapPence;
-      const funnel = firestoreFunnelStore(firestore);
-      return {
-        scan: firestoreScanStore(firestore),
-        store: firestoreLookupStore(firestore),
-        funnel,
-        readCriteria: () => getCurrentCriteria(firestore),
-        llm: {
-          transport: fakes ? fakes.fakeTransport() : anthropicTransport(anthropicApiKey.value()),
-          usage: dailyCapped(firestoreUsageStore(firestore), 'lookup', dailyCapPence),
-          capPence: config.monthlyCapPence ?? DEFAULT_MONTHLY_CAP_PENCE,
-          fxUsdToGbp: config.fxUsdToGbp ?? DEFAULT_FX_USD_TO_GBP,
-          // Reservation IDs start with the cap's key, so the day's live ones can be summed.
-          newId: () => `lookup-${randomUUID()}`,
-        },
-        // Boards are fetched like a scan does (robots, User-Agent, spacing); LinkedIn never is.
-        ats: createAtsSearch({
-          http: scanHttpClient(fetchImpl, startedAtMs + LOOKUP.deadlineMs, []),
-          watched: () => funnel.watchedCompanies(),
-          maxBoards: LOOKUP.atsBoardsPerCall,
-        }),
-        now: () => new Date(),
-        clock: Date.now,
-        sleep: (ms) =>
-          new Promise((resolve) => {
-            setTimeout(resolve, ms);
+    // Pauses the boards sent during this call are saved for the next scan or Lookup, even if the
+    // call fails.
+    let savePauses: () => Promise<void> = () => Promise.resolve();
+    try {
+      return await lookupHandler(request.data, async () => {
+        const firestore = db();
+        const fakes = useFakes ? await loadDevFakes() : null;
+        const fetchImpl = fakes ? (fakes.fakeFetch as typeof fetch) : fetch;
+        const overrides = LookupOverridesSchema.safeParse(config.lookup ?? {});
+        const dailyCapPence =
+          (overrides.success ? overrides.data.dailyCapPence : undefined) ?? LOOKUP.dailyCapPence;
+        const funnel = firestoreFunnelStore(firestore);
+        // Boards are fetched like a scan does (robots, User-Agent, spacing, the pauses earlier
+        // runs were given); LinkedIn never is.
+        const http = scanHttpClient(
+          fetchImpl,
+          startedAtMs + LOOKUP.deadlineMs,
+          await funnel.atsPauses(new Date()),
+        );
+        savePauses = () => funnel.saveAtsPauses(http.pauses(), new Date());
+        return {
+          scan: firestoreScanStore(firestore),
+          store: firestoreLookupStore(firestore),
+          funnel,
+          readCriteria: () => getCurrentCriteria(firestore),
+          llm: {
+            transport: fakes ? fakes.fakeTransport() : anthropicTransport(anthropicApiKey.value()),
+            usage: dailyCapped(firestoreUsageStore(firestore), 'lookup', dailyCapPence),
+            capPence: config.monthlyCapPence ?? DEFAULT_MONTHLY_CAP_PENCE,
+            fxUsdToGbp: config.fxUsdToGbp ?? DEFAULT_FX_USD_TO_GBP,
+            // Reservation IDs start with the cap's key, so the day's live ones can be summed.
+            newId: () => `lookup-${randomUUID()}`,
+          },
+          ats: createAtsSearch({
+            http,
+            watched: () => funnel.watchedCompanies(),
+            maxBoards: LOOKUP.atsBoardsPerCall,
           }),
-        startedAtMs,
-      };
-    });
+          now: () => new Date(),
+          clock: Date.now,
+          sleep: (ms) =>
+            new Promise((resolve) => {
+              setTimeout(resolve, ms);
+            }),
+          startedAtMs,
+        };
+      });
+    } finally {
+      await savePauses().catch((error: unknown) => {
+        log.warn('lookup.pauses_not_saved', errorFields(error));
+      });
+    }
   }),
 );
