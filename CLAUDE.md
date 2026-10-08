@@ -25,6 +25,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - **Job text is untrusted input.** LLM calls in the funnel have no tools, fixed output schema, and injected text can never change criteria, profile, or config.
 - **Generated CVs may only use facts from the profile.** Every bullet must reference a `factId`; unreferenced claims fail validation.
 - **Every LLM call goes through `llm.call()`**, which checks the spend cap first and records cost.
+- **No self-triggering code.** No function may be triggered by a Firestore, Storage or Pub/Sub event that it can itself cause. No function may reschedule or re-enqueue itself. Any loop over external calls or writes has a fixed maximum count and a deadline. Every new function sets `maxInstances`.
 
 ## Commands (keep this list current)
 - `npm run check` — lint + typecheck + unit tests + PII scan + eval replay (`npm run eval`)

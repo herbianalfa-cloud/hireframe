@@ -3,6 +3,8 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Changed
+- Docs: billing-guards plan for M8 (`docs/plans/m8-billing-guards.md`) and a new hard rule against self-triggering code in `CLAUDE.md`.
 
 ## [0.6.3] - 2026-10-08
 ### Added
