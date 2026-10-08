@@ -369,7 +369,7 @@ describe('Added by you', () => {
     expect(order).toEqual(['measure:hf:usable', 'added']);
   });
 
-  it('does not start while the Apply list is still loading', async () => {
+  it('does not start while the Apply list is still loading', () => {
     setup({ apply: { status: 'loading' } });
     expect(screen.getByRole('status', { name: 'Loading numbers' })).toBeDefined();
     expect(watchAddedByYou).not.toHaveBeenCalled();
