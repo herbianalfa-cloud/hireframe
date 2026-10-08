@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { canonicalAlertUrl, canonicalLinkedInJobUrl, linkedInJobId } from './alerts/links.js';
 import { JOB_LIMITS } from './jobs.js';
-import { keysFromUrl, parseLocation } from './normalise.js';
+import { keysFromUrl } from './normalise.js';
 import { VERDICTS } from './funnel.js';
 
 /**
@@ -141,6 +141,7 @@ export type PasteLink = z.infer<typeof PasteLinkSchema>;
 
 /** Lines that decorate a card but carry no job data. */
 const NOISE = [
+  /^[·•]$/,
   /^promoted$/i,
   /^viewed$/i,
   /^saved$/i,
@@ -149,66 +150,90 @@ const NOISE = [
   /^easy apply$/i,
   /^actively (recruiting|reviewing applicants)$/i,
   /^be an early applicant$/i,
-  /^top applicant$/i,
+  /^(you['’]d be a )?top applicant$/i,
   /^dismiss\b/i,
   /^\d+\+? (applicants?|connections?|school alumni|alumni|people clicked apply)\b/i,
   /^\d+ (connection|alum)/i,
   /^(\d+ )?results?$/i,
   /^\d+ (new )?jobs?\b/i,
 ];
-const SALARY_LINE = /^[£$€]\s?\d.*(\/(yr|hr|mo)|per (year|hour|month|annum|day)|\bk\b)/i;
+/** "£40K/yr", "31K GBP/yr - 48K GBP/yr", "£15 per hour". */
+const SALARY_LINE =
+  /^(?:[£$€]\s?\d|\d[\d,.]*\s?k?\s?(?:gbp|usd|eur)\b).*(\/(yr|hr|mo)|per (year|hour|month|annum|day)|\bk\b)/i;
+/**
+ * An age line: "3 days ago", "Reposted 1 week ago", "Just now". The page copies the visible text
+ * and the screen-reader text run together ("Posted 1 week ago1 week ago"), so a repeat is allowed.
+ */
 const AGE_LINE =
-  /^(?:(?:reposted|posted)\s+)?(just now|\d+\s*(?:second|minute|hour|day|week|month)s?\s+ago)\b/i;
+  /^((?:reposted|posted)\s+)?(just now|\d+\s*(?:second|minute|hour|day|week|month)s?\s+ago)(?:\s*\2)?$/i;
 const MODE_SUFFIX = /\((remote|hybrid|on-?site)\)\s*$/i;
+const VERIFIED_MARK = /\s*\(verified job\)/gi;
 const VERIFICATION_SUFFIX = /\s+with verification$/i;
+/** A title shown twice, optionally with a space between the copies. */
+const DOUBLED = /^(.{2,}?) ?\1$/;
 
 function isNoise(line: string): boolean {
   return NOISE.some((pattern) => pattern.test(line)) || SALARY_LINE.test(line);
 }
 
-function isLocationLine(line: string): boolean {
-  // A place, not a sentence that happens to name one.
-  if (line.length > 80 || line.split(' ').length > 9 || /[.!?]$/.test(line)) return false;
-  return MODE_SUFFIX.test(line) || parseLocation(line).country !== 'unknown';
+/** The age on a line, once and in one piece ("Posted 1 week ago"), or undefined. */
+function ageOf(line: string): string | undefined {
+  const match = AGE_LINE.exec(line);
+  return match?.[2] ? `${match[1] ?? ''}${match[2]}`.replace(/\s+/g, ' ') : undefined;
 }
 
+/** A card's title line is the title twice; this is the title once, or null for any other line. */
+function doubledTitle(line: string): string | null {
+  const bare = line.replace(VERIFIED_MARK, '').trim();
+  return DOUBLED.exec(bare)?.[1]?.trim() ?? null;
+}
+
+/** A link's text or a title line reduced to the title, for pairing (case and spacing ignored). */
 function titleKey(text: string): string {
-  return text.replace(VERIFICATION_SUFFIX, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const bare = text
+    .replace(/\s+/g, ' ')
+    .replace(VERIFIED_MARK, '')
+    .replace(VERIFICATION_SUFFIX, '')
+    .trim();
+  return (DOUBLED.exec(bare)?.[1] ?? bare).trim().toLowerCase();
 }
 
 /**
- * Jobs on a pasted LinkedIn results page (plain text of "select all, copy"), at most 50. A card
- * is the lines around its location line: title (often shown twice), company, location, then
- * badges, salary and an age line such as "3 days ago", "Reposted 1 week ago" or "Just now".
- * `links` are the page's anchors (href and text) from the paste's HTML; each card's title is
- * paired with the first unused `/jobs/view/{id}` anchor of the same text, in page order, which is
- * the only way a LinkedIn ID is read. Without links the rows have no ID and match by title,
- * company and city. Pure and tolerant: a card that doesn't fit the shape is left out, not guessed.
+ * Jobs on a pasted LinkedIn results page (plain text of "select all, copy"), at most 50. In a real
+ * copy a card is: the title twice in one line (a verified job has "(Verified job)" between the
+ * copies), the company, the location (a bare town, or with a trailing "(Hybrid)"), then badges,
+ * a salary, "Viewed" and an age such as "Posted 1 week ago1 week ago". Cards are found by their
+ * doubled title line. `links` are the page's anchors (href and text) from the paste's HTML; each
+ * card's title is paired with the first unused `/jobs/view/{id}` anchor of the same text, in page
+ * order, which is the only way a LinkedIn ID is read. Without links the rows have no ID and match
+ * by title, company and city. Pure and tolerant: a card that doesn't fit the shape is left out
+ * (a copy that begins mid-card loses that card), never guessed.
  */
 export function parseResultsPage(text: string, links: readonly PasteLink[] = []): LookupRow[] {
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter((line) => line !== '' && !(isNoise(line) && !AGE_LINE.test(line)));
+    .filter((line) => line !== '' && !(isNoise(line) && ageOf(line) === undefined));
 
-  const locations: number[] = [];
+  const starts: number[] = [];
   lines.forEach((line, index) => {
-    if (index >= 2 && !AGE_LINE.test(line) && isLocationLine(line)) locations.push(index);
+    if (doubledTitle(line) !== null) starts.push(index);
   });
 
   const rows: LookupRow[] = [];
   let anchor = 0;
-  locations.forEach((at, order) => {
-    const company = lines[at - 1];
-    const title = lines[at - 2];
-    const location = lines[at];
-    if (!company || !title || !location || company.length > 120 || title.length > 200) return;
-    // A line just before the location that is itself a location or an age isn't a company.
-    if (AGE_LINE.test(company) || AGE_LINE.test(title) || locations.includes(at - 1)) return;
-    const nextTitleAt = (locations[order + 1] ?? lines.length + 3) - 3;
+  starts.forEach((at, order) => {
+    const title = doubledTitle(lines[at] ?? '');
+    const company = lines[at + 1];
+    const location = lines[at + 2];
+    const end = starts[order + 1] ?? lines.length;
+    if (!title || !company || !location || at + 2 >= end) return;
+    if (company.length > 120 || title.length > 200) return;
+    // A company or location that is an age line means the card is missing a part.
+    if (ageOf(company) !== undefined || ageOf(location) !== undefined) return;
     const age = lines
-      .slice(at + 1, Math.max(at + 1, nextTitleAt + 1))
-      .map((line) => AGE_LINE.exec(line)?.[0])
+      .slice(at + 3, end)
+      .map(ageOf)
       .find((found): found is string => found !== undefined);
 
     const wanted = titleKey(title);
@@ -224,7 +249,7 @@ export function parseResultsPage(text: string, links: readonly PasteLink[] = [])
     }
 
     const row = LookupRowSchema.safeParse({
-      title: title.replace(VERIFICATION_SUFFIX, ''),
+      title,
       company,
       location: location.replace(MODE_SUFFIX, '').trim(),
       ...(age ? { age } : {}),
@@ -247,7 +272,7 @@ const AGE_MS: Readonly<Record<string, number>> = {
 /** An approximate posting date from an age such as "3 days ago" (a month counts as 30 days). */
 export function ageToPostedAt(age: string, now: Date): Date | undefined {
   const match = AGE_LINE.exec(age.trim());
-  const found = match?.[1]?.toLowerCase();
+  const found = match?.[2]?.toLowerCase();
   if (!found) return undefined;
   if (found === 'just now') return new Date(now.getTime());
   const parts = /^(\d+)\s*([a-z]+?)s?\s+ago$/.exec(found);

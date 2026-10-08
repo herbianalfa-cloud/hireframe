@@ -116,19 +116,46 @@ describe('parseResultsPage', () => {
     expect(rows[0]).toMatchObject({
       title: 'Product Analyst',
       company: 'Acme Analytics',
-      location: 'London, England, United Kingdom (Hybrid)'.replace(/ \(Hybrid\)$/, ''),
-      age: 'Just now',
+      location: 'London',
+      age: 'Posted 2 hours ago',
     });
-    // No age line on the eighth card.
+    // A card with no age line, and one that shows "Viewed" instead.
     expect(rows[7]?.age).toBeUndefined();
-    expect(rows[4]?.age).toBe('Reposted 1 week ago');
+    expect(rows[4]?.age).toBe('Posted 2 weeks ago');
+    expect(rows[3]?.age).toBe('Reposted 1 week ago');
   });
 
-  it('removes the work mode from the location and the verification suffix from the title', () => {
-    for (const row of rows) {
-      expect(row.location).not.toMatch(/\((Hybrid|Remote|On-site)\)/);
-      expect(row.title).not.toMatch(/with verification/);
-    }
+  it('reads the title once, from the doubled line, with or without "(Verified job)"', () => {
+    expect(rows.map((row) => row.title)).toEqual(RESULTS_CARDS.map((card) => card.title));
+    expect(RESULTS_CARDS.some((card) => card.verified)).toBe(true);
+    expect(RESULTS_CARDS.some((card) => !card.verified)).toBe(true);
+    for (const row of rows) expect(row.title).not.toMatch(/verified|with verification/i);
+  });
+
+  it('keeps bare towns and removes the work mode from the location', () => {
+    expect(rows.map((row) => row.location)).toEqual(
+      RESULTS_CARDS.map((card) => card.location.replace(/ ?\((Hybrid|Remote|On-site)\)$/, '')),
+    );
+    expect(rows.some((row) => row.location === 'Reading')).toBe(true);
+    for (const row of rows) expect(row.location).not.toMatch(/\((Hybrid|Remote|On-site)\)/);
+  });
+
+  it('reads a title with brackets of its own and a doubled age', () => {
+    const [row] = parseResultsPage(
+      [
+        'Lead Data Analyst (6 Month FTC) (Verified job)Lead Data Analyst (6 Month FTC) ',
+        'Example Co',
+        'London (Hybrid)',
+        '3 school alumni work here',
+        'Posted 2 weeks ago2 weeks ago',
+      ].join('\n\n'),
+    );
+    expect(row).toEqual({
+      title: 'Lead Data Analyst (6 Month FTC)',
+      company: 'Example Co',
+      location: 'London',
+      age: 'Posted 2 weeks ago',
+    });
   });
 
   it('pairs each card with its own job ID by order, even when titles repeat', () => {
@@ -137,11 +164,20 @@ describe('parseResultsPage', () => {
     expect(rows[2]?.linkedinId).not.toBe(rows[11]?.linkedinId);
   });
 
-  it('drops badges and salary lines instead of reading them as data', () => {
-    const companies = rows.map((row) => row.company);
-    expect(companies).not.toContain('Promoted');
-    expect(companies).not.toContain('Easy Apply');
-    expect(rows.some((row) => (row.company + row.title + row.location).includes('£'))).toBe(false);
+  it('drops badges, salary, alumni and "Easy Apply" lines instead of reading them as data', () => {
+    const joined = rows.map((row) => `${row.title}|${row.company}|${row.location}`).join('\n');
+    for (const noise of [
+      'Promoted',
+      'Easy Apply',
+      'alumni',
+      'top applicant',
+      'Viewed',
+      'GBP',
+      '£',
+    ]) {
+      expect(joined).not.toContain(noise);
+    }
+    expect(rows.map((row) => row.company)).toEqual(RESULTS_CARDS.map((card) => card.company));
   });
 
   it('reads plain text alone, with no IDs', () => {
@@ -157,6 +193,24 @@ describe('parseResultsPage', () => {
       ...resultsPageLinks(),
     ]);
     expect(withJunk[0]?.linkedinId).toBe(RESULTS_CARDS[0]?.id);
+  });
+
+  it('leaves out a card cut off at the start of the copy, and one missing its location', () => {
+    const text = [
+      'Product Analyst',
+      'Cut Off Co',
+      'Harlow',
+      'Posted 2 weeks ago2 weeks ago',
+      'Data AnalystData Analyst',
+      'No Location Co',
+      'Posted 1 week ago1 week ago',
+      'Business AnalystBusiness Analyst',
+      'Whole Co',
+      'Leeds',
+    ].join('\n\n');
+    expect(parseResultsPage(text)).toEqual([
+      { title: 'Business Analyst', company: 'Whole Co', location: 'Leeds' },
+    ]);
   });
 
   it('caps the rows at 50', () => {
@@ -179,6 +233,9 @@ describe('ageToPostedAt', () => {
     expect(ageToPostedAt('Just now', now)).toEqual(now);
     expect(ageToPostedAt('3 days ago', now)).toEqual(new Date('2026-10-05T12:00:00Z'));
     expect(ageToPostedAt('Reposted 1 week ago', now)).toEqual(new Date('2026-10-01T12:00:00Z'));
+    expect(ageToPostedAt('Posted 1 week ago1 week ago', now)).toEqual(
+      new Date('2026-10-01T12:00:00Z'),
+    );
     expect(ageToPostedAt('2 hours ago', now)).toEqual(new Date('2026-10-08T10:00:00Z'));
     expect(ageToPostedAt('1 month ago', now)).toEqual(new Date('2026-09-08T12:00:00Z'));
   });
