@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 import { canonicalAlertUrl, canonicalLinkedInJobUrl, linkedInJobId } from './alerts/links.js';
+import { COLLECTIONS } from './firestore.js';
 import { JOB_LIMITS } from './jobs.js';
+import type { QuerySpec } from './query-spec.js';
 import { keysFromUrl } from './normalise.js';
 import { VERDICTS } from './funnel.js';
 
@@ -387,3 +389,23 @@ export const LookupParseResultSchema = z.object({
 export type LookupParseResult = z.infer<typeof LookupParseResultSchema>;
 
 export type LookupResult = LookupAddResult | LookupDescribeResult | LookupParseResult;
+
+// ---- Match queries (each is checked against firestore.indexes.json in indexes.test.ts) ----
+
+/** Jobs holding any of up to 30 source keys. The automatic index serves it. */
+export function lookupKeysSpec(keys: readonly string[]): QuerySpec {
+  return {
+    collection: COLLECTIONS.jobs,
+    filters: [{ field: 'keys', op: 'array-contains-any', value: keys }],
+    orderBy: [],
+  };
+}
+
+/** The job stored under a canonical URL. The automatic index serves it. */
+export function lookupUrlSpec(url: string): QuerySpec {
+  return {
+    collection: COLLECTIONS.jobs,
+    filters: [{ field: 'url', op: '==', value: url }],
+    orderBy: [],
+  };
+}

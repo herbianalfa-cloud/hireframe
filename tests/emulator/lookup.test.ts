@@ -13,6 +13,8 @@ import {
   DOCS,
   JobDescriptionSchema,
   JobSchema,
+  lookupKeysSpec,
+  lookupUrlSpec,
   parseLookupInput,
   PATHS,
   ScanLockSchema,
@@ -30,7 +32,6 @@ import { LINKEDIN_ALERT } from '../../packages/shared/src/fixtures/alerts.js';
 import { FAKE_CV_EXTRACTION } from '../../functions/src/fixtures/fake-cv-response.js';
 import { planAttachment } from '../../functions/src/funnel/attach.js';
 import { s1PassPatch } from '../../functions/src/funnel/judgement.js';
-import { jobsByKeysSpec } from '../../functions/src/funnel/queries.js';
 import { firestoreFunnelStore } from '../../functions/src/funnel/store.js';
 import { runIngest } from '../../functions/src/ingest/run.js';
 import { firestoreIngestStore } from '../../functions/src/ingest/store.js';
@@ -45,7 +46,6 @@ import { FAKE_SEED } from '../../functions/src/sources/fixtures.js';
 import { testHttpClient } from '../../functions/src/sources/testing.js';
 import { normaliseRawJob } from '@hireframe/shared';
 import { timestampsToDates } from '../../functions/src/timestamps.js';
-import { lookupKeysSpec, lookupUrlSpec } from '../../web/src/services/lookup.js';
 
 const NOW = new Date('2026-10-08T12:00:00Z');
 const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000);

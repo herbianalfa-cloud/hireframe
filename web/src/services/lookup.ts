@@ -6,6 +6,8 @@ import {
   LookupDescribeResultSchema,
   LookupInputSchema,
   LookupParseResultSchema,
+  lookupKeysSpec,
+  lookupUrlSpec,
   parseLocation,
   type LookupAddResult,
   type LookupDescribeResult,
@@ -45,23 +47,8 @@ const jobsCollection = (db: Firestore) => collection(db, COLLECTIONS.jobs);
 
 // ---- Queries (each is checked against firestore.indexes.json in indexes.test.ts) ----
 
-/** Jobs holding any of up to 30 source keys. The automatic index serves it. */
-export function lookupKeysSpec(keys: readonly string[]): QuerySpec {
-  return {
-    collection: COLLECTIONS.jobs,
-    filters: [{ field: 'keys', op: 'array-contains-any', value: keys }],
-    orderBy: [],
-  };
-}
-
-/** The job stored under a canonical URL. The automatic index serves it. */
-export function lookupUrlSpec(url: string): QuerySpec {
-  return {
-    collection: COLLECTIONS.jobs,
-    filters: [{ field: 'url', op: '==', value: url }],
-    orderBy: [],
-  };
-}
+// `lookupKeysSpec` and `lookupUrlSpec` live in `@hireframe/shared` (the emulator test runs them).
+export { lookupKeysSpec, lookupUrlSpec };
 
 /** Jobs waiting for a pasted description, newest first. Served by `(next, sortAt desc)`. */
 export const needsDescriptionSpec: QuerySpec = {
