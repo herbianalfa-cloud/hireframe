@@ -178,6 +178,20 @@ export const SCAN = {
   boardTimeShare: 0.6,
 } as const;
 
+/**
+ * Hosts the server never requests (CLAUDE.md hard rules, ADR-004, ADR-026, ADR-028): these boards
+ * reach Hireframe only through alert emails or text the owner pastes. The HTTP client refuses
+ * them before any fetch, robots.txt included, so no code path can reach them.
+ */
+export const FORBIDDEN_FETCH_HOSTS = [
+  'linkedin.com',
+  'indeed.com',
+  'indeed.co.uk',
+  'wellfound.com',
+  'glassdoor.com',
+  'glassdoor.co.uk',
+] as const;
+
 export interface HostPolicyConfig {
   robots: 'enforce' | 'api-terms';
   intervalMs: number;

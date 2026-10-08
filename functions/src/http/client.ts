@@ -26,7 +26,9 @@ export type HttpErrorCode =
   | 'robots_disallowed'
   | 'deadline'
   /** The host asked us to stay away (a Retry-After beyond the cap); no request was made. */
-  | 'host_paused';
+  | 'host_paused'
+  /** A host we never fetch (CLAUDE.md hard rule: LinkedIn and the other alert-only boards). */
+  | 'forbidden_host';
 
 export class HttpError extends Error {
   override name = 'HttpError';
@@ -49,7 +51,7 @@ export interface HostPolicy {
 }
 
 export type HttpLogEvent =
-  'http.retry' | 'http.failed' | 'http.robots_blocked' | 'http.host_paused';
+  'http.retry' | 'http.failed' | 'http.robots_blocked' | 'http.host_paused' | 'http.forbidden_host';
 
 /** A host that told us to come back later (epoch ms). */
 export interface HostPause {
@@ -78,6 +80,11 @@ export interface HttpClientDeps {
   maxBodyBytes: number;
   /** Epoch ms after which no request starts. */
   deadline?: number;
+  /**
+   * Hosts (and their subdomains) this client never requests: `getJson` throws `forbidden_host`
+   * before any fetch, robots.txt included (ADR-004, ADR-049).
+   */
+  forbiddenHosts?: readonly string[];
   /** Pauses carried over from earlier runs: no request goes to these hosts until then. */
   paused?: readonly HostPause[];
   log: HttpLog;
@@ -227,10 +234,21 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     return loading;
   }
 
+  function isForbidden(hostname: string): boolean {
+    const host = hostname.toLowerCase();
+    return (deps.forbiddenHosts ?? []).some(
+      (banned) => host === banned || host.endsWith(`.${banned}`),
+    );
+  }
+
   async function getJson<T>(rawUrl: string, schema: z.ZodType<T>, options: RequestOptions) {
     const url = new URL(rawUrl);
     const policy = deps.hostPolicy(url.host);
     const fields = { host: url.host, label: options.label };
+    if (isForbidden(url.hostname)) {
+      deps.log('warn', 'http.forbidden_host', fields);
+      throw new HttpError('forbidden_host');
+    }
     if ((pausedUntil.get(url.host) ?? 0) > deps.now()) {
       logPause(url.host, options.label);
       throw new HttpError('host_paused');

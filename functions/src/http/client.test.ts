@@ -276,6 +276,31 @@ describe('http client', () => {
     expect(logs[0]?.fields).toMatchObject({ host: 'api.example.com', label: 'test.endpoint' });
   });
 
+  it('refuses a forbidden host and its subdomains before any fetch, robots.txt included', async () => {
+    const h = harness({ '*': [json({ ok: true })] }, { forbiddenHosts: ['linkedin.com'] });
+    for (const url of [
+      'https://www.linkedin.com/jobs/view/4012345678',
+      'https://LinkedIn.com/jobs/view/1',
+      'https://uk.linkedin.com/comm/jobs/view/1',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts)).rejects.toMatchObject({
+        code: 'forbidden_host',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
+    expect(h.client.requests()).toBe(0);
+    expect(h.logs[0]).toMatchObject({ event: 'http.forbidden_host' });
+    // A host that merely contains the name is not the host.
+    await expect(
+      harness(
+        { '/robots.txt': NO_ROBOTS, '/a': [json({ ok: true })] },
+        {
+          forbiddenHosts: ['linkedin.com'],
+        },
+      ).client.getJson('https://notlinkedin.com/a', Schema, opts),
+    ).resolves.toEqual({ ok: true });
+  });
+
   it('builds a Basic auth header with an empty password', () => {
     expect(basicAuth('key')).toBe(`Basic ${Buffer.from('key:').toString('base64')}`);
   });
