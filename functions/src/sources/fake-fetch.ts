@@ -15,6 +15,15 @@ import {
  * leaves the machine. robots.txt is a 404 everywhere (no rules); unknown URLs are 404s.
  */
 const ROUTES: readonly [RegExp, unknown][] = [
+  // Single postings (Lookup, ADR-049) come before the boards whose URLs they extend.
+  [
+    /^https:\/\/boards-api\.greenhouse\.io\/v1\/boards\/acmeanalytics\/jobs\/5551234$/,
+    GREENHOUSE_BOARD.jobs[0],
+  ],
+  [
+    /^https:\/\/api(\.eu)?\.lever\.co\/v0\/postings\/bramble\/0b1c2d3e-0000-4000-8000-000000000001$/,
+    LEVER_BOARD[0],
+  ],
   [/^https:\/\/boards-api\.greenhouse\.io\/v1\/boards\/acmeanalytics\/jobs/, GREENHOUSE_BOARD],
   [/^https:\/\/api(\.eu)?\.lever\.co\/v0\/postings\/bramble/, LEVER_BOARD],
   [/^https:\/\/api\.ashbyhq\.com\/posting-api\/job-board\/cobaltledger/, ASHBY_BOARD],

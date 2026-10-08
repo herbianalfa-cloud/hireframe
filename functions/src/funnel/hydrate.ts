@@ -1,8 +1,9 @@
 import { htmlToText, tidyText, type HydrateCounts, type Quota } from '@hireframe/shared';
 
-import { QUOTAS } from '../config.js';
+import { FUNNEL, QUOTAS } from '../config.js';
 import { basicAuth, HttpError, type HttpClient } from '../http/client.js';
 import { log } from '../log.js';
+import type { AtsMatch, AtsSearch } from '../lookup/ats-search.js';
 import { addCalls, currentQuota, remainingCalls } from '../sources/queries.js';
 import { ReedDetailsSchema, reedDetailsUrl } from '../sources/reed.js';
 import type { Hydrator, StoredJob } from './run.js';
@@ -73,6 +74,82 @@ export function createReedHydrator(deps: ReedHydratorDeps): Hydrator {
     async finish() {
       const calls = deps.http.requests();
       if (quota && calls > 0) await deps.saveQuota(addCalls(quota, calls));
+    },
+  };
+}
+
+export interface AtsHydratorDeps {
+  search: AtsSearch;
+  /** Saves the posting's text, source and keys on the job. */
+  attach: (entry: StoredJob, match: AtsMatch, now: Date) => Promise<void>;
+  now: () => Date;
+}
+
+/**
+ * Full text from the board of a watched company for a job with none (an alert job, ADR-049): the
+ * same search Lookup uses, on the same official board APIs. Free of quotas (the boards are public
+ * and fetched once per run each), but a board that fits no job, or two, gives nothing.
+ */
+export function createAtsHydrator(deps: AtsHydratorDeps): Hydrator {
+  const counts: HydrateCounts = { attempted: 0, ok: 0, failed: 0 };
+  return {
+    async fullText(entry: StoredJob) {
+      const { job } = entry;
+      const found = await deps.search.find({
+        title: job.title,
+        company: job.company,
+        city: job.city,
+        ...(job.companyId ? { companyId: job.companyId } : {}),
+      });
+      if (!found.searched) return null;
+      counts.attempted += 1;
+      const text = found.match?.posting.description.text ?? '';
+      if (!found.match || text.length < FUNNEL.minDeepReadChars) {
+        if (found.failed) counts.failed += 1;
+        return null;
+      }
+      try {
+        await deps.attach(entry, found.match, deps.now());
+      } catch (error) {
+        counts.failed += 1;
+        log.warn('hydrate.failed', {
+          source: 'ats',
+          code: error instanceof HttpError ? error.code : 'internal',
+        });
+        return null;
+      }
+      counts.ok += 1;
+      return text;
+    },
+    counts: () => ({ ...counts }),
+    finish: () => Promise.resolve(),
+  };
+}
+
+/** Tries each hydrator in turn until one returns text; counts add up. */
+export function composeHydrators(hydrators: readonly Hydrator[]): Hydrator {
+  return {
+    async fullText(entry) {
+      for (const hydrator of hydrators) {
+        const text = await hydrator.fullText(entry);
+        if (text !== null) return text;
+      }
+      return null;
+    },
+    counts: () =>
+      hydrators.reduce<HydrateCounts>(
+        (sum, hydrator) => {
+          const counts = hydrator.counts();
+          return {
+            attempted: sum.attempted + counts.attempted,
+            ok: sum.ok + counts.ok,
+            failed: sum.failed + counts.failed,
+          };
+        },
+        { attempted: 0, ok: 0, failed: 0 },
+      ),
+    async finish() {
+      for (const hydrator of hydrators) await hydrator.finish();
     },
   };
 }

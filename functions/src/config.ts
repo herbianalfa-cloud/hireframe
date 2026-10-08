@@ -280,6 +280,8 @@ export const FUNNEL = {
   deepReadRpm: 20,
   /** Reed details calls for full text, per run (they count against Reed's quotas too). */
   reedHydratePerRun: 20,
+  /** Watched boards the ATS search may read per run, to find a posting for a job with none. */
+  atsBoardsPerRun: 12,
   /** From the run's start: no new S2 call after this, nor a new S3 call after the next. */
   s2StopMs: 400_000,
   s3StopMs: 450_000,

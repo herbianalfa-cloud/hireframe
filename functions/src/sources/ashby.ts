@@ -1,7 +1,7 @@
 import type { RawJob, RemoteMode, Salary } from '@hireframe/shared';
 import { z } from 'zod';
 
-import { createAtsSource, keyedEnvelope, optionalText } from './ats.js';
+import { boardReader, createAtsSource, keyedEnvelope, optionalText, type AtsSpec } from './ats.js';
 import { parseDate, type Source, type WatchedCompany } from './types.js';
 
 /**
@@ -105,12 +105,15 @@ export function ashbyToRawJob(job: AshbyJob, company: WatchedCompany): RawJob | 
   };
 }
 
+const ashbySpec: AtsSpec<AshbyJob> = {
+  id: 'ashby',
+  boardUrl: (company) => ashbyBoardUrl(company.ats.token ?? ''),
+  envelope: keyedEnvelope('jobs'),
+  item: AshbyJobSchema,
+  toRawJob: ashbyToRawJob,
+};
+export const ashbyBoard = boardReader(ashbySpec);
+
 export function createAshbySource(): Source {
-  return createAtsSource({
-    id: 'ashby',
-    boardUrl: (company) => ashbyBoardUrl(company.ats.token ?? ''),
-    envelope: keyedEnvelope('jobs'),
-    item: AshbyJobSchema,
-    toRawJob: ashbyToRawJob,
-  });
+  return createAtsSource(ashbySpec);
 }

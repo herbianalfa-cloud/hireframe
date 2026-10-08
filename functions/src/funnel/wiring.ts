@@ -13,7 +13,8 @@ import { scanHttpClient } from '../http/scan-client.js';
 import type { LlmTransport } from '../llm/transport.js';
 import { firestoreUsageStore } from '../llm/usage-store.js';
 import { log } from '../log.js';
-import { createReedHydrator } from './hydrate.js';
+import { createAtsSearch } from '../lookup/ats-search.js';
+import { composeHydrators, createAtsHydrator, createReedHydrator } from './hydrate.js';
 import { runFunnel, type FunnelOutcome } from './run.js';
 import { firestoreFunnelStore } from './store.js';
 
@@ -54,7 +55,7 @@ export function funnelFor(wiring: FunnelWiring): FunnelRunner {
     const store = firestoreFunnelStore(wiring.firestore);
     const criteria = await getCurrentCriteria(wiring.firestore);
     const reedApiKey = wiring.reedApiKey;
-    const hydrator = reedApiKey
+    const reed = reedApiKey
       ? createReedHydrator({
           http: scanHttpClient(
             wiring.fetch,
@@ -69,6 +70,17 @@ export function funnelFor(wiring: FunnelWiring): FunnelRunner {
           now: () => new Date(),
         })
       : null;
+    // A separate client: Reed's request count is its quota (ADR-029), the boards' is not.
+    const ats = createAtsHydrator({
+      search: createAtsSearch({
+        http: scanHttpClient(wiring.fetch, invokedAt.getTime() + FUNNEL.s3StopMs, []),
+        watched: () => store.watchedCompanies(),
+        maxBoards: FUNNEL.atsBoardsPerRun,
+      }),
+      attach: (entry, match, now) => store.attachPosting(entry, match.posting, now),
+      now: () => new Date(),
+    });
+    const hydrator = composeHydrators(reed ? [reed, ats] : [ats]);
     log.info('funnel.started', { runId, rescore: rescoreSince !== undefined });
     const outcome = await runFunnel(
       {

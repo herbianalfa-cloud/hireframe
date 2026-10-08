@@ -14,7 +14,7 @@ describe('scanHttpClient', () => {
     'https://www.glassdoor.co.uk/job-listing/x',
   ])('never calls fetch for %s (CLAUDE.md hard rule)', async (url) => {
     const fetchSpy = vi.fn();
-    const client = scanHttpClient(fetchSpy as unknown as typeof fetch, Date.now() + 60_000, []);
+    const client = scanHttpClient(fetchSpy, Date.now() + 60_000, []);
     const error = await client
       .getJson(url, z.unknown(), { label: 'test' })
       .catch((caught: unknown) => caught);

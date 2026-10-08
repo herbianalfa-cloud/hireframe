@@ -1,4 +1,5 @@
 import {
+  CompanySchema,
   COLLECTIONS,
   DOCS,
   FactSchema,
@@ -12,6 +13,7 @@ import {
   QuotaSchema,
   SourceHealthSchema,
   type FunnelFact,
+  type NormalisedJob,
   type Quota,
   type QueueStage,
 } from '@hireframe/shared';
@@ -19,10 +21,12 @@ import { FieldValue, type Firestore, type Query } from 'firebase-admin/firestore
 
 import { SCAN } from '../config.js';
 import type { HostPause } from '../http/client.js';
+import type { WatchedCompany } from '../sources/types.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 import type { JobPatch } from './judgement.js';
-import { addedQueuedSpec, staleQueuedSpec } from './queries.js';
+import { addedQueuedSpec, staleQueuedSpec, watchedCompaniesSpec } from './queries.js';
+import { planAttachment } from './attach.js';
 import type { CompanyInfo, FunnelStore, StoredJob } from './run.js';
 
 /**
@@ -57,6 +61,10 @@ export function patchUpdate(patch: JobPatch, now: Date): Record<string, unknown>
 
 export interface FirestoreFunnelStore extends FunnelStore {
   saveFullText(jobId: string, text: string, now: Date): Promise<void>;
+  /** Watched companies with a job board, for the ATS search (a spec-built read). */
+  watchedCompanies(): Promise<WatchedCompany[]>;
+  /** Saves a board posting's text on the job and merges its source and keys. */
+  attachPosting(entry: StoredJob, posting: NormalisedJob, now: Date): Promise<void>;
   reedQuota(): Promise<Quota | undefined>;
   /** Hosts Reed's last scan was told to stay away from (a long Retry-After). */
   reedPauses(): Promise<HostPause[]>;
@@ -247,6 +255,43 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
         schemaVersion: 1,
       });
       batch.update(db.doc(PATHS.job(jobId)), { descriptionKind: 'full', updatedAt: now });
+      await batch.commit();
+    },
+
+    async watchedCompanies() {
+      const spec = watchedCompaniesSpec();
+      const query = spec.filters.reduce<Query>(
+        (found, filter) => found.where(filter.field, filter.op, filter.value),
+        db.collection(spec.collection),
+      );
+      const snapshot = await query.select('name', 'ats').get();
+      const found: WatchedCompany[] = [];
+      for (const doc of snapshot.docs) {
+        const parsed = CompanySchema.pick({ name: true, ats: true }).safeParse(
+          timestampsToDates(doc.data()),
+        );
+        if (parsed.success && parsed.data.ats.type !== 'none') {
+          found.push({ id: doc.id, name: parsed.data.name, ats: parsed.data.ats });
+        }
+      }
+      return found;
+    },
+
+    async attachPosting(entry, posting, now) {
+      const attachment = planAttachment(entry.job, posting, now);
+      const batch = db.batch();
+      batch.set(db.doc(PATHS.jobDescription(entry.id)), attachment.description);
+      batch.update(db.doc(PATHS.job(entry.id)), {
+        descriptionKind: 'full',
+        ...(attachment.addSources.length
+          ? { sources: FieldValue.arrayUnion(...attachment.addSources) }
+          : {}),
+        ...(attachment.addKeys.length
+          ? { keys: FieldValue.arrayUnion(...attachment.addKeys) }
+          : {}),
+        ...(attachment.postedAt ? { postedAt: attachment.postedAt } : {}),
+        updatedAt: now,
+      });
       await batch.commit();
     },
 
