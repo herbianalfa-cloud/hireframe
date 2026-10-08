@@ -1,15 +1,9 @@
 import {
-  applyHardRules,
-  DeepReadOutputSchema,
-  factAliases,
   freshnessCutoff,
   FUNNEL_LIMITS,
   isExpired,
   monthKey,
-  resolveDeepRead,
-  scoreJob,
   triagePasses,
-  TriageOutputSchema,
   WAIT_STATES,
   type CriteriaVersion,
   type FunnelFact,
@@ -32,8 +26,8 @@ import {
   type WorkRightsSetting,
 } from '@hireframe/shared';
 
-import { FUNNEL, MODELS, type FunnelLimits } from '../config.js';
-import { llmCall, type LlmCallDeps } from '../llm/call.js';
+import { FUNNEL, type FunnelLimits } from '../config.js';
+import type { LlmCallDeps } from '../llm/call.js';
 import { LlmOutputError, RunBudgetExceededError, SpendCapExceededError } from '../llm/errors.js';
 import { createRunLease, type LeaseStage, type RunLease } from '../llm/lease.js';
 import type { LlmTransport } from '../llm/transport.js';
@@ -50,13 +44,12 @@ import {
   s1SkipPatch,
   s2PassPatch,
   s2SkipPatch,
-  s3Patch,
   type JobPatch,
   type JudgeContext,
   type S1Outcome,
 } from './judgement.js';
 import { createPacer } from './pacer.js';
-import { fingerprint, PROMPT_VERSIONS, s2System, s2User, s3System, s3User } from './prompts.js';
+import { buildFunnelContext } from './steps.js';
 
 /**
  * The funnel for one run (docs/FUNNEL.md, ADR-032–037): S1 on jobs no stage has judged (the M3
@@ -238,23 +231,9 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
 
   const ctx = (): JudgeContext => ({ criteriaVersion: criteria.version, now: deps.now() });
   const { facts, workRights } = await store.loadProfile();
-  const { toAlias, toId } = factAliases(facts.map((fact) => fact.id));
-  const systems = {
-    s2: s2System(criteria, facts, workRights),
-    s3: s3System(criteria, facts, toAlias, workRights),
-  };
-  const fingerprints = {
-    s2: fingerprint(MODELS.triage, PROMPT_VERSIONS.s2, systems.s2),
-    s3: fingerprint(MODELS.deepRead, PROMPT_VERSIONS.s3, systems.s3),
-  };
-  const rules = (entry: StoredJob, text: string) =>
-    applyHardRules({
-      job: entry.job,
-      text,
-      criteria,
-      workRights: workRights?.workRights ?? null,
-      now: deps.now(),
-    });
+  const steps = buildFunnelContext(criteria, facts, workRights);
+  const { fingerprints } = steps;
+  const rules = (entry: StoredJob, text: string) => steps.rules(entry.job, text, deps.now());
 
   // ---- Reads shared by the stages ----
   const companyCache = new Map<string, CompanyInfo>();
@@ -285,33 +264,11 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     options: { flags: JobFlag[]; costPence: number; s2Fingerprint: string },
   ): JobPatch {
     const company = job.companyId ? companyCache.get(job.companyId) : undefined;
-    const score = scoreJob({
-      lane: triage.lane,
+    return steps.judge(
+      job,
+      triage,
       deep,
-      criteria,
-      now: deps.now(),
-      ...(job.postedAt ? { postedAt: job.postedAt } : {}),
-      ...(company?.size ? { companySize: company.size } : {}),
-      ...(job.experienceAsk ? { experienceAsk: job.experienceAsk } : {}),
-      workRights: workRights?.workRights ?? null,
-    });
-    if (score.drift) {
-      log.warn('funnel.score_drift', {
-        modelFit: deep.model.fit,
-        fit: score.fit,
-        modelLuck: deep.model.luck,
-        luck: score.luck,
-      });
-    }
-    return s3Patch(
-      {
-        deep,
-        score,
-        triage,
-        fingerprints: { s2: options.s2Fingerprint, s3: fingerprints.s3 },
-        flags: mergeFlags(options.flags, score.drift ? ['score_drift'] : []),
-        costPence: options.costPence,
-      },
+      { ...options, now: deps.now(), ...(company ? { company } : {}) },
       ctx(),
     );
   }
@@ -617,12 +574,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       if (errors.isStopped()) return;
       try {
         const result = await withRoom(activeLease, 's2', errors, FUNNEL.s2StopMs, () =>
-          llmCall(llmDeps(activeLease, 's2'), {
-            purpose: 'triage',
-            system: systems.s2,
-            user: s2User(entry.job, texts.get(entry.id) ?? ''),
-            schema: TriageOutputSchema,
-          }),
+          steps.triage(llmDeps(activeLease, 's2'), entry.job, texts.get(entry.id) ?? ''),
         );
         if (!result) return;
         errors.ok();
@@ -743,19 +695,11 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         const company = job.companyId ? companyCache.get(job.companyId) : undefined;
         const { triage } = job;
         const result = await withRoom(activeLease, 's3', errors, FUNNEL.s3StopMs, () =>
-          llmCall(llmDeps(activeLease, 's3'), {
-            purpose: 'deepRead',
-            system: systems.s3,
-            user: s3User(job, text, {
-              lane: triage.lane,
-              now: deps.now(),
-              descriptionKind: snippet ? 'snippet' : 'full',
-              ...(job.postedAt ? { postedAt: job.postedAt } : {}),
-              ...(company?.size ? { companySize: company.size } : {}),
-              ...(company?.stage ? { companyStage: company.stage } : {}),
-            }),
-            schema: DeepReadOutputSchema,
-            cacheSystem: true,
+          steps.deepRead(llmDeps(activeLease, 's3'), job, triage, {
+            text,
+            descriptionKind: snippet ? 'snippet' : 'full',
+            now: deps.now(),
+            ...(company ? { company } : {}),
           }),
         );
         if (!result) {
@@ -765,11 +709,8 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         }
         errors.ok();
         s3.in += 1;
-        const { deep, downgraded, unknownRefs } = resolveDeepRead(result.data, toId);
+        const { deep, downgraded } = result;
         if (downgraded > 0) extraFlags.push('unsupported_match');
-        if (downgraded > 0 || unknownRefs > 0) {
-          log.warn('funnel.unsupported_match', { downgraded, unknownRefs });
-        }
         const patch = judge(job, job.triage, deep, {
           flags: extraFlags,
           costPence: result.costPence,
