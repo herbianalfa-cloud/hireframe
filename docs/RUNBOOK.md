@@ -165,11 +165,11 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
 28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
     ```bash
-    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs; do
+    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs lookup; do
       gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers --project=hireframe-f6b03
     done
     ```
-    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `ingestEmailJobs` (M6) is an HTTPS function, not a callable: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
+    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `lookup` (M6, 6B) is a callable like the others. `ingestEmailJobs` (M6) is an HTTPS function, not a callable: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
 29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` (and `scanNow` from M3) are listed in `europe-west2`.
 30. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
 31. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
@@ -342,6 +342,18 @@ Design: ADR-046 (transport and signing), ADR-047 (parsing), ADR-048 (the lock an
 81. **Apps Script** (G6). In the repo folder: `npm run build:apps-script`, then `npm exec -w apps-script clasp login` (your Google account), `npm exec -w apps-script clasp -- create --type standalone --rootDir build` once (the workspace is the working directory, so the root is `build`, not `apps-script/build`; it writes the gitignored `apps-script/.clasp.json`, and the committed `.clasp.json.example` shows its shape), then `npm exec -w apps-script clasp -- push`. Open the project in the Apps Script editor by its script ID (`https://script.google.com/home/projects/<scriptId>/edit`, the ID is in `.clasp.json`), not from the Apps Script project list. In the Apps Script editor: **Services → Gmail API** on. **Project Settings → Script Properties:** `HIREFRAME_INGEST_URL` (the function URL, from the Firebase console → Functions) and `HIREFRAME_HMAC_SECRET`. For the secret, in Cloud Shell run `gcloud secrets versions access latest --secret=INGEST_HMAC_SECRET` and copy it straight into the property; don't paste it anywhere else. Run `setup` once and accept the scopes (read and change mail labels, send to external services, manage triggers). Run `run` once by hand.
 82. **Gmail labels and filters** (G7). The labels `hireframe/alerts` and `hireframe/done` exist in the primary account (One-time setup step 5). A filter `from:jobalerts-noreply@linkedin.com` → apply `hireframe/alerts`, plus one for each other alert sender you use. On the second account, keep the filter that auto-forwards LinkedIn alerts to the primary.
 83. **Check it** (G8). First, in Gmail's search box, type `label:hireframe/alerts` and confirm it lists the messages you labelled: `hireframe/alerts` is a nested label (a `hireframe` parent), and the script's query is exactly that text, so if the search finds nothing the script will find nothing either. Then label one real alert `hireframe/alerts`, choosing one whose text contains a `·` or a `£` (most LinkedIn and Wellfound alerts do): the signed bytes and the sent bytes must agree on non-ASCII text, and only a real alert proves it end to end. Run `run` in the editor. **System → Sources → Gmail alerts** shows the ingest (emails, jobs new and merged), and the message is under `hireframe/done`. After the next scan, those jobs have been through S1 and S2, and the LinkedIn ones end at **Waiting for a description** (the count is on System next to Jobs stored). If a message stays under `hireframe/alerts`, see Recovery.
+
+### Part H: Lookup (M6, PR 6B)
+
+84. **Before the tag, repeat the invoker check on `scheduledScan`** (Part G step 77, H1): the bundle changes, so the deploy rewrites the invoker unless it is exact. Only then merge and tag.
+85. **Invoker binding for `lookup`** (H3), after its first deploy: Part C step 28's loop includes it. Or just this one:
+    ```bash
+    gcloud functions add-invoker-policy-binding lookup --region=europe-west2 --member=allUsers --project=hireframe-f6b03
+    ```
+    Public invocation is safe: the callable enforces App Check and the owner check.
+86. **The new index** (H4). Firestore → Indexes: `jobs (next, addedAt desc)` says **Enabled** before the next scheduled run. Until it does, the user-added-first read fails; the stage logs `funnel.failed` with `step: queued_added` and reads the usual order instead.
+87. **Optional: the daily Lookup cap** (H7). Lookup spends at most 25p a day by default. To change it, add `lookup: { dailyCapPence: 40 }` to `config/app` in the console (like `funnel` and `alerts`; a typo is ignored and the default applies).
+88. **Locally**, `npm run dev` seeds two Lookup-added jobs (one with a verdict, one waiting for a description). The Lookup screen and the steps that need it (pasting on the phone, `hf:usable`, Lighthouse) come with the web session.
 
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
