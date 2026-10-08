@@ -46,3 +46,14 @@ export function makeView(id: string, overrides: Partial<Job> = {}): JobView {
   const job = makeJob(overrides);
   return { id, job, raw: { status: job.status, verdict: job.verdict } };
 }
+
+const JUDGED_FIELDS = ['verdict', 'fitScore', 'luckScore', 'reason', 'judgedAt'];
+
+/** A job with no verdict yet (waiting or queued): the judged fields are left off. */
+export function makeUnjudgedView(id: string, overrides: Partial<Job> = {}): JobView {
+  const job = makeJob(overrides);
+  for (const field of JUDGED_FIELDS) {
+    if (!(field in overrides)) Reflect.deleteProperty(job, field);
+  }
+  return { id, job, raw: { status: job.status } };
+}

@@ -111,6 +111,21 @@ export function linkHost(url: string): string {
   }
 }
 
+/**
+ * Where a job without a verdict stands, in words: waiting for a human, for a description, for a
+ * model step, or being judged right now. Null once it has a verdict.
+ */
+export function pendingStateText(
+  job: Pick<Job, 'verdict' | 'next' | 'review' | 'skip' | 'describingAt'>,
+): string | null {
+  if (job.verdict) return null;
+  if (job.review) return 'Needs review';
+  if (job.skip) return 'Skipped';
+  if (job.next === 'description') return 'Needs a description';
+  if (job.next) return `Queued for ${STAGE_NAMES[job.next].toLowerCase()}`;
+  return 'Judging…';
+}
+
 /** Why a job was skipped, in words (PRD R6: the stage and, for rules, the rule). */
 export function skipText(skip: JobSkip): string {
   const stage = STAGE_NAMES[skip.stage];
@@ -174,6 +189,7 @@ export const SOURCE_NAMES: Readonly<Record<string, string>> = {
   hn: 'HN Who is hiring',
   'linkedin-alert': 'LinkedIn alert',
   'email-alert': 'Email alert',
+  lookup: 'Added by you',
 };
 
 /** The agreement line (ADR-038): the rate and its split, since applying is only a quiet 👍. */

@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AppRoutes } from './App';
+import appSource from './App.tsx?raw';
 import { SessionContext } from './session';
 
 vi.mock('@/features/profile/ProfilePage', () => ({ ProfilePage: () => <h1>Profile screen</h1> }));
@@ -11,6 +12,7 @@ vi.mock('@/features/criteria/CriteriaPage', () => ({
 }));
 vi.mock('@/features/today/TodayPage', () => ({ TodayPage: () => <h1>Today screen</h1> }));
 vi.mock('@/features/jobs/JobsPage', () => ({ JobsPage: () => <h1>Jobs screen</h1> }));
+vi.mock('@/features/lookup/LookupPage', () => ({ LookupPage: () => <h1>Lookup screen</h1> }));
 vi.mock('@/features/system/SystemPage', () => ({ SystemPage: () => <h1>System screen</h1> }));
 
 function renderAt(path: string) {
@@ -29,6 +31,7 @@ describe('AppRoutes', () => {
   it.each([
     ['/', 'Today screen'],
     ['/jobs', 'Jobs screen'],
+    ['/lookup', 'Lookup screen'],
     ['/profile', 'Profile screen'],
     ['/criteria', 'Criteria screen'],
     ['/system', 'System screen'],
@@ -37,8 +40,10 @@ describe('AppRoutes', () => {
     expect(await screen.findByRole('heading', { name: heading })).toBeTruthy();
   });
 
-  it('keeps the empty state for screens not built yet', () => {
-    renderAt('/lookup');
-    expect(screen.getByText('Look up a job link')).toBeTruthy();
+  it('loads the Lookup screen lazily, so none of its code is in the initial bundle', () => {
+    expect(appSource).toMatch(
+      /const LookupPage = lazy\(\(\) =>\s+import\('@\/features\/lookup\/LookupPage'\)/,
+    );
+    expect(appSource).not.toMatch(/^import .* from '@\/features\/lookup/m);
   });
 });

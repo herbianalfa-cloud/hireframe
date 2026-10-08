@@ -10,7 +10,7 @@ import {
   ThumbsUp,
   type LucideIcon,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -43,6 +43,13 @@ import {
   VERDICT_LABELS,
 } from './labels';
 import { VerdictBadge } from './VerdictBadge';
+
+// The paste control lives in the Lookup chunk and loads only for a job that needs a description.
+const PasteDescription = lazy(() =>
+  import('@/features/lookup/PasteDescription').then((module) => ({
+    default: module.PasteDescription,
+  })),
+);
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -330,6 +337,7 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {job.verdict ? <VerdictBadge verdict={job.verdict} /> : <Badge>Not judged yet</Badge>}
         <Badge>{STATUS_LABELS[job.status]}</Badge>
+        {job.addedAt ? <Badge variant="accent">Added by you</Badge> : null}
         {job.fitScore !== undefined ? (
           <span className="font-mono text-xs tabular-nums text-muted-foreground">
             fit {scoreText(job.fitScore)} · luck {scoreText(job.luckScore)}
@@ -358,9 +366,18 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
       ) : job.next === 'description' ? (
         <Section title="Needs a description">
           <p>
-            This job came from an email alert, which carries no description, so there is nothing to
-            read yet. A later scan may find the posting on the company&apos;s job board.
+            There is no description to read yet: an email alert carries none, and a job you add by
+            hand starts without one. A later scan may find the posting on the company&apos;s job
+            board. Or open the posting, copy its description and paste it below to have the job
+            judged now.
           </p>
+          <div className="mt-3">
+            <Suspense
+              fallback={<Skeleton role="status" aria-label="Loading paste form" className="h-24" />}
+            >
+              <PasteDescription jobId={view.id} />
+            </Suspense>
+          </div>
         </Section>
       ) : job.next ? (
         <Section title="Queued">
