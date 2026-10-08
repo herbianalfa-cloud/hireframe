@@ -1,15 +1,9 @@
 import {
-  applyHardRules,
-  DeepReadOutputSchema,
-  factAliases,
   freshnessCutoff,
   FUNNEL_LIMITS,
   isExpired,
   monthKey,
-  resolveDeepRead,
-  scoreJob,
   triagePasses,
-  TriageOutputSchema,
   WAIT_STATES,
   type CriteriaVersion,
   type FunnelFact,
@@ -32,8 +26,8 @@ import {
   type WorkRightsSetting,
 } from '@hireframe/shared';
 
-import { FUNNEL, MODELS, type FunnelLimits } from '../config.js';
-import { llmCall, type LlmCallDeps } from '../llm/call.js';
+import { FUNNEL, LOOKUP, type FunnelLimits } from '../config.js';
+import type { LlmCallDeps } from '../llm/call.js';
 import { LlmOutputError, RunBudgetExceededError, SpendCapExceededError } from '../llm/errors.js';
 import { createRunLease, type LeaseStage, type RunLease } from '../llm/lease.js';
 import type { LlmTransport } from '../llm/transport.js';
@@ -44,19 +38,19 @@ import {
   expiredPatch,
   mergeFlags,
   needsDescriptionPatch,
+  releasedClaimPatch,
   requeuePatch,
   reviewPatch,
   s1PassPatch,
   s1SkipPatch,
   s2PassPatch,
   s2SkipPatch,
-  s3Patch,
   type JobPatch,
   type JudgeContext,
   type S1Outcome,
 } from './judgement.js';
 import { createPacer } from './pacer.js';
-import { fingerprint, PROMPT_VERSIONS, s2System, s2User, s3System, s3User } from './prompts.js';
+import { buildFunnelContext } from './steps.js';
 
 /**
  * The funnel for one run (docs/FUNNEL.md, ADR-032–037): S1 on jobs no stage has judged (the M3
@@ -92,6 +86,11 @@ export interface FunnelStore {
    * Served by the `(next, sortAt desc)` index for all three wait states.
    */
   staleQueued(state: WaitState, before: Date, limit: number): Promise<StoredJob[]>;
+  /**
+   * Jobs whose `describingAt` claim is older than `before`, oldest first (the sweep releases the
+   * ones that never got a verdict, ADR-049).
+   */
+  staleDescribing(before: Date, limit: number): Promise<StoredJob[]>;
   /** Jobs first seen at or after `since` (re-score). */
   recentJobs(since: Date, limit: number): Promise<StoredJob[]>;
   /** Description text by job ID (missing descriptions are left out). */
@@ -99,6 +98,11 @@ export interface FunnelStore {
   companies(ids: readonly string[]): Promise<Map<string, CompanyInfo>>;
   /** Applies patches (funnel fields and `stage` only). Returns how many failed. */
   apply(updates: readonly { jobId: string; patch: JobPatch }[], now: Date): Promise<number>;
+  /**
+   * Jobs the owner added from Lookup that wait for `stage`, newest `addedAt` first (ADR-049). A
+   * run reads these before `queued`, so they are judged first.
+   */
+  queuedAdded(stage: QueueStage, limit: number): Promise<StoredJob[]>;
   /** How many jobs wait for each stage. */
   queueCounts(): Promise<Record<QueueStage, number>>;
 }
@@ -167,6 +171,19 @@ function chunks<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
+}
+
+/**
+ * A stage's queue: the jobs the owner added from Lookup first (newest `addedAt` first), then the
+ * usual order, no job twice, at most `limit` (ADR-049).
+ */
+export function mergeQueued(
+  added: readonly StoredJob[],
+  usual: readonly StoredJob[],
+  limit: number,
+): StoredJob[] {
+  const seen = new Set(added.map((entry) => entry.id));
+  return [...added, ...usual.filter((entry) => !seen.has(entry.id))].slice(0, limit);
 }
 
 function s1Outcome(result: S1Result): S1Outcome {
@@ -238,23 +255,9 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
 
   const ctx = (): JudgeContext => ({ criteriaVersion: criteria.version, now: deps.now() });
   const { facts, workRights } = await store.loadProfile();
-  const { toAlias, toId } = factAliases(facts.map((fact) => fact.id));
-  const systems = {
-    s2: s2System(criteria, facts, workRights),
-    s3: s3System(criteria, facts, toAlias, workRights),
-  };
-  const fingerprints = {
-    s2: fingerprint(MODELS.triage, PROMPT_VERSIONS.s2, systems.s2),
-    s3: fingerprint(MODELS.deepRead, PROMPT_VERSIONS.s3, systems.s3),
-  };
-  const rules = (entry: StoredJob, text: string) =>
-    applyHardRules({
-      job: entry.job,
-      text,
-      criteria,
-      workRights: workRights?.workRights ?? null,
-      now: deps.now(),
-    });
+  const steps = buildFunnelContext(criteria, facts, workRights);
+  const { fingerprints } = steps;
+  const rules = (entry: StoredJob, text: string) => steps.rules(entry.job, text, deps.now());
 
   // ---- Reads shared by the stages ----
   const companyCache = new Map<string, CompanyInfo>();
@@ -285,33 +288,11 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     options: { flags: JobFlag[]; costPence: number; s2Fingerprint: string },
   ): JobPatch {
     const company = job.companyId ? companyCache.get(job.companyId) : undefined;
-    const score = scoreJob({
-      lane: triage.lane,
+    return steps.judge(
+      job,
+      triage,
       deep,
-      criteria,
-      now: deps.now(),
-      ...(job.postedAt ? { postedAt: job.postedAt } : {}),
-      ...(company?.size ? { companySize: company.size } : {}),
-      ...(job.experienceAsk ? { experienceAsk: job.experienceAsk } : {}),
-      workRights: workRights?.workRights ?? null,
-    });
-    if (score.drift) {
-      log.warn('funnel.score_drift', {
-        modelFit: deep.model.fit,
-        fit: score.fit,
-        modelLuck: deep.model.luck,
-        luck: score.luck,
-      });
-    }
-    return s3Patch(
-      {
-        deep,
-        score,
-        triage,
-        fingerprints: { s2: options.s2Fingerprint, s3: fingerprints.s3 },
-        flags: mergeFlags(options.flags, score.drift ? ['score_drift'] : []),
-        costPence: options.costPence,
-      },
+      { ...options, now: deps.now(), ...(company ? { company } : {}) },
       ctx(),
     );
   }
@@ -344,6 +325,10 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       const { job } = entry;
       const result = rules(entry, texts.get(entry.id) ?? '');
       const outcome = s1Outcome(result);
+      // An estimated posting date (Lookup, ADR-049) is still an estimate after a re-score.
+      if (job.flags?.includes('posted_estimated')) {
+        outcome.flags = mergeFlags(outcome.flags, ['posted_estimated']);
+      }
       if (!result.pass) {
         const same = job.skip?.stage === 's1' && job.skip.ruleId === result.ruleId;
         counts[same ? 'unchanged' : 's1Changed'] += 1;
@@ -443,6 +428,21 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     }
   }
 
+  // A `describe` that died after claiming its job leaves it at `next: null` with `describingAt`
+  // set and no verdict: nothing queued it, so it goes back to waiting for a description.
+  try {
+    const claimedBefore = new Date(deps.now().getTime() - LOOKUP.describeClaimStaleMs);
+    const abandoned = (
+      await store.staleDescribing(claimedBefore, deps.limits.expireMaxJobs)
+    ).filter(({ job }) => (job.next ?? null) === null && !job.verdict && !job.judgedAt);
+    for (const entry of abandoned) await write(entry.id, releasedClaimPatch(entry.job));
+    await flush();
+    if (abandoned.length > 0) log.warn('funnel.describe_released', { jobs: abandoned.length });
+  } catch (error) {
+    log.error('funnel.failed', { step: 'describe_sweep', ...errorFields(error) });
+    sweepFailed = true;
+  }
+
   // ---- The run's spend lease (ADR-032) ----
   const month = monthKey(deps.now());
   const leaseId = `run-${options.runId}`;
@@ -498,6 +498,18 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       fxUsdToGbp: deps.fxUsdToGbp,
       now: deps.now,
     };
+  }
+
+  /**
+   * The jobs a stage reads: the owner's Lookup jobs first. If that read fails (its index not
+   * built yet, RUNBOOK H4) the stage falls back to the usual order and logs it.
+   */
+  async function readQueue(stage: QueueStage, limit: number): Promise<StoredJob[]> {
+    const added = await store.queuedAdded(stage, limit).catch((error: unknown) => {
+      log.error('funnel.failed', { step: 'queued_added', stage, ...errorFields(error) });
+      return [];
+    });
+    return mergeQueued(added, await store.queued(stage, limit), limit);
   }
 
   function pastDeadline(stopMs: number): boolean {
@@ -598,7 +610,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   async function runS2(activeLease: RunLease): Promise<void> {
     const began = deps.clock();
     const pacer = createPacer(deps.limits.triageRpm, deps.clock, deps.sleep);
-    const queue = await store.queued('s2', deps.limits.s2MaxJobs);
+    const queue = await readQueue('s2', deps.limits.s2MaxJobs);
     await loadCompanies(queue);
     const texts = await loadTexts(queue);
     const errors = stageErrors('s2');
@@ -617,12 +629,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       if (errors.isStopped()) return;
       try {
         const result = await withRoom(activeLease, 's2', errors, FUNNEL.s2StopMs, () =>
-          llmCall(llmDeps(activeLease, 's2'), {
-            purpose: 'triage',
-            system: systems.s2,
-            user: s2User(entry.job, texts.get(entry.id) ?? ''),
-            schema: TriageOutputSchema,
-          }),
+          steps.triage(llmDeps(activeLease, 's2'), entry.job, texts.get(entry.id) ?? ''),
         );
         if (!result) return;
         errors.ok();
@@ -666,7 +673,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     const pacer = createPacer(deps.limits.deepReadRpm, deps.clock, deps.sleep);
     const { hydrator } = deps;
     // A few extra, in case some have gone stale while queued.
-    const queue = await store.queued('s3', deps.limits.s3MaxJobs * 2);
+    const queue = await readQueue('s3', deps.limits.s3MaxJobs * 2);
     await loadCompanies(queue);
     const texts = await loadTexts(queue);
     const errors = stageErrors('s3');
@@ -743,19 +750,11 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         const company = job.companyId ? companyCache.get(job.companyId) : undefined;
         const { triage } = job;
         const result = await withRoom(activeLease, 's3', errors, FUNNEL.s3StopMs, () =>
-          llmCall(llmDeps(activeLease, 's3'), {
-            purpose: 'deepRead',
-            system: systems.s3,
-            user: s3User(job, text, {
-              lane: triage.lane,
-              now: deps.now(),
-              descriptionKind: snippet ? 'snippet' : 'full',
-              ...(job.postedAt ? { postedAt: job.postedAt } : {}),
-              ...(company?.size ? { companySize: company.size } : {}),
-              ...(company?.stage ? { companyStage: company.stage } : {}),
-            }),
-            schema: DeepReadOutputSchema,
-            cacheSystem: true,
+          steps.deepRead(llmDeps(activeLease, 's3'), job, triage, {
+            text,
+            descriptionKind: snippet ? 'snippet' : 'full',
+            now: deps.now(),
+            ...(company ? { company } : {}),
           }),
         );
         if (!result) {
@@ -765,11 +764,8 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
         }
         errors.ok();
         s3.in += 1;
-        const { deep, downgraded, unknownRefs } = resolveDeepRead(result.data, toId);
+        const { deep, downgraded } = result;
         if (downgraded > 0) extraFlags.push('unsupported_match');
-        if (downgraded > 0 || unknownRefs > 0) {
-          log.warn('funnel.unsupported_match', { downgraded, unknownRefs });
-        }
         const patch = judge(job, job.triage, deep, {
           flags: extraFlags,
           costPence: result.costPence,

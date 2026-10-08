@@ -28,6 +28,7 @@ export type LogEvent =
   | 'http.failed'
   | 'http.robots_blocked'
   | 'http.host_paused'
+  | 'http.forbidden_host'
   | 'scan.started'
   | 'scan.done'
   | 'scan.refused'
@@ -48,6 +49,7 @@ export type LogEvent =
   | 'funnel.review'
   | 'funnel.score_drift'
   | 'funnel.sweep_drift'
+  | 'funnel.describe_released'
   | 'funnel.unsupported_match'
   | 'funnel.overrides_invalid'
   | 'hydrate.failed'
@@ -58,7 +60,14 @@ export type LogEvent =
   | 'ingest.done'
   | 'ingest.failed'
   | 'ingest.message'
-  | 'ingest.parse_failed';
+  | 'ingest.parse_failed'
+  | 'lookup.started'
+  | 'lookup.done'
+  | 'lookup.failed'
+  | 'lookup.busy'
+  | 'lookup.dropped'
+  | 'lookup.ats_failed'
+  | 'lookup.pauses_not_saved';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

@@ -1,4 +1,4 @@
-import { hostPolicy, SCAN } from '../config.js';
+import { FORBIDDEN_FETCH_HOSTS, hostPolicy, SCAN } from '../config.js';
 import { log } from '../log.js';
 import { createHttpClient, type HostPause, type HttpClient } from './client.js';
 
@@ -27,6 +27,7 @@ export function scanHttpClient(
     backoffBaseMs: SCAN.backoffBaseMs,
     retryAfterCapMs: SCAN.retryAfterCapMs,
     maxBodyBytes: SCAN.maxBodyBytes,
+    forbiddenHosts: FORBIDDEN_FETCH_HOSTS,
     deadline,
     paused,
     log: (level, event, fields) => {

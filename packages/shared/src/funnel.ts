@@ -131,6 +131,8 @@ export const JOB_FLAGS = [
   'unsupported_match',
   /** No description to read: the job waits for one (M6, ADR-048). */
   'needs_description',
+  /** `postedAt` is approximate: read from a relative age such as "3 days ago" (ADR-049). */
+  'posted_estimated',
 ] as const;
 export type JobFlag = (typeof JOB_FLAGS)[number];
 
@@ -242,6 +244,11 @@ export const JobFunnelFieldsSchema = z.object({
   costPence: z.number().min(0).exactOptional(),
   /** Set while a re-score waits for a model call; the old verdict stays until it's replaced. */
   rescoreQueuedAt: z.date().exactOptional(),
+  /**
+   * Claim time while a pasted description is being judged; cleared when done (ADR-049). A claim
+   * older than `describeClaimStaleMs` with no verdict is released by the expiry sweep.
+   */
+  describingAt: z.date().exactOptional(),
 });
 export type JobFunnelFields = z.infer<typeof JobFunnelFieldsSchema>;
 

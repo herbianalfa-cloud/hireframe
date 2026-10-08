@@ -39,11 +39,16 @@ export const SCAN_SOURCE_IDS = [
 export type ScanSourceId = (typeof SCAN_SOURCE_IDS)[number];
 
 /**
- * Every source a job can come from: the scan sources plus email alerts (M6). `linkedin-alert`
- * is the deterministic LinkedIn parser, `email-alert` any other sender through the model
- * fallback (ADR-047).
+ * Every source a job can come from: the scan sources plus email alerts and Lookup (M6).
+ * `linkedin-alert` is the deterministic LinkedIn parser, `email-alert` any other sender through
+ * the model fallback (ADR-047), `lookup` a job the owner added or described by hand (ADR-049).
  */
-export const JOB_SOURCE_IDS = [...SCAN_SOURCE_IDS, 'linkedin-alert', 'email-alert'] as const;
+export const JOB_SOURCE_IDS = [
+  ...SCAN_SOURCE_IDS,
+  'linkedin-alert',
+  'email-alert',
+  'lookup',
+] as const;
 export type JobSourceId = (typeof JOB_SOURCE_IDS)[number];
 
 export const ATS_TYPES = ['greenhouse', 'lever', 'ashby', 'workable', 'none'] as const;
@@ -194,6 +199,8 @@ export const JobSchema = JobFunnelFieldsSchema.extend({
   salary: SalarySchema.exactOptional(),
   stage: z.enum(JOB_STAGES),
   status: z.enum(JOB_STATUSES),
+  /** Server time Lookup added the job, set once; only jobs added from Lookup have it (ADR-049). */
+  addedAt: z.date().exactOptional(),
   /** Set with `status: 'applied'` (server time) and removed on leaving it (ADR-038). */
   appliedAt: z.date().exactOptional(),
   /** The job's verdict when it was marked applied. */

@@ -250,7 +250,7 @@ export function profileSeedDocuments(now: Date) {
 
 // ---- Dashboard seed (M5): judged jobs, usage, one rating, one applied-on-Apply ----
 
-type SeedSource = 'greenhouse' | 'reed' | 'adzuna' | 'hn';
+type SeedSource = 'greenhouse' | 'reed' | 'adzuna' | 'hn' | 'lookup';
 
 interface SeedJobSpec {
   id: string;
@@ -260,7 +260,7 @@ interface SeedJobSpec {
   /** Fields beyond the ingest ones: status, verdict, scores, queue state. */
   fields: Record<string, unknown>;
   description: string;
-  kind?: 'full' | 'snippet';
+  kind?: 'full' | 'snippet' | 'none';
 }
 
 const hoursAgo = (now: Date, hours: number) => new Date(now.getTime() - hours * 3_600_000);
@@ -499,6 +499,48 @@ export function devJobSeeds(now: Date): SeedJobSpec[] {
         judgedAt: hoursAgo(now, 10),
       },
     },
+    // Added from Lookup (M6, ADR-049): one with a verdict, one waiting for a pasted description.
+    {
+      id: 'dev-job-lookup-judged',
+      title: 'Operations Insights Analyst',
+      company: 'Larkspur Data',
+      source: 'lookup',
+      description:
+        'Larkspur Data is hiring an Operations Insights Analyst to turn product questions into SQL and explain the answers to the team.\n\nYou will own the weekly metrics review.',
+      fields: {
+        status: 'new',
+        addedAt: hoursAgo(now, 3),
+        ...judgedFields(
+          now,
+          2,
+          verdictFields('apply', 7.8, 6.5, 'Strong match on SQL and metrics reviews.'),
+        ),
+      },
+    },
+    {
+      id: 'dev-job-lookup-waiting',
+      title: 'Technical Support Analyst',
+      company: 'Wrenfield Cloud',
+      source: 'lookup',
+      kind: 'none',
+      description: '',
+      fields: {
+        status: 'new',
+        addedAt: hoursAgo(now, 1),
+        stage: 's2',
+        next: 'description',
+        sortAt: hoursAgo(now, 1),
+        flags: ['needs_description'],
+        triage: {
+          lane: 'secondary',
+          seniority: 'junior',
+          blockers: [],
+          pass: true,
+          triageScore: 6,
+          note: 'A customer-facing technical role.',
+        },
+      },
+    },
     {
       id: 'dev-job-queued',
       title: 'Insights Analyst',
@@ -522,6 +564,7 @@ const SEED_SOURCE_HOSTS: Record<SeedSource, string> = {
   reed: 'https://www.reed.example.com/jobs',
   adzuna: 'https://www.adzuna.example.com/jobs',
   hn: 'https://news.example.com/item',
+  lookup: 'https://www.linkedin.example.com/jobs/view',
 };
 
 /** A seed job as the plain `jobs/{id}` data and its description (REST via `toRestFields`). */

@@ -1,7 +1,7 @@
 import type { RawJob } from '@hireframe/shared';
 import { z } from 'zod';
 
-import { createAtsSource, keyedEnvelope, optionalText } from './ats.js';
+import { boardReader, createAtsSource, keyedEnvelope, optionalText, type AtsSpec } from './ats.js';
 import { parseDate, type Source, type WatchedCompany } from './types.js';
 
 /**
@@ -54,12 +54,15 @@ export function workableToRawJob(job: WorkableJob, company: WatchedCompany): Raw
   };
 }
 
+const workableSpec: AtsSpec<WorkableJob> = {
+  id: 'workable',
+  boardUrl: (company) => workableBoardUrl(company.ats.token ?? ''),
+  envelope: keyedEnvelope('jobs'),
+  item: WorkableJobSchema,
+  toRawJob: workableToRawJob,
+};
+export const workableBoard = boardReader(workableSpec);
+
 export function createWorkableSource(): Source {
-  return createAtsSource({
-    id: 'workable',
-    boardUrl: (company) => workableBoardUrl(company.ats.token ?? ''),
-    envelope: keyedEnvelope('jobs'),
-    item: WorkableJobSchema,
-    toRawJob: workableToRawJob,
-  });
+  return createAtsSource(workableSpec);
 }

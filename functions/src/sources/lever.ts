@@ -1,7 +1,7 @@
 import type { RawJob, RemoteMode, Salary } from '@hireframe/shared';
 import { z } from 'zod';
 
-import { arrayEnvelope, createAtsSource, optionalText } from './ats.js';
+import { arrayEnvelope, boardReader, createAtsSource, optionalText, type AtsSpec } from './ats.js';
 import { parseDate, type Source, type WatchedCompany } from './types.js';
 
 /**
@@ -90,12 +90,21 @@ export function leverToRawJob(posting: LeverPosting, company: WatchedCompany): R
   };
 }
 
+/** One posting: `api.lever.co/v0/postings/{token}/{id}`. */
+export function leverPostingUrl(token: string, id: string, host?: 'eu'): string {
+  const api = host === 'eu' ? 'api.eu.lever.co' : 'api.lever.co';
+  return `https://${api}/v0/postings/${encodeURIComponent(token)}/${encodeURIComponent(id)}`;
+}
+
+const leverSpec: AtsSpec<LeverPosting> = {
+  id: 'lever',
+  boardUrl: (company) => leverBoardUrl(company.ats.token ?? '', company.ats.host),
+  envelope: arrayEnvelope,
+  item: LeverPostingSchema,
+  toRawJob: leverToRawJob,
+};
+export const leverBoard = boardReader(leverSpec);
+
 export function createLeverSource(): Source {
-  return createAtsSource({
-    id: 'lever',
-    boardUrl: (company) => leverBoardUrl(company.ats.token ?? '', company.ats.host),
-    envelope: arrayEnvelope,
-    item: LeverPostingSchema,
-    toRawJob: leverToRawJob,
-  });
+  return createAtsSource(leverSpec);
 }

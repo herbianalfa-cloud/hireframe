@@ -30,7 +30,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run check` — lint + typecheck + unit tests + PII scan + eval replay (`npm run eval`)
 - `npm run format` / `npm run format:check` — Prettier (code and config; Markdown excluded)
 - `npm run scan:pii` — fail on emails/phone numbers in tracked files
-- `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria, the fake CV's facts with work rights, one LinkedIn-alert job, one alert job waiting for a description, twelve fake judged jobs and this month's usage; fake LLM and fake job APIs unless `LIVE=1`)
+- `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria, the fake CV's facts with work rights, one LinkedIn-alert job, one alert job waiting for a description, twelve fake judged jobs, two Lookup-added jobs (one judged, one waiting for a description) and this month's usage; fake LLM and fake job APIs unless `LIVE=1`)
 - `npm run test:rules` — Firestore + Storage security rules tests and emulator integration tests (`tests/emulator/`) (needs Java 21)
 - `npm run build` — build all workspaces (functions: esbuild bundle in `functions/deploy/`; Gmail bridge: `apps-script/build/`)
 - `npm run build:apps-script` — bundle the Gmail bridge (`apps-script/build/Code.js` + `appsscript.json`) for `npm exec -w apps-script clasp -- push` (RUNBOOK Part G)

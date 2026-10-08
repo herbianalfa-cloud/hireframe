@@ -59,6 +59,39 @@ export function boardsThisRun(
   return { selected, deferred };
 }
 
+/**
+ * A board's postings read without a scan: the URL, the envelope and a per-item reader that
+ * validates each posting on its own, as the source does. Lookup uses it to search one board
+ * (ADR-049).
+ */
+export interface AtsBoardReader {
+  boardUrl: (company: WatchedCompany) => string;
+  envelope: z.ZodType<unknown[]>;
+  /** Valid postings as raw jobs; `invalid` counts the ones that failed the item schema. */
+  read: (items: readonly unknown[], company: WatchedCompany) => { jobs: RawJob[]; invalid: number };
+}
+
+export function boardReader<Item>(spec: AtsSpec<Item>): AtsBoardReader {
+  return {
+    boardUrl: spec.boardUrl,
+    envelope: spec.envelope,
+    read(items, company) {
+      const jobs: RawJob[] = [];
+      let invalid = 0;
+      for (const raw of items) {
+        const parsed = spec.item.safeParse(raw);
+        if (!parsed.success) {
+          invalid += 1;
+          continue;
+        }
+        const job = spec.toRawJob(parsed.data, company);
+        if (job) jobs.push(job);
+      }
+      return { jobs, invalid };
+    },
+  };
+}
+
 export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
   let report: SourceReport = emptyReport();
   return {

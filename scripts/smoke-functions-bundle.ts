@@ -28,6 +28,9 @@ const fixtureMarkers = [
   'Mallory Systems',
   'Founding Product Analyst',
   'Bramble Software',
+  'Meridian Logistics',
+  'Roles I noted this week',
+  'Larkspur Data',
 ];
 const leaked = fixtureMarkers.filter((marker) => source.includes(marker));
 if (leaked.length > 0 && process.env.HIREFRAME_DEV_BUNDLE !== '1') {

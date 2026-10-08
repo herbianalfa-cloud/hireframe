@@ -8,6 +8,7 @@ import { makeView } from '@/features/jobs/fixtures';
 import {
   loadAgreement,
   loadTodayCounts,
+  watchAddedByYou,
   watchSpend,
   watchTodayList,
   type TodayCountResults,
@@ -20,6 +21,7 @@ import { TodayPage } from './TodayPage';
 vi.mock('@/services/dashboard', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   watchTodayList: vi.fn(),
+  watchAddedByYou: vi.fn(),
   loadTodayCounts: vi.fn(),
   watchSpend: vi.fn(),
   loadAgreement: vi.fn(),
@@ -52,7 +54,20 @@ const ready = (...views: JobView[]): LiveState<JobView[]> => ({
   invalid: 0,
 });
 
-function setup(lists: Lists, options: { search?: string; kpis?: 'ok' | 'one-fails' } = {}) {
+function setup(
+  lists: Lists,
+  options: {
+    search?: string;
+    kpis?: 'ok' | 'one-fails';
+    added?: LiveState<JobView[]>;
+    onAddedStart?: () => void;
+  } = {},
+) {
+  vi.mocked(watchAddedByYou).mockImplementation((callback) => {
+    options.onAddedStart?.();
+    callback(options.added ?? ready());
+    return () => undefined;
+  });
   vi.mocked(watchTodayList).mockImplementation((list, callback) => {
     callback(lists[list] ?? ready());
     return () => undefined;
@@ -93,6 +108,7 @@ function setup(lists: Lists, options: { search?: string; kpis?: 'ok' | 'one-fail
 
 beforeEach(() => {
   vi.mocked(watchTodayList).mockReset();
+  vi.mocked(watchAddedByYou).mockReset();
   vi.mocked(loadTodayCounts).mockReset();
   vi.mocked(watchSpend).mockReset();
   vi.mocked(setJobStatus).mockReset().mockResolvedValue();
@@ -217,6 +233,73 @@ describe('TodayPage', () => {
     const wildcard = screen.getByRole('link', { name: /see all wildcard jobs/i });
     expect(wildcard.getAttribute('href')).toBe('/jobs?verdict=wildcard&status=new');
     expect(wildcard.closest('p')?.textContent).toContain('Showing the newest 10.');
+  });
+});
+
+describe('Added by you', () => {
+  const added = (id: string, overrides = {}) =>
+    makeView(id, { title: `Added ${id}`, addedAt: new Date('2026-10-14T08:00:00Z'), ...overrides });
+
+  it('is hidden when nothing was added from Lookup', async () => {
+    setup({ apply: ready(makeView('a1')) });
+    await screen.findByText('12 judged today');
+    await waitFor(() => {
+      expect(watchAddedByYou).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByRole('heading', { name: /Added by you/ })).toBeNull();
+  });
+
+  it('lists the newest added jobs with where each one stands', async () => {
+    setup(
+      { apply: ready(makeView('a1')) },
+      {
+        added: ready(
+          added('v', { verdict: 'near_miss' }),
+          added('d', { verdict: undefined, next: 'description', stage: 's2' }),
+          added('q', { verdict: undefined, next: 's3', stage: 's2' }),
+          added('s', { verdict: undefined, skip: { stage: 's1', ruleId: 'R1' } as never }),
+        ),
+      },
+    );
+    const list = await screen.findByRole('list', { name: 'Added by you' });
+    const rows = within(list);
+    expect(rows.getByText('Added v')).toBeDefined();
+    expect(rows.getByText('Near miss')).toBeDefined();
+    expect(rows.getByText('Needs a description')).toBeDefined();
+    expect(rows.getByText('Queued for deep read')).toBeDefined();
+    expect(rows.getByText('Skipped')).toBeDefined();
+    expect(screen.getByRole('link', { name: /see all jobs you added/i }).getAttribute('href')).toBe(
+      '/jobs?added=1',
+    );
+  });
+
+  it('starts reading only after hf:usable, so it never delays it', async () => {
+    const order: string[] = [];
+    const measure = performance.measure.bind(performance);
+    vi.spyOn(performance, 'measure').mockImplementation((...args) => {
+      order.push(`measure:${args[0]}`);
+      return measure(...args);
+    });
+    setup({ apply: ready(makeView('a1')) }, { onAddedStart: () => order.push('added') });
+    await waitFor(() => {
+      expect(watchAddedByYou).toHaveBeenCalledTimes(1);
+    });
+    expect(order).toEqual(['measure:hf:usable', 'added']);
+  });
+
+  it('does not start while the Apply list is still loading', async () => {
+    setup({ apply: { status: 'loading' } });
+    await screen.findByText('12 judged today');
+    expect(watchAddedByYou).not.toHaveBeenCalled();
+  });
+
+  it('shows its own error without touching the lists', async () => {
+    setup(
+      { apply: ready(makeView('a1', { title: 'Apply role' })) },
+      { added: { status: 'error', message: "Couldn't load the jobs you added." } },
+    );
+    expect(await screen.findByText("Couldn't load the jobs you added.")).toBeDefined();
+    expect(screen.getByText('Apply role')).toBeDefined();
   });
 });
 

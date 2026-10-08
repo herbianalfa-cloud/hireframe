@@ -118,6 +118,7 @@ const SOURCE_PRIORITY: readonly JobSourceId[] = [
   'email-alert',
   'adzuna',
   'hn',
+  'lookup',
 ];
 
 function rank(job: NormalisedJob): number {

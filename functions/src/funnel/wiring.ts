@@ -9,13 +9,15 @@ import {
   type FunnelOverrides,
 } from '../config.js';
 import { getCurrentCriteria } from '../criteria.js';
+import type { HttpClient } from '../http/client.js';
 import { scanHttpClient } from '../http/scan-client.js';
 import type { LlmTransport } from '../llm/transport.js';
 import { firestoreUsageStore } from '../llm/usage-store.js';
 import { log } from '../log.js';
-import { createReedHydrator } from './hydrate.js';
-import { runFunnel, type FunnelOutcome } from './run.js';
-import { firestoreFunnelStore } from './store.js';
+import { createAtsSearch } from '../lookup/ats-search.js';
+import { composeHydrators, createAtsHydrator, createReedHydrator } from './hydrate.js';
+import { runFunnel, type FunnelOutcome, type Hydrator } from './run.js';
+import { firestoreFunnelStore, type FirestoreFunnelStore } from './store.js';
 
 /**
  * Builds the funnel for `scanNow`, `scheduledScan` and `rescore` from the app config and the
@@ -47,6 +49,39 @@ export function funnelOverrides(config: Pick<AppConfig, 'funnel'>): FunnelOverri
   return {};
 }
 
+/**
+ * The scan's ATS hydrator: its own HTTP client (the forbidden hosts, the run's deadline and the
+ * pauses earlier runs were given), saving the pauses it is given when the run ends.
+ */
+export interface AtsHydratorDeps {
+  fetch: typeof fetch;
+  store: Pick<
+    FirestoreFunnelStore,
+    'watchedCompanies' | 'attachPosting' | 'atsPauses' | 'saveAtsPauses'
+  >;
+  /** Epoch ms after which no board request starts (the S3 stop, from the invocation). */
+  deadline: number;
+}
+
+/** The client behind the ATS hydrator: scan rules, the deadline and the carried pauses. */
+export async function atsHttpClient(deps: AtsHydratorDeps): Promise<HttpClient> {
+  return scanHttpClient(deps.fetch, deps.deadline, await deps.store.atsPauses(new Date()));
+}
+
+export async function atsHydratorFor(deps: AtsHydratorDeps): Promise<Hydrator> {
+  const http = await atsHttpClient(deps);
+  return createAtsHydrator({
+    search: createAtsSearch({
+      http,
+      watched: () => deps.store.watchedCompanies(),
+      maxBoards: FUNNEL.atsBoardsPerRun,
+    }),
+    attach: (entry, match, now) => deps.store.attachPosting(entry, match.posting, now),
+    now: () => new Date(),
+    savePauses: () => deps.store.saveAtsPauses(http.pauses(), new Date()),
+  });
+}
+
 export function funnelFor(wiring: FunnelWiring): FunnelRunner {
   const monthlyCapPence = wiring.config.monthlyCapPence ?? DEFAULT_MONTHLY_CAP_PENCE;
   const limits = funnelLimits(monthlyCapPence, funnelOverrides(wiring.config));
@@ -54,7 +89,7 @@ export function funnelFor(wiring: FunnelWiring): FunnelRunner {
     const store = firestoreFunnelStore(wiring.firestore);
     const criteria = await getCurrentCriteria(wiring.firestore);
     const reedApiKey = wiring.reedApiKey;
-    const hydrator = reedApiKey
+    const reed = reedApiKey
       ? createReedHydrator({
           http: scanHttpClient(
             wiring.fetch,
@@ -69,6 +104,13 @@ export function funnelFor(wiring: FunnelWiring): FunnelRunner {
           now: () => new Date(),
         })
       : null;
+    // A separate client: Reed's request count is its quota (ADR-029), the boards' is not.
+    const ats = await atsHydratorFor({
+      fetch: wiring.fetch,
+      store,
+      deadline: invokedAt.getTime() + FUNNEL.s3StopMs,
+    });
+    const hydrator = composeHydrators(reed ? [reed, ats] : [ats]);
     log.info('funnel.started', { runId, rescore: rescoreSince !== undefined });
     const outcome = await runFunnel(
       {

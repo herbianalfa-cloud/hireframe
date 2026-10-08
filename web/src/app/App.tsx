@@ -16,6 +16,9 @@ const TodayPage = lazy(() =>
 const JobsPage = lazy(() =>
   import('@/features/jobs/JobsPage').then((module) => ({ default: module.JobsPage })),
 );
+const LookupPage = lazy(() =>
+  import('@/features/lookup/LookupPage').then((module) => ({ default: module.LookupPage })),
+);
 const ProfilePage = lazy(() =>
   import('@/features/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })),
 );
@@ -41,6 +44,7 @@ const screen = (page: ReactNode) => () => <Suspense fallback={<ScreenLoading />}
 const PAGES: Readonly<Record<string, () => ReactNode>> = {
   '/': screen(<TodayPage />),
   '/jobs': screen(<JobsPage />),
+  '/lookup': screen(<LookupPage />),
   '/profile': screen(<ProfilePage />),
   '/criteria': screen(<CriteriaPage />),
   '/system': screen(<SystemPage />),

@@ -46,7 +46,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     inTabBar: true,
     empty: {
       title: 'Look up a job link',
-      body: "Paste any job URL to see whether it's been seen, and what the verdict was. Coming soon.",
+      body: "Paste any job URL to see whether it's been seen, and what the verdict was, or paste a LinkedIn results page to add the jobs you haven't seen.",
     },
   },
   {

@@ -1,5 +1,6 @@
 import {
   FUNNEL_LIMITS,
+  JobSchema,
   type ExperienceAsk,
   type Job,
   type JobDeep,
@@ -226,4 +227,23 @@ export function needsDescriptionPatch(job: Pick<Job, 'flags'>): JobPatch {
     set: { next: 'description', flags: mergeFlags(job.flags, ['needs_description']) },
     clear: [],
   };
+}
+
+/** A dead `describe` claim released: the job waits for a description again (ADR-049). */
+export function releasedClaimPatch(job: Pick<Job, 'flags'>): JobPatch {
+  return { ...needsDescriptionPatch(job), clear: ['describingAt'] };
+}
+
+/**
+ * The job as it will be once `patch` is written: fields set, fields cleared, spend added. The
+ * store writes the same patch to Firestore; Lookup uses this to build a new job's first state.
+ */
+export function applyPatch(job: Job, patch: JobPatch, now: Date): Job {
+  const cleared = new Set<string>(patch.clear);
+  const next: Record<string, unknown> = Object.fromEntries(
+    Object.entries({ ...job, ...patch.set }).filter(([name]) => !cleared.has(name)),
+  );
+  if (patch.addCostPence) next.costPence = (job.costPence ?? 0) + patch.addCostPence;
+  next.updatedAt = now;
+  return JobSchema.parse(next);
 }

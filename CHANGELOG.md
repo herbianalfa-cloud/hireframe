@@ -3,6 +3,37 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+
+## [0.6.2] - 2026-10-08
+### Added
+- **M6 PR 6B, session 1: Lookup, the server** (ADR-049). The Lookup screen comes in the web session.
+  - **`lookup` callable** (owner only, App Check, 300 s). `add` creates the jobs the owner picked from a pasted LinkedIn results page or a Greenhouse, Lever, Ashby or Workable URL (source `lookup`, `addedAt`, a seen job is never re-created), under the scan lock for the create step only (waits up to 20 s, then answers `busy`). S1 runs at once (a skip is final and free), then S2 on title, company and location, the ATS board search for the full posting, and S3 when there is text, outside the lock. A job with no posting waits for a description (`next: 'description'`). `describe` judges a pasted description (claims the job, re-runs S1 on the text, S2 if there is no triage, then S3; a cap or error sets `next` so the next scan judges it). `parse` reads a pasted page the deterministic parser couldn't, with one cheap-model call (`pasteParse`).
+  - **Spend** goes through `llm.call()` under the monthly cap and a **25p daily Lookup cap** (`config/app.lookup.dailyCapPence`). Over a cap, the 200 s deadline or three errors in a row, the rest stays queued and is reported; every write after a model call is a transaction with a precondition, so a scan that moved the job in the meantime wins (`lookup.dropped`).
+  - **User-added jobs go first in scans:** S2 and S3 read them (newest `addedAt` first) before the usual order, through the new index `jobs (next, addedAt desc)`; if that read fails the stage logs it and falls back.
+  - **ATS board search:** the unique posting of a watched company's board for a job's title (the city decides among several; zero or several is no match), using the scan's modules and HTTP client. It is also a second hydrator in S3, so an alert job waiting for text gets its posting in a scan. The posting's text, source and keys are attached to the job.
+  - **No LinkedIn fetch, in code:** the HTTP client refuses LinkedIn, Indeed, Wellfound and Glassdoor (`forbidden_host`) before any request.
+  - **Shared:** the funnel steps now live in `funnel/steps.ts` for `runFunnel` and `lookup` (`run.test.ts` and the eval unchanged); `parseLookupInput`, `parseResultsPage`, `parseAtsUrl`, `ageToPostedAt` and the callable schemas in `packages/shared/src/lookup.ts`; source `lookup`, `Job.addedAt`, `Job.describingAt`, the flag `posted_estimated` (an age such as "3 days ago" gives an approximate `postedAt`, kept through a re-score).
+  - `npm run dev` seeds two Lookup-added jobs; emulator tests cover the precondition writes, the claim, the attach, the queries, the daily cap under concurrency and the R8 match by ID.
+- **M6 PR 6B, session 2: Lookup, the web** (ADR-049). M6 is done.
+  - **Lookup screen** (`/lookup`, lazy). Paste job links to see whether each has been seen: **Seen** shows the verdict (or where it waits), the stage it stopped at, first-seen and judged dates, and opens the job; **Not seen yet** offers **Add from the job board** for a Greenhouse, Lever, Ashby or Workable link, or **Add by hand** (title, company, optional description) for any other. Matching is a plain read of your jobs (by source key, then by canonical URL), so it costs nothing and works during a scan.
+  - **Results page.** Copy a LinkedIn search results page (select all, copy) and paste it: a preview lists the jobs read, marks the ones already seen, and **Add n jobs** judges the ticked ones at once, with a per-job outcome (verdict, skipped and why, needs a description, queued, review). A scan holding the lock answers "adding will work in about n min"; a cap lists which jobs were queued. A page nothing can read offers **Let the model try** (one small call). The page's HTML is read only for its job links, with `DOMParser`, and never inserted into the page.
+  - **Waiting for a description** on Lookup lists the jobs that need one (alert jobs and ones you added): **Open on LinkedIn** (or **Search on LinkedIn**) and **Paste description** → **Judge**. The job sheet has the same paste control for such a job, and marks a job **Added by you**.
+  - **Today → Added by you** (newest 5, with each job's state; hidden when empty; read only after `hf:usable`) and **Jobs → Added by you** (a standalone filter, paged, like Needs review). Rows without a verdict show where they stand.
+  - **Query specs and indexes:** `lookupKeysSpec`, `lookupUrlSpec`, `needsDescriptionSpec` and `addedByYouSpec`, checked against `firestore.indexes.json` ("serves every Lookup query"). No new client writes, rules or index.
+  - **Bundle:** initial JS 292.9 → 293.1 kB gzip (limit 300); Lookup (5.2 kB), its paste control (5.1 kB with the Functions SDK) and the job sheet (5.7 kB, now shared) are lazy chunks.
+
+### Fixed
+- **Review of PR 6B.**
+  - **The HTTP client checks every redirect.** It follows at most 3 hops by hand and refuses a hop to a forbidden host (`forbidden_host`) before any request. The forbidden list is now the default for every client (the watchlist detector included) and covers `angel.co`, `lnkd.in` and the Indeed and Glassdoor country domains.
+  - **Board host pauses are carried and saved** for the scan's ATS hydrator and for Lookup: a Retry-After beyond the cap is honoured by the next scan and Lookup, on the ATS source's health record.
+  - **A dead `describe` no longer strands a job.** The expiry sweep returns a claim older than 10 minutes with no verdict to `next: 'description'` (`funnel.describe_released`); `describingAt` joins the funnel fields.
+  - Tests: redirects and the default list, the hydrator's wiring and deadline, the sweep, the unretried Lookup call, and the R8 match through the web specs with verdict and dates. Invented title, town and salary replace strings that looked copied from a real paste.
+
+### Changed
+- **The results-page parser reads the real LinkedIn copy format.** A card is its title twice on one line (a verified job has ` (Verified job)` between the copies), then the company, the location (a bare town, or with `(Hybrid)` / `(Remote)` / `(On-site)`), badges and alumni lines, a salary such as `27K GBP/yr`, `Viewed`, and an age that is also doubled (`Posted 1 week ago1 week ago`). Cards are found by the doubled title, so bare towns work; the age is read once. The assumed format and its fixture are replaced (fake values only). A copy that begins mid-card loses that card.
+- The Lookup nav entry's text no longer says "Coming soon".
+
+## [0.6.1]
 ### Added
 - **Funnel intake PR B (ADR-045).** S1 now skips sales titles (`Sales Executive`, `Sales Representative`, `Sales Development`, `Sales Associate`, `Account Executive`, `Business Development`, `SDR`, `BDR`) after the panel counted 43 S2 skips, no good job and no job waiting for S3 among them; Sales Engineer, Presales and Solutions Consultant still pass, and the Sales Executive, Sales Representative, Sales Development and Sales Associate terms allow a `Pre` prefix (Pre-Sales Associate) while Business Development allows `Solutions Engineer`. C1 to C3 were rejected (they hit good jobs), C5 and C6 are not built. System gets "Recent S1 skips by rule" (the last 7 days, 20 per rule, with a new `(skip.ruleId, judgedAt)` index) for a first-week spot-check. Title-table rows for the new rules.
 

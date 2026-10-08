@@ -1,10 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
+import { Badge } from '@/components/ui/badge';
 import type { JobView } from '@/services/jobs';
 
 import { performJobAction, type JobActionHandlers } from './actions';
 
-import { ageText, scoreText } from './labels';
+import { ageText, pendingStateText, scoreText } from './labels';
 import { SourceAttribution } from './AdzunaAttribution';
 import { useListKeys } from './useListKeys';
 import { VerdictBadge } from './VerdictBadge';
@@ -22,6 +23,8 @@ function JobRow({
 }) {
   const { job } = view;
   const hasAttribution = job.sources.some((s) => s.id === 'adzuna' || s.id === 'reed');
+  // A job added from Lookup can be waiting rather than judged; say where it stands.
+  const pending = pendingStateText(job);
   return (
     <li>
       <button
@@ -36,6 +39,7 @@ function JobRow({
         <span className="flex flex-wrap items-center gap-2">
           <span className="min-w-0 flex-1 text-sm font-medium">{job.title}</span>
           {showVerdict && job.verdict ? <VerdictBadge verdict={job.verdict} /> : null}
+          {pending ? <Badge>{pending}</Badge> : null}
           {job.status !== 'new' ? (
             <span className="text-xs text-muted-foreground capitalize">{job.status}</span>
           ) : null}

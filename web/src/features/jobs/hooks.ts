@@ -76,8 +76,8 @@ interface Loaded {
  * filtering in the browser (ADR-044); there is no cursor then.
  */
 export function useJobsList(filters: JobFilters, { full = false }: { full?: boolean } = {}) {
-  const { verdict, status, needsReview } = filters;
-  const sig = `${verdict ?? ''}|${status ?? ''}|${String(needsReview ?? false)}|${full ? 'full' : 'paged'}`;
+  const { verdict, status, needsReview, addedByYou } = filters;
+  const sig = `${verdict ?? ''}|${status ?? ''}|${String(needsReview ?? false)}|${String(addedByYou ?? false)}|${full ? 'full' : 'paged'}`;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -87,6 +87,7 @@ export function useJobsList(filters: JobFilters, { full = false }: { full?: bool
       ...(verdict ? { verdict } : {}),
       ...(status ? { status } : {}),
       ...(needsReview ? { needsReview } : {}),
+      ...(addedByYou ? { addedByYou } : {}),
     };
     const read = full
       ? loadJobsWindow(current).then((window) => ({
@@ -114,7 +115,7 @@ export function useJobsList(filters: JobFilters, { full = false }: { full?: bool
     return () => {
       cancelled = true;
     };
-  }, [sig, verdict, status, needsReview, full]);
+  }, [sig, verdict, status, needsReview, addedByYou, full]);
 
   const loadMore = useCallback(() => {
     if (loaded?.sig !== sig || !loaded.cursor || loadingMore) return;
@@ -124,6 +125,7 @@ export function useJobsList(filters: JobFilters, { full = false }: { full?: bool
         ...(verdict ? { verdict } : {}),
         ...(status ? { status } : {}),
         ...(needsReview ? { needsReview } : {}),
+        ...(addedByYou ? { addedByYou } : {}),
       },
       loaded.cursor,
     ).then(
@@ -144,7 +146,7 @@ export function useJobsList(filters: JobFilters, { full = false }: { full?: bool
         setLoadingMore(false);
       },
     );
-  }, [loaded, sig, loadingMore, verdict, status, needsReview]);
+  }, [loaded, sig, loadingMore, verdict, status, needsReview, addedByYou]);
 
   const patch = useCallback((view: JobView) => {
     setLoaded((previous) =>

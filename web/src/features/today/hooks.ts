@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import {
   loadTodayCounts,
+  watchAddedByYou,
   type TodayCountResults,
   watchSpend,
   watchTodayList,
@@ -14,6 +15,13 @@ import type { LiveState } from '@/services/profile';
 export function useTodayList(list: TodayListId): LiveState<JobView[]> {
   const [state, setState] = useState<LiveState<JobView[]>>({ status: 'loading' });
   useEffect(() => watchTodayList(list, setState), [list]);
+  return state;
+}
+
+/** The newest jobs added from Lookup; Today mounts the section only after `hf:usable`. */
+export function useAddedByYou(): LiveState<JobView[]> {
+  const [state, setState] = useState<LiveState<JobView[]>>({ status: 'loading' });
+  useEffect(() => watchAddedByYou(setState), []);
   return state;
 }
 

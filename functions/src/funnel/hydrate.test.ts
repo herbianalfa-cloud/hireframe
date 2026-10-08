@@ -2,7 +2,9 @@ import type { Quota } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
 import { testHttpClient } from '../sources/testing.js';
-import { createReedHydrator } from './hydrate.js';
+import { createAtsSearch } from '../lookup/ats-search.js';
+import { FAKE_WATCHLIST } from '../sources/fixtures.js';
+import { composeHydrators, createAtsHydrator, createReedHydrator } from './hydrate.js';
 import { testJob, TEST_NOW } from './testing.js';
 
 const reedJob = (externalId: string) =>
@@ -76,5 +78,99 @@ describe('createReedHydrator', () => {
     const spent = setup({ quota });
     expect(await spent.hydrator.fullText({ id: 'a', job: reedJob('1') })).toBeNull();
     expect(spent.hydrator.counts().attempted).toBe(0);
+  });
+});
+
+describe('ATS hydrator', () => {
+  const alertJob = (patch: Parameters<typeof testJob>[0] = {}) =>
+    testJob({
+      title: 'Product Analyst',
+      company: 'Acme Analytics',
+      city: 'london',
+      descriptionKind: 'none',
+      sources: [
+        {
+          id: 'linkedin-alert',
+          url: 'https://www.linkedin.com/jobs/view/4012345678',
+          externalId: '4012345678',
+          seenAt: TEST_NOW,
+        },
+      ],
+      ...patch,
+    });
+
+  function atsSetup() {
+    const attached: { jobId: string; sourceId: string }[] = [];
+    const hydrator = createAtsHydrator({
+      search: createAtsSearch({
+        http: testHttpClient(),
+        watched: () => Promise.resolve(FAKE_WATCHLIST),
+        maxBoards: 5,
+      }),
+      attach: (entry, match) => {
+        attached.push({ jobId: entry.id, sourceId: match.posting.sourceId });
+        return Promise.resolve();
+      },
+      now: () => TEST_NOW,
+    });
+    return { hydrator, attached };
+  }
+
+  it('returns the board posting’s text for an alert job and attaches it', async () => {
+    const { hydrator, attached } = atsSetup();
+    const text = await hydrator.fullText({ id: 'j1', job: alertJob() });
+    expect(text).toContain('weekly metrics review');
+    expect(attached).toEqual([{ jobId: 'j1', sourceId: 'greenhouse' }]);
+    expect(hydrator.counts()).toEqual({ attempted: 1, ok: 1, failed: 0 });
+  });
+
+  it('counts a failure and attaches nothing when the run deadline has passed', async () => {
+    const attached: string[] = [];
+    const hydrator = createAtsHydrator({
+      search: createAtsSearch({
+        // The test client's clock starts at 2026-10-01T08:00Z; its deadline is a minute earlier.
+        http: testHttpClient({ deadline: Date.parse('2026-10-01T07:59:00Z') }),
+        watched: () => Promise.resolve(FAKE_WATCHLIST),
+        maxBoards: 5,
+      }),
+      attach: (entry) => {
+        attached.push(entry.id);
+        return Promise.resolve();
+      },
+      now: () => TEST_NOW,
+    });
+    expect(await hydrator.fullText({ id: 'j1', job: alertJob() })).toBeNull();
+    expect(attached).toEqual([]);
+    expect(hydrator.counts()).toEqual({ attempted: 1, ok: 0, failed: 1 });
+  });
+
+  it('is silent for a company that is not on the watchlist (not an attempt)', async () => {
+    const { hydrator, attached } = atsSetup();
+    expect(
+      await hydrator.fullText({ id: 'j1', job: alertJob({ company: 'Nobody Ltd' }) }),
+    ).toBeNull();
+    expect(attached).toEqual([]);
+    expect(hydrator.counts()).toEqual({ attempted: 0, ok: 0, failed: 0 });
+  });
+
+  it('counts an attempt with no match, but not as a failure', async () => {
+    const { hydrator } = atsSetup();
+    expect(
+      await hydrator.fullText({ id: 'j1', job: alertJob({ title: 'Chief Wizard' }) }),
+    ).toBeNull();
+    expect(hydrator.counts()).toEqual({ attempted: 1, ok: 0, failed: 0 });
+  });
+
+  it('composes with Reed: the first hydrator with text wins, counts add up', async () => {
+    const first = {
+      fullText: () => Promise.resolve(null),
+      counts: () => ({ attempted: 2, ok: 0, failed: 1 }),
+      finish: () => Promise.resolve(),
+    };
+    const { hydrator } = atsSetup();
+    const both = composeHydrators([first, hydrator]);
+    expect(await both.fullText({ id: 'j1', job: alertJob() })).toContain('weekly metrics review');
+    expect(both.counts()).toEqual({ attempted: 3, ok: 1, failed: 1 });
+    await expect(both.finish()).resolves.toBeUndefined();
   });
 });

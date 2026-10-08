@@ -15,7 +15,7 @@ import {
   emptyUsage,
   type LeaseStore,
 } from '../llm/usage-store.js';
-import type { JobPatch } from './judgement.js';
+import { applyPatch, type JobPatch } from './judgement.js';
 import type { CompanyInfo, FunnelStore, StoredJob } from './run.js';
 
 /** Test doubles for the funnel: an in-memory store and lease store with Firestore's semantics. */
@@ -86,16 +86,6 @@ export function testJob(patch: Partial<Job> = {}): Job {
   };
 }
 
-function applyPatch(job: Job, patch: JobPatch): Job {
-  const cleared = new Set<string>(patch.clear);
-  const next: Record<string, unknown> = Object.fromEntries(
-    Object.entries({ ...job, ...patch.set }).filter(([name]) => !cleared.has(name)),
-  );
-  if (patch.addCostPence) next.costPence = (job.costPence ?? 0) + patch.addCostPence;
-  next.updatedAt = TEST_NOW;
-  return JobSchema.parse(next);
-}
-
 export interface MemoryFunnelStore extends FunnelStore {
   jobs: Map<string, Job>;
   texts: Map<string, string>;
@@ -155,6 +145,12 @@ export function memoryFunnelStore(
       );
       return Promise.resolve(waiting.slice(0, limit));
     },
+    queuedAdded: (stage, limit) =>
+      Promise.resolve(
+        list((job) => job.next === stage && job.addedAt !== undefined)
+          .sort((a, b) => time(b.job.addedAt) - time(a.job.addedAt))
+          .slice(0, limit),
+      ),
     staleQueued: (stage, before, limit) =>
       Promise.resolve(
         list(
@@ -164,6 +160,14 @@ export function memoryFunnelStore(
             job.sortAt.getTime() < before.getTime(),
         )
           .sort((a, b) => time(b.job.sortAt) - time(a.job.sortAt))
+          .slice(0, limit),
+      ),
+    staleDescribing: (before, limit) =>
+      Promise.resolve(
+        list(
+          (job) => job.describingAt !== undefined && job.describingAt.getTime() < before.getTime(),
+        )
+          .sort((a, b) => time(a.job.describingAt) - time(b.job.describingAt))
           .slice(0, limit),
       ),
     recentJobs: (since, limit) =>
@@ -185,7 +189,7 @@ export function memoryFunnelStore(
     apply: (updates) => {
       for (const update of updates) {
         patches.push(update);
-        jobs.set(update.jobId, applyPatch(store.get(update.jobId), update.patch));
+        jobs.set(update.jobId, applyPatch(store.get(update.jobId), update.patch, TEST_NOW));
       }
       return Promise.resolve(0);
     },

@@ -1,4 +1,5 @@
 import {
+  CompanySchema,
   COLLECTIONS,
   DOCS,
   FactSchema,
@@ -12,6 +13,7 @@ import {
   QuotaSchema,
   SourceHealthSchema,
   type FunnelFact,
+  type NormalisedJob,
   type Quota,
   type QueueStage,
 } from '@hireframe/shared';
@@ -19,10 +21,18 @@ import { FieldValue, type Firestore, type Query } from 'firebase-admin/firestore
 
 import { SCAN } from '../config.js';
 import type { HostPause } from '../http/client.js';
+import { ATS_SOURCE_IDS, mergePauses, pausesBySource } from '../sources/ats-pauses.js';
+import type { WatchedCompany } from '../sources/types.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 import type { JobPatch } from './judgement.js';
-import { staleQueuedSpec } from './queries.js';
+import {
+  addedQueuedSpec,
+  staleDescribingSpec,
+  staleQueuedSpec,
+  watchedCompaniesSpec,
+} from './queries.js';
+import { planAttachment } from './attach.js';
 import type { CompanyInfo, FunnelStore, StoredJob } from './run.js';
 
 /**
@@ -57,10 +67,26 @@ export function patchUpdate(patch: JobPatch, now: Date): Record<string, unknown>
 
 export interface FirestoreFunnelStore extends FunnelStore {
   saveFullText(jobId: string, text: string, now: Date): Promise<void>;
+  /** Watched companies with a job board, for the ATS search (a spec-built read). */
+  watchedCompanies(): Promise<WatchedCompany[]>;
+  /** Saves a board posting's text on the job and merges its source and keys. */
+  attachPosting(entry: StoredJob, posting: NormalisedJob, now: Date): Promise<void>;
   reedQuota(): Promise<Quota | undefined>;
   /** Hosts Reed's last scan was told to stay away from (a long Retry-After). */
   reedPauses(): Promise<HostPause[]>;
   saveReedQuota(quota: Quota): Promise<void>;
+  /** Hosts the ATS sources' last scans were told to stay away from (still in force). */
+  atsPauses(now: Date): Promise<HostPause[]>;
+  /** Saves pauses the ATS search was given, on the source that owns each host (ADR-049). */
+  saveAtsPauses(pauses: readonly HostPause[], now: Date): Promise<void>;
+}
+
+/** `sources/{id}.pausedHosts` as pauses; anything invalid reads as none. */
+function storedPauses(value: unknown): HostPause[] {
+  const parsed = SourceHealthSchema.shape.pausedHosts.safeParse(timestampsToDates(value));
+  return parsed.success
+    ? parsed.data.map(({ host, until }) => ({ host, until: until.getTime() }))
+    : [];
 }
 
 export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
@@ -129,9 +155,37 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
       );
     },
 
+    queuedAdded(stage, limit) {
+      if (limit <= 0) return Promise.resolve([]);
+      const spec = addedQueuedSpec(stage);
+      const filtered = spec.filters.reduce<Query>(
+        (query, filter) => query.where(filter.field, filter.op, filter.value),
+        jobs,
+      );
+      const ordered = spec.orderBy.reduce(
+        (query, order) => query.orderBy(order.field, order.direction),
+        filtered,
+      );
+      return read(ordered.limit(limit));
+    },
+
     staleQueued(stage, before, limit) {
       if (limit <= 0) return Promise.resolve([]);
       const spec = staleQueuedSpec(stage, before);
+      const filtered = spec.filters.reduce<Query>(
+        (query, filter) => query.where(filter.field, filter.op, filter.value),
+        jobs,
+      );
+      const ordered = spec.orderBy.reduce(
+        (query, order) => query.orderBy(order.field, order.direction),
+        filtered,
+      );
+      return read(ordered.limit(limit));
+    },
+
+    staleDescribing(before, limit) {
+      if (limit <= 0) return Promise.resolve([]);
+      const spec = staleDescribingSpec(before);
       const filtered = spec.filters.reduce<Query>(
         (query, filter) => query.where(filter.field, filter.op, filter.value),
         jobs,
@@ -236,6 +290,43 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
       await batch.commit();
     },
 
+    async watchedCompanies() {
+      const spec = watchedCompaniesSpec();
+      const query = spec.filters.reduce<Query>(
+        (found, filter) => found.where(filter.field, filter.op, filter.value),
+        db.collection(spec.collection),
+      );
+      const snapshot = await query.select('name', 'ats').get();
+      const found: WatchedCompany[] = [];
+      for (const doc of snapshot.docs) {
+        const parsed = CompanySchema.pick({ name: true, ats: true }).safeParse(
+          timestampsToDates(doc.data()),
+        );
+        if (parsed.success && parsed.data.ats.type !== 'none') {
+          found.push({ id: doc.id, name: parsed.data.name, ats: parsed.data.ats });
+        }
+      }
+      return found;
+    },
+
+    async attachPosting(entry, posting, now) {
+      const attachment = planAttachment(entry.job, posting, now);
+      const batch = db.batch();
+      batch.set(db.doc(PATHS.jobDescription(entry.id)), attachment.description);
+      batch.update(db.doc(PATHS.job(entry.id)), {
+        descriptionKind: 'full',
+        ...(attachment.addSources.length
+          ? { sources: FieldValue.arrayUnion(...attachment.addSources) }
+          : {}),
+        ...(attachment.addKeys.length
+          ? { keys: FieldValue.arrayUnion(...attachment.addKeys) }
+          : {}),
+        ...(attachment.postedAt ? { postedAt: attachment.postedAt } : {}),
+        updatedAt: now,
+      });
+      await batch.commit();
+    },
+
     async reedQuota() {
       const snapshot = await db.doc(PATHS.source('reed')).get();
       const parsed = QuotaSchema.safeParse(timestampsToDates(snapshot.get('quota')));
@@ -244,12 +335,34 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
 
     async reedPauses() {
       const snapshot = await db.doc(PATHS.source('reed')).get();
-      const parsed = SourceHealthSchema.shape.pausedHosts.safeParse(
-        timestampsToDates(snapshot.get('pausedHosts')),
+      return storedPauses(snapshot.get('pausedHosts'));
+    },
+
+    async atsPauses(now) {
+      const snapshots = await db.getAll(...ATS_SOURCE_IDS.map((id) => db.doc(PATHS.source(id))));
+      return mergePauses(
+        snapshots.flatMap((snapshot) => storedPauses(snapshot.get('pausedHosts'))),
+        [],
+        now.getTime(),
       );
-      return parsed.success
-        ? parsed.data.map(({ host, until }) => ({ host, until: until.getTime() }))
-        : [];
+    },
+
+    async saveAtsPauses(pauses, now) {
+      for (const [id, fresh] of pausesBySource(pauses)) {
+        const ref = db.doc(PATHS.source(id));
+        await db.runTransaction(async (tx) => {
+          const merged = mergePauses(
+            storedPauses((await tx.get(ref)).get('pausedHosts')),
+            fresh,
+            now.getTime(),
+          );
+          tx.set(
+            ref,
+            { pausedHosts: merged.map(({ host, until }) => ({ host, until: new Date(until) })) },
+            { merge: true },
+          );
+        });
+      }
     },
 
     async saveReedQuota(quota) {

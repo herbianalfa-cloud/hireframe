@@ -1,7 +1,7 @@
 import type { RawJob } from '@hireframe/shared';
 import { z } from 'zod';
 
-import { createAtsSource, keyedEnvelope, optionalText } from './ats.js';
+import { boardReader, createAtsSource, keyedEnvelope, optionalText, type AtsSpec } from './ats.js';
 import { parseDate, type Source, type WatchedCompany } from './types.js';
 
 /**
@@ -53,12 +53,20 @@ function decodeOnce(escaped: string): string {
     .replace(/&amp;/g, '&');
 }
 
+/** One posting: `boards-api.greenhouse.io/v1/boards/{token}/jobs/{id}` (full content included). */
+export function greenhouseJobUrl(token: string, id: string): string {
+  return `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(token)}/jobs/${encodeURIComponent(id)}`;
+}
+
+const greenhouseSpec: AtsSpec<GreenhouseJob> = {
+  id: 'greenhouse',
+  boardUrl: (company) => greenhouseBoardUrl(company.ats.token ?? ''),
+  envelope: keyedEnvelope('jobs'),
+  item: GreenhouseJobSchema,
+  toRawJob: greenhouseToRawJob,
+};
+export const greenhouseBoard = boardReader(greenhouseSpec);
+
 export function createGreenhouseSource(): Source {
-  return createAtsSource({
-    id: 'greenhouse',
-    boardUrl: (company) => greenhouseBoardUrl(company.ats.token ?? ''),
-    envelope: keyedEnvelope('jobs'),
-    item: GreenhouseJobSchema,
-    toRawJob: greenhouseToRawJob,
-  });
+  return createAtsSource(greenhouseSpec);
 }

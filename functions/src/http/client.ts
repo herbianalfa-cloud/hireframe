@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 
+import { FORBIDDEN_FETCH_HOSTS } from '../config.js';
 import { ALLOW_ALL, robotsFromResponse, type RobotsPolicy } from './robots.js';
 
 /**
@@ -26,7 +27,9 @@ export type HttpErrorCode =
   | 'robots_disallowed'
   | 'deadline'
   /** The host asked us to stay away (a Retry-After beyond the cap); no request was made. */
-  | 'host_paused';
+  | 'host_paused'
+  /** A host we never fetch (CLAUDE.md hard rule: LinkedIn and the other alert-only boards). */
+  | 'forbidden_host';
 
 export class HttpError extends Error {
   override name = 'HttpError';
@@ -49,7 +52,7 @@ export interface HostPolicy {
 }
 
 export type HttpLogEvent =
-  'http.retry' | 'http.failed' | 'http.robots_blocked' | 'http.host_paused';
+  'http.retry' | 'http.failed' | 'http.robots_blocked' | 'http.host_paused' | 'http.forbidden_host';
 
 /** A host that told us to come back later (epoch ms). */
 export interface HostPause {
@@ -78,6 +81,12 @@ export interface HttpClientDeps {
   maxBodyBytes: number;
   /** Epoch ms after which no request starts. */
   deadline?: number;
+  /**
+   * Hosts (and their subdomains) this client never requests, redirects included: `getJson`
+   * throws `forbidden_host` before any fetch, robots.txt included (ADR-004, ADR-049). Defaults to
+   * `FORBIDDEN_FETCH_HOSTS`; a client can only be made laxer by passing a shorter list on purpose.
+   */
+  forbiddenHosts?: readonly string[];
   /** Pauses carried over from earlier runs: no request goes to these hosts until then. */
   paused?: readonly HostPause[];
   log: HttpLog;
@@ -97,6 +106,9 @@ export interface HttpClient {
   pauses(): HostPause[];
 }
 
+/** Redirect hops followed by hand, each checked against the forbidden hosts. */
+const MAX_REDIRECTS = 3;
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 function retryAfterMs(header: string | null, now: number): number | null {
@@ -172,18 +184,44 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       logPause(url.host, label);
       throw new HttpError('host_paused');
     }
-    const timeoutMs = Math.min(policy.timeoutMs, remaining());
-    if (timeoutMs <= 0) throw new HttpError('deadline');
-    if (counted) requestCount += 1;
-    try {
-      return await deps.fetch(url, {
-        headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...headers },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      const name = error instanceof Error ? error.name : '';
-      throw new HttpError(name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network');
+    // Redirects are followed by hand, a few hops at most, and every hop is checked against the
+    // forbidden list: a board API must not be able to send us to LinkedIn (ADR-049).
+    let target = url;
+    for (let hop = 0; ; hop++) {
+      const timeoutMs = Math.min(policy.timeoutMs, remaining());
+      if (timeoutMs <= 0) throw new HttpError('deadline');
+      if (counted) requestCount += 1;
+      let response: Response;
+      try {
+        response = await deps.fetch(target, {
+          headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...headers },
+          redirect: 'manual',
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        const name = error instanceof Error ? error.name : '';
+        throw new HttpError(
+          name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network',
+        );
+      }
+      if (!REDIRECT_STATUS.has(response.status)) return response;
+      void response.body?.cancel().catch(() => undefined);
+      const location = response.headers.get('location');
+      let next: URL | null;
+      try {
+        next = location ? new URL(location, target) : null;
+      } catch {
+        next = null;
+      }
+      if (!next || hop >= MAX_REDIRECTS || !/^https?:$/.test(next.protocol)) {
+        throw new HttpError('http_status', response.status);
+      }
+      if (isForbidden(next.hostname)) {
+        deps.log('warn', 'http.forbidden_host', { host: next.host, label });
+        throw new HttpError('forbidden_host');
+      }
+      target = next;
+      await slot(target.host, Math.max(intervalMs, deps.hostPolicy(target.host).intervalMs));
     }
   }
 
@@ -227,10 +265,21 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     return loading;
   }
 
+  function isForbidden(hostname: string): boolean {
+    const host = hostname.toLowerCase();
+    return (deps.forbiddenHosts ?? FORBIDDEN_FETCH_HOSTS).some(
+      (banned) => host === banned || host.endsWith(`.${banned}`),
+    );
+  }
+
   async function getJson<T>(rawUrl: string, schema: z.ZodType<T>, options: RequestOptions) {
     const url = new URL(rawUrl);
     const policy = deps.hostPolicy(url.host);
     const fields = { host: url.host, label: options.label };
+    if (isForbidden(url.hostname)) {
+      deps.log('warn', 'http.forbidden_host', fields);
+      throw new HttpError('forbidden_host');
+    }
     if ((pausedUntil.get(url.host) ?? 0) > deps.now()) {
       logPause(url.host, options.label);
       throw new HttpError('host_paused');

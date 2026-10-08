@@ -66,6 +66,7 @@ describe('deployed functions (ADR-017)', () => {
     ['scanNow', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['scheduledScan', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
+    ['lookup', ['ANTHROPIC_API_KEY']],
     ['ingestEmailJobs', ['ANTHROPIC_API_KEY', 'INGEST_HMAC_SECRET']],
   ])('%s mounts %j', (name, secrets) => {
     const endpoint = endpoints.find(([exported]) => exported === name)?.[1];

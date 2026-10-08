@@ -47,16 +47,19 @@ export function JobsPage() {
   const verdictParam = params.get('verdict');
   const statusParam = params.get('status');
   const needsReview = params.get('review') === '1';
-  const verdict = !needsReview && isVerdict(verdictParam) ? verdictParam : undefined;
-  const status = !needsReview && isStatus(statusParam) ? statusParam : undefined;
+  const addedByYou = !needsReview && params.get('added') === '1';
+  // Needs review and Added by you each stand alone: no index combines them with the others.
+  const standalone = needsReview || addedByYou;
+  const verdict = !standalone && isVerdict(verdictParam) ? verdictParam : undefined;
+  const status = !standalone && isStatus(statusParam) ? statusParam : undefined;
   const sortParam = params.get('sort');
   const laneParam = params.get('lane');
   const gapParam = params.get('gap');
-  const sort = !needsReview && isJobSort(sortParam) ? sortParam : 'newest';
-  const lane = !needsReview && isLaneFilter(laneParam) ? laneParam : undefined;
+  const sort = !standalone && isJobSort(sortParam) ? sortParam : 'newest';
+  const lane = !standalone && isLaneFilter(laneParam) ? laneParam : undefined;
   // Gap filters near misses, so it only applies while that verdict is chosen.
   const gap =
-    !needsReview && verdict === 'near_miss' && isGapFilter(gapParam) ? gapParam : undefined;
+    !standalone && verdict === 'near_miss' && isGapFilter(gapParam) ? gapParam : undefined;
   const full = sort !== 'newest' || lane !== undefined || gap !== undefined;
   const jobId = params.get('job');
 
@@ -67,6 +70,7 @@ export function JobsPage() {
       ...(verdict ? { verdict } : {}),
       ...(status ? { status } : {}),
       ...(needsReview ? { needsReview } : {}),
+      ...(addedByYou ? { addedByYou } : {}),
     },
     { full },
   );
@@ -74,7 +78,7 @@ export function JobsPage() {
     state.status === 'ready' ? state.jobs : [],
     sort,
     { lane, gap },
-    `${verdict ?? ''}|${status ?? ''}|${String(needsReview)}`,
+    `${verdict ?? ''}|${status ?? ''}|${String(needsReview)}|${String(addedByYou)}`,
   );
   const [now] = useState(() => new Date());
 
@@ -105,6 +109,7 @@ export function JobsPage() {
     verdict !== undefined ||
     status !== undefined ||
     needsReview ||
+    addedByYou ||
     lane !== undefined ||
     gap !== undefined;
   const shownJobs = state.status === 'ready' ? (full ? sorted.jobs : state.jobs) : [];
@@ -128,7 +133,7 @@ export function JobsPage() {
           Verdict
           <select
             value={verdict ?? ''}
-            disabled={needsReview}
+            disabled={standalone}
             onChange={(event) => {
               // Gap belongs to near misses only.
               update({
@@ -150,7 +155,7 @@ export function JobsPage() {
           Status
           <select
             value={status ?? ''}
-            disabled={needsReview}
+            disabled={standalone}
             onChange={(event) => {
               update({ status: event.target.value });
             }}
@@ -170,7 +175,7 @@ export function JobsPage() {
             value={gap ?? ''}
             options={GAP_OPTIONS}
             emptyLabel="Any"
-            disabled={needsReview}
+            disabled={standalone}
             onChange={(value) => {
               update({ gap: value });
             }}
@@ -181,14 +186,14 @@ export function JobsPage() {
           value={lane ?? ''}
           options={LANE_OPTIONS}
           emptyLabel="All"
-          disabled={needsReview}
+          disabled={standalone}
           onChange={(value) => {
             update({ lane: value });
           }}
         />
         <SortSelect
           value={sort}
-          disabled={needsReview}
+          disabled={standalone}
           onChange={(value) => {
             update({ sort: value === 'newest' ? null : value });
           }}
@@ -198,17 +203,45 @@ export function JobsPage() {
             type="checkbox"
             checked={needsReview}
             onChange={(event) => {
-              update({ review: event.target.checked ? '1' : null, verdict: null, status: null });
+              update({
+                review: event.target.checked ? '1' : null,
+                added: null,
+                verdict: null,
+                status: null,
+              });
             }}
             className="size-4"
           />
           Needs review
         </label>
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={addedByYou}
+            onChange={(event) => {
+              update({
+                added: event.target.checked ? '1' : null,
+                review: null,
+                verdict: null,
+                status: null,
+              });
+            }}
+            className="size-4"
+          />
+          Added by you
+        </label>
         {filtered ? (
           <Button
             variant="ghost"
             onClick={() => {
-              update({ verdict: null, status: null, review: null, lane: null, gap: null });
+              update({
+                verdict: null,
+                status: null,
+                review: null,
+                added: null,
+                lane: null,
+                gap: null,
+              });
             }}
           >
             Clear filters
@@ -230,12 +263,18 @@ export function JobsPage() {
         ) : shownJobs.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-surface px-6 py-12 text-center">
             <h2 className="text-sm font-medium">
-              {filtered ? 'No jobs match these filters' : 'No judged jobs yet'}
+              {addedByYou
+                ? 'Nothing added from Lookup yet'
+                : filtered
+                  ? 'No jobs match these filters'
+                  : 'No judged jobs yet'}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {filtered
-                ? 'Clear the filters to see everything.'
-                : 'Jobs appear here once a scan has judged them. Run Scan now on System.'}
+              {addedByYou
+                ? 'Jobs you add on the Lookup screen appear here, newest first.'
+                : filtered
+                  ? 'Clear the filters to see everything.'
+                  : 'Jobs appear here once a scan has judged them. Run Scan now on System.'}
             </p>
             {state.capped ? (
               <p className="mt-2 text-xs text-muted-foreground">

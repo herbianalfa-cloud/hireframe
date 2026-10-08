@@ -44,7 +44,9 @@ function isShortHolder(holder: LockHolder | undefined): boolean {
 
 /** How long a lock may stay held before it counts as dead (ADR-048). */
 export function lockStaleMs(holder: LockHolder): number {
-  return holder === 'email' ? SHORT_LOCK.emailStaleMs : SCAN.lockStaleMs;
+  if (holder === 'email') return SHORT_LOCK.emailStaleMs;
+  if (holder === 'lookup') return SHORT_LOCK.lookupStaleMs;
+  return SCAN.lockStaleMs;
 }
 
 function chunks<T>(items: readonly T[], size: number): T[][] {
