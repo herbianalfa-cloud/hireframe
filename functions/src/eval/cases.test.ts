@@ -42,12 +42,26 @@ describe('the golden set (ADR-036)', () => {
     ['g32', 'freshness'],
     ['g34', 'title:data-analyst'],
     ['g35', 'title:growth'],
+    ['g36', 'title:sales-development'],
+    ['g39', 'title:sales-executive'],
   ])('S1 skips %s with %s', (id, rule) => {
     expect(s1(id)).toBe(rule);
   });
 
   it('sends every other case to the model, injection cases included', () => {
-    const s1Skips = new Set(['g26', 'g27', 'g28', 'g29', 'g30', 'g31', 'g32', 'g34', 'g35']);
+    const s1Skips = new Set([
+      'g26',
+      'g27',
+      'g28',
+      'g29',
+      'g30',
+      'g31',
+      'g32',
+      'g34',
+      'g35',
+      'g36',
+      'g39',
+    ]);
     for (const entry of cases.filter((c) => !s1Skips.has(c.id))) {
       expect([entry.id, s1(entry.id)]).toEqual([entry.id, null]);
     }

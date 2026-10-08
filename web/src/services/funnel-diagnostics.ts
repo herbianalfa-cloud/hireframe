@@ -1,4 +1,5 @@
 import {
+  ADOPTED_S1_RULE_IDS,
   buildReport,
   COLLECTIONS,
   CriteriaPointerSchema,
@@ -48,6 +49,9 @@ export const DIAGNOSTICS_DAYS = 30;
 /** Most jobs read per set. */
 export const DIAGNOSTICS_READ_LIMIT = 500;
 const READ_TIMEOUT_MS = 20_000;
+/** How far back "Recent S1 skips by rule" reaches, and the most jobs listed per rule. */
+export const S1_SKIPS_DAYS = 7;
+export const S1_SKIPS_PER_RULE = 20;
 
 const GOOD_VERDICTS: readonly Verdict[] = ['apply', 'near_miss', 'wildcard'];
 
@@ -99,11 +103,26 @@ export function queuedCountSpecs(stage: QueueStage) {
   } satisfies Record<string, QuerySpec>;
 }
 
+/** One rule's recent S1 skips: `skip.ruleId == <stored ID, e.g. title:sdr>`, newest first (ADR-045). */
+export function s1SkipsByRuleSpec(ruleId: string, now: Date): QuerySpec {
+  const since = Timestamp.fromMillis(now.getTime() - S1_SKIPS_DAYS * 86_400_000);
+  return jobsOf({
+    filters: [
+      { field: 'skip.ruleId', op: '==', value: ruleId },
+      { field: 'judgedAt', op: '>=', value: since },
+    ],
+    orderBy: [{ field: 'judgedAt', direction: 'desc' }],
+  });
+}
+
 /** Every diagnostics query, for the index check. */
 export function diagnosticsQuerySpecs(now: Date): Record<string, QuerySpec> {
   const specs: Record<string, QuerySpec> = {};
   for (const [name, spec] of Object.entries(diagnosticsSpecs(now))) {
     specs[`diagnostics:${name}`] = spec;
+  }
+  for (const ruleId of ADOPTED_S1_RULE_IDS) {
+    specs[`diagnostics:s1SkipsByRule:${ruleId}`] = s1SkipsByRuleSpec(`title:${ruleId}`, now);
   }
   for (const stage of ['s2', 's3'] as const) {
     for (const [name, spec] of Object.entries(queuedCountSpecs(stage))) {
@@ -230,4 +249,39 @@ export async function loadDiagnostics(now: Date): Promise<DiagnosticsReport> {
     now,
     queuedWithoutSortAt: { s2: missing(s2All, s2Sorted), s3: missing(s3All, s3Sorted) },
   });
+}
+
+/** A job S1 skipped, as the spot-check list shows it. */
+export interface RecentS1Skip {
+  id: string;
+  title: string;
+  company: string;
+}
+
+/**
+ * Up to `S1_SKIPS_PER_RULE` of the last 7 days' skips for each adopted rule, so the owner can
+ * spot a rule that caught a job it shouldn't have (ADR-045). Titles and companies are for the
+ * screen only; they are not part of the report or "Copy counts". Throws `IndexBuildingError`
+ * while the `(skip.ruleId, judgedAt)` index is building.
+ */
+export async function loadRecentS1Skips(
+  now: Date,
+  ruleIds: readonly string[] = ADOPTED_S1_RULE_IDS,
+): Promise<Record<string, RecentS1Skip[]>> {
+  const { db } = await getFirebase();
+  const jobs = collection(db, COLLECTIONS.jobs);
+  const entries = await Promise.all(
+    ruleIds.map(async (ruleId) => {
+      const set = await readSet(
+        query(
+          jobs,
+          ...specConstraints(s1SkipsByRuleSpec(`title:${ruleId}`, now)),
+          limit(S1_SKIPS_PER_RULE),
+        ),
+      );
+      const skips = set.map(({ id, job }) => ({ id, title: job.title, company: job.company }));
+      return [ruleId, skips] as const;
+    }),
+  );
+  return Object.fromEntries(entries);
 }

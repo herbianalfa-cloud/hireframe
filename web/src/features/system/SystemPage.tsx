@@ -525,10 +525,14 @@ const S2SkipReasons = lazy(() =>
   import('./S2SkipReasons').then((module) => ({ default: module.S2SkipReasons })),
 );
 
+const S1RecentSkips = lazy(() =>
+  import('./S1RecentSkips').then((module) => ({ default: module.S1RecentSkips })),
+);
+
 /**
  * System (PRD R12): Scan now, source health and recent runs (M3, ADR-029), with each run's
  * funnel counts per stage, cost and spend warnings (M4), then the spend meter, verdict
- * agreement and error alerts (M5), then the S2 skip-reasons panel (funnel intake, ADR-043).
+ * agreement and error alerts (M5), then the S2 skip-reasons panel and the recent S1 skips by rule (funnel intake, ADR-043, ADR-045).
  */
 export function SystemPage() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -582,6 +586,11 @@ export function SystemPage() {
       <ErrorBoundary what="The S2 skip reasons panel">
         <Suspense fallback={<Skeleton className="mt-8 h-16 w-full" />}>
           <S2SkipReasons />
+        </Suspense>
+      </ErrorBoundary>
+      <ErrorBoundary what="The recent S1 skips list">
+        <Suspense fallback={<Skeleton className="mt-8 h-16 w-full" />}>
+          <S1RecentSkips />
         </Suspense>
       </ErrorBoundary>
     </section>

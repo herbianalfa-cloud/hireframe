@@ -334,7 +334,7 @@ Context: ADR-009 said the S3 per-run cap should be lowered until "scheduled runs
 - **Time:** the scan's fetch budget drops from 360 s to 300 s (Workable now rotates 36 boards a scan). No new S2 call starts after 400 s and no new S3 call after 450 s; the deep-read budget of 60 s plus a 30 s margin ends inside the 540 s callable (`config.test.ts`).
 - **Rate limits:** each stage paces its request starts (triage 45/min, deep read 20/min) with 4 and 2 calls in flight. All of these are in `FUNNEL` (`functions/src/config.ts`), and the counts and rates can be overridden from `config/app.funnel`, which is parsed on its own so a typo can't fail the owner check.
 
-Amendment (funnel intake, draft; PR B finalises it): the default lease is sized to the cap, not to the intake, so a busy day can leave good jobs queued. The intake-based method (docs/FUNNEL.md "Sizing the run budget to the intake") derives L from the largest day's S1 passes P, the bigger run's share f, the S2 pass rate q and the share t that adopted S1 rules remove: n₂ = f·P·(1−t), n₃ = f·P·q, L = max((0.151·n₂ + 0.40)/0.4, 0.151·n₂ + 1.5·n₃ + 4.0) rounded up, and `monthlyCapPence = ceil(46·L/0.75)` rounded up to the next 100. S3 has no 60% cap of its own; only S2 has an extra test against its share. This PR changes no cap, lease or override. The approved `monthlyCapPence` and its aggregate inputs are recorded here once the owner has approved them.
+Amendment (funnel intake, ADR-045; approved 8 Oct): the default lease is sized to the cap, not to the intake, so a busy day can leave good jobs queued. The intake-based method (docs/FUNNEL.md "Sizing the run budget to the intake") derives L from the largest day's S1 passes P, the bigger run's share f, the S2 pass rate q and the share t that adopted S1 rules remove: n₂ = f·P·(1−t), n₃ = f·P·q, L = max((0.151·n₂ + 0.40)/0.4, 0.151·n₂ + c₃·n₃ + (5.5 − c₃)) rounded up, and `monthlyCapPence = ceil(46·L/0.75)` rounded up to the next 100. S3 has no 60% cap of its own; only S2 has an extra test against its share. **Approved:** `monthlyCapPence` **3200**, from f·P = 105, q = 0.30 (66/217), c₃ = 1.0p (measured; the earlier 1.5p was conservative, so S3's headroom is 4.5p), t = 0.06, n₂ = 99, n₃ = 32, L = 52 (floor(3200 × 0.75 / 46) = 52). `FUNNEL.s3MaxJobs` rises 25 → 32 to fit n₃, which is inside the existing 60 ceiling. The cap is set in the console (`config/app.monthlyCapPence`, read by the lease, the cap check, ingest and the profile callables); this PR changes only the `s3MaxJobs` default. The scheduled worst case becomes 46 × 52p = £23.92, and the cap itself is £32 (the other 25% is the manual share). Re-check at 10 scheduled runs.
 
 Consequences: at the default cap, steady-state volume fits and a large backlog takes several runs. If verdicts lag, raising the monthly cap is the lever. A crashed run overstates the month by its unused lease, never understates it. FUNNEL's per-run caps are now budget-first.
 
@@ -562,3 +562,27 @@ Consequences: initial JS fell from 300.0 to 293.6 kB gzip locally (CI measures a
 - **6A has no screen for these jobs;** System shows "Waiting for a description: n" and the sheet says the job needs one. 6B adds the paste.
 
 **Consequences:** S3 now routes short-text jobs of any kind to `description`; the test helpers' default description is longer than 200 characters for that reason. HN comments are `full` text, so an HN posting of the same role releases a waiting alert job, as an ATS posting does. This amends ADR-029 (the lock), ADR-037 (the scheduled run) and ADR-043 (the sweep).
+
+## ADR-045 S1 tightening from S2 skip reasons
+**Context:** S2 was skipping most of what S1 passed (ADR-043). The "S2 skip reasons" panel (read 8 Oct) counted what each candidate S1 rule would have skipped. The bar from the plan: a rule ships only if `good == 0`, `queuedS3 == 0` and `s2Skipped ≥ 2`; unknown titles are never skipped at S1, so each rule targets a known non-fit term.
+
+**Sets read:** S2 model skips 499 (2026-10-05 to 2026-10-08); good jobs (apply, near miss, wildcard) 176 (2026-10-03 to 2026-10-08); waiting for S3 23 (2026-10-06 to 2026-10-07). Queued without a `sortAt`: S2 0, S3 0. The S3 set is small, so a zero there is weaker evidence than a zero over the good jobs; the golden set (below) backs it.
+
+| Candidate | S2 skips | Good | Waiting for S3 | Outcome |
+|---|---|---|---|---|
+| C1 seniority markers (Sr, Snr, Mid, Mid Level, Experienced, Staff, II, III) | 17 | 1 | 0 | rejected: one good job |
+| C2 plain Product Manager | 18 | 8 | 0 | rejected: eight good jobs |
+| C3 engineering titles | 23 | 1 | 1 | rejected: one good job, one waiting for S3 |
+| C4 sales titles | 43 | 0 | 0 | **adopted** |
+| C5 language blocker | n/a | n/a | n/a | not built: no hit counts yet (13 of 499 skips list a language blocker) |
+| C6 ambiguous experience ask | n/a | n/a | n/a | not built: no hit counts yet |
+
+**Decision:**
+- **Adopt C4 only.** The seed gains `sales-executive`, `sales-representative`, `sales-development`, `sales-associate`, `account-executive`, `business-development`, `sdr` and `bdr` (`criteria-seed.ts`). Plain `Sales` is not a term (a guard only sees words before a term, so it would also exclude Sales Engineer); Sales Engineer, Pre-Sales, Presales and Solutions Consultant contain no C4 term and stay allowed. The S1 title table (`TITLE_CASES`, which the eval requires at 100%) gains those must-pass rows and the must-exclude rows (Sales Development Representative, Account Executive, Business Development Executive, Sales Executive, SDR), plus the wildcard guards that C3's rejection leaves untested otherwise (Unity Developer, Prompt Engineer, Junior Product Manager). Two golden cases labelled skip (g36, g39) now stop at S1; agreement is unchanged at 85.0% and no apply, near-miss or wildcard case is caught.
+- **Rejected candidates fail the bar** and are not tuned around. `SENIORITY_TITLE_IDS` and `s1.ts` are unchanged. They go to the ROADMAP parking lot with what would make them worth re-testing (C1 and C3 per term; C5 and C6 only after their hits are counted).
+- **S3's cap.** `s3MaxJobs` default 25 → 32 (ADR-032 amendment above).
+- **Spot-check.** System gets "Recent S1 skips by rule": for each adopted rule, up to 20 jobs from the last 7 days (`skip.ruleId == title:<id>`, `judgedAt desc`), with title and company on screen only and a link to the job sheet. It has its own Load button and is never part of "Copy counts". The query needs the new composite index `(skip.ruleId asc, judgedAt desc)`; the panel shows "Index building" until it has built. Routine for the first 7 days after rollout: read each rule's list once a day; if a rule skipped a job it shouldn't have, delete or narrow that term in Criteria and press Re-score (free; the job returns to S2).
+- **Run rows** show `expired` apart from the model's skips (`S2 3 passed, 4 skipped, 1 expired`) instead of adding them.
+- **Observed gap, not acted on:** 135 of the 499 S2 skips carry a location blocker S1 missed (parked on the ROADMAP).
+
+**Consequences:** C4 removes 43 of 499 S2 skips (about 9%); t = 0.06 is the figure used for sizing. Deploy PR B, then edit Criteria in the app (the seed only seeds `criteria/v1`; a live criteria version needs the eight rows added by hand) and press Re-score.

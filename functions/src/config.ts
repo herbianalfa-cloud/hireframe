@@ -258,7 +258,7 @@ export const FUNNEL = {
   /** Queued jobs past `freshness_days` the expiry sweep reads per stage and run (free). */
   expireMaxJobs: 2_000,
   s2MaxJobs: 300,
-  s3MaxJobs: 25,
+  s3MaxJobs: 32,
   s2Concurrency: 4,
   s3Concurrency: 2,
   /** Request starts per minute, under Anthropic's rate limits for the account's tier. */

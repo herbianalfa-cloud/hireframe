@@ -125,6 +125,21 @@ const row = (term: string, unlessPrefixedBy?: readonly string[]): ExcludedTitle 
   ...(unlessPrefixedBy ? { unless_prefixed_by: [...unlessPrefixedBy] } : {}),
 });
 
+/** C4, the one adopted candidate (ADR-045): sales titles. The seed carries the same terms. */
+const C4_TERMS = [
+  'Sales Executive',
+  'Sales Representative',
+  'Sales Development',
+  'Sales Associate',
+  'Account Executive',
+  'Business Development',
+  'SDR',
+  'BDR',
+] as const;
+
+/** The excluded-title rule IDs adopted into the seed, whose recent skips System lists (ADR-045). */
+export const ADOPTED_S1_RULE_IDS: readonly string[] = C4_TERMS.map((term) => row(term).id);
+
 /**
  * The plan's criteria-only candidates, C1 to C4. C5 (a language blocker) and C6 (an ambiguous
  * experience ask) change S1's code, so they can't be tried through `applyHardRules` yet; the
@@ -154,20 +169,7 @@ export const CANDIDATE_RULES: readonly CandidateRule[] = [
       row('Developer', ['Unity', 'Game']),
     ],
   },
-  {
-    id: 'C4',
-    seniority: false,
-    terms: [
-      'Sales Executive',
-      'Sales Representative',
-      'Sales Development',
-      'Sales Associate',
-      'Account Executive',
-      'Business Development',
-      'SDR',
-      'BDR',
-    ].map((term) => row(term)),
-  },
+  { id: 'C4', seniority: false, terms: C4_TERMS.map((term) => row(term)) },
 ];
 
 export interface DiagnosticSets {

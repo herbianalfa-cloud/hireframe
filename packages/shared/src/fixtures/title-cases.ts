@@ -23,4 +23,20 @@ export const TITLE_CASES: readonly (readonly [title: string, excludedBy: string 
   ['Head of Product', 'head-of'],
   ['Data Analyst', 'data-analyst'],
   ['Product Analyst', null],
+  // C4 sales titles (ADR-045). Sales Engineer, Pre-Sales and Solutions Consultant are the Solutions
+  // lane under another name and contain no C4 term; guards the "plain Sales" trap.
+  ['Sales Engineer', null],
+  ['Pre-Sales Consultant', null],
+  ['Pre Sales Solutions Consultant', null],
+  ['Presales Engineer', null],
+  ['Solutions Consultant', null],
+  ['Sales Development Representative', 'sales-development'],
+  ['Account Executive', 'account-executive'],
+  ['Business Development Executive', 'business-development'],
+  ['Sales Executive', 'sales-executive'],
+  ['SDR', 'sdr'],
+  // Wildcard and engineering-adjacent titles stay allowed (C3 was rejected).
+  ['Unity Developer', null],
+  ['Prompt Engineer', null],
+  ['Junior Product Manager', null],
 ];
