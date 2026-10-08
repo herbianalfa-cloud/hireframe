@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useSearchParams } from 'react-router';
 
 import { Skeleton } from '@/components/ui/skeleton';
+import { markOnce } from '@/lib/perf';
 import { useCurrentCriteria } from '@/features/criteria/hooks';
 import { JobDetail } from '@/features/jobs/JobDetail';
 import { JobList } from '@/features/jobs/JobList';
@@ -240,6 +241,9 @@ export function TodayPage() {
   const [usable, setUsable] = useState(false);
   const measured = useRef(false);
   const [now] = useState(() => new Date());
+  useEffect(() => {
+    markOnce('hf:today-mount');
+  }, []);
 
   const markApplyReady = useCallback(() => {
     setApplyReady(true);

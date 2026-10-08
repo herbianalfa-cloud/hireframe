@@ -6,6 +6,8 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth';
 
+import { markOnce } from '@/lib/perf';
+
 import { getFirebase } from './firebase';
 import { errorCode, logError } from './log';
 
@@ -29,6 +31,7 @@ export function onAuthChange(callback: (state: AuthState) => void): () => void {
     ({ auth }) => {
       if (cancelled) return;
       unsubscribe = onAuthStateChanged(auth, (user) => {
+        markOnce('hf:auth');
         callback(
           user
             ? { status: 'signed-in', user: { uid: user.uid, email: user.email } }

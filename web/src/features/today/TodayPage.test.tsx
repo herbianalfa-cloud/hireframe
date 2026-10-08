@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeView } from '@/features/jobs/fixtures';
+import { hfMarks, resetMarksForTest } from '@/lib/perf';
 import {
   loadAgreement,
   loadTodayCounts,
@@ -116,6 +117,7 @@ beforeEach(() => {
   window.localStorage.clear();
   vi.restoreAllMocks();
   performance.clearMeasures('hf:usable');
+  resetMarksForTest();
 });
 
 describe('TodayPage', () => {
@@ -220,6 +222,16 @@ describe('TodayPage', () => {
     await waitFor(() => {
       expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
     });
+  });
+
+  it('marks hf:today-mount before hf:usable', async () => {
+    setup({ apply: ready(makeView('a1')) });
+    await waitFor(() => {
+      expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
+    });
+    const names = hfMarks().map(([name]) => name);
+    expect(names).toContain('hf:today-mount');
+    expect(names.indexOf('hf:today-mount')).toBeLessThan(names.indexOf('hf:usable'));
   });
 
   it('links to the full list when a list is truncated', () => {

@@ -1,6 +1,8 @@
 import { AppConfigSchema, DOCS } from '@hireframe/shared';
 import { doc, getDoc } from 'firebase/firestore';
 
+import { markOnce } from '@/lib/perf';
+
 import { getFirebase } from './firebase';
 import { errorCode, logError } from './log';
 import { isTransient, withRetry, withTimeout } from './resilience';
@@ -51,5 +53,7 @@ export async function checkAccess(
     // Rules deny non-owners (and everyone before bootstrap) with permission-denied.
     if (errorCode(error) === 'permission-denied') return { status: 'denied' };
     return { status: 'error', message: "Couldn't check access. Try again." };
+  } finally {
+    markOnce('hf:owner');
   }
 }

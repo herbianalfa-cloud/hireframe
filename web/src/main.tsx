@@ -6,8 +6,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App';
+import { markOnce } from './lib/perf';
 import { applyTheme, readThemePreference } from './theme/theme';
 
+markOnce('hf:boot');
 applyTheme(readThemePreference());
 
 const root = document.getElementById('root');

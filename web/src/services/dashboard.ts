@@ -32,6 +32,8 @@ import {
   type QueryConstraint,
 } from 'firebase/firestore';
 
+import { markOnce } from '@/lib/perf';
+
 import { getFirebase } from './firebase';
 import { addedByYouSpec, parseJobs, type JobView } from './jobs';
 import { errorCode, logError } from './log';
@@ -162,6 +164,11 @@ export function watchTodayList(
       return onSnapshot(
         run(db, todayListSpec(list), limit(TODAY_LIST_SIZE)),
         (snapshot) => {
+          markOnce(`hf:list:${list}`, () => ({
+            docs: snapshot.size,
+            fromCache: snapshot.metadata.fromCache,
+            bytes: snapshot.docs.reduce((sum, d) => sum + JSON.stringify(d.data()).length, 0),
+          }));
           const { jobs: views, invalid } = parseJobs(snapshot.docs);
           callback({ status: 'ready', data: views, invalid });
         },
@@ -205,11 +212,17 @@ export function watchAddedByYou(callback: (state: LiveState<JobView[]>) => void)
 }
 
 async function count(label: string, source: Query): Promise<number> {
-  const snapshot = await withRetry(
-    () => withTimeout(getCountFromServer(source), READ_TIMEOUT_MS, label),
-    { label: `dashboard.${label}`, isRetryable: isTransient },
-  );
-  return snapshot.data().count;
+  try {
+    const snapshot = await withRetry(
+      () => withTimeout(getCountFromServer(source), READ_TIMEOUT_MS, label),
+      { label: `dashboard.${label}`, isRetryable: isTransient },
+    );
+    markOnce(`hf:count:${label}`, { ok: true });
+    return snapshot.data().count;
+  } catch (error) {
+    markOnce(`hf:count:${label}`, { ok: false });
+    throw error;
+  }
 }
 
 /** The four tile counts, measured at `now` (London day and week). One aggregation read each. */
@@ -218,6 +231,7 @@ export async function loadTodayCounts(now: Date): Promise<TodayCountResults> {
   const specs = kpiSpecs(now);
   const keys = Object.keys(specs) as (keyof TodayCounts)[];
   const settled = await Promise.allSettled(keys.map((key) => count(key, run(db, specs[key]))));
+  markOnce('hf:counts');
   const results = {} as TodayCountResults;
   keys.forEach((key, i) => {
     const outcome = settled[i];
