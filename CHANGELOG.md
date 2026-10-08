@@ -3,6 +3,8 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+
+## [0.6.2] - 2026-10-08
 ### Added
 - **M6 PR 6B, session 1: Lookup, the server** (ADR-049). The Lookup screen comes in the web session.
   - **`lookup` callable** (owner only, App Check, 300 s). `add` creates the jobs the owner picked from a pasted LinkedIn results page or a Greenhouse, Lever, Ashby or Workable URL (source `lookup`, `addedAt`, a seen job is never re-created), under the scan lock for the create step only (waits up to 20 s, then answers `busy`). S1 runs at once (a skip is final and free), then S2 on title, company and location, the ATS board search for the full posting, and S3 when there is text, outside the lock. A job with no posting waits for a description (`next: 'description'`). `describe` judges a pasted description (claims the job, re-runs S1 on the text, S2 if there is no triage, then S3; a cap or error sets `next` so the next scan judges it). `parse` reads a pasted page the deterministic parser couldn't, with one cheap-model call (`pasteParse`).
