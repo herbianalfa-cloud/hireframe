@@ -17,6 +17,7 @@ export { verifyEvidence } from './evidence.js';
 export * from './events.js';
 export { decodeEntities, htmlToText, tidyText } from './html.js';
 export * from './jobs.js';
+export * from './lookup.js';
 export * from './normalise.js';
 export { COLLECTIONS, DOCS, PATHS, STORAGE_PATHS, SUBCOLLECTIONS } from './firestore.js';
 export * from './merge.js';

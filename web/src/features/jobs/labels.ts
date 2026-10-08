@@ -53,6 +53,7 @@ export const FLAG_TEXT: Readonly<Record<JobFlag, string>> = {
   score_drift: 'The model’s scores differed from the computed ones',
   unsupported_match: 'A claimed match had no supporting fact and was downgraded',
   needs_description: 'No description to read: an email alert carries none',
+  posted_estimated: 'Posting date is approximate, read from an age such as “3 days ago”',
 };
 
 export const GAP_LABELS: Readonly<Record<GapType, string>> = {

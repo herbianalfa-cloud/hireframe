@@ -21,6 +21,8 @@ export const AppConfigSchema = z.object({
   funnel: z.unknown().exactOptional(),
   /** `{ dailyCapPence }` for alert parsing (ADR-047); parsed on its own like `funnel`. */
   alerts: z.unknown().exactOptional(),
+  /** `{ dailyCapPence }` for Lookup (ADR-049); parsed on its own like `funnel`. */
+  lookup: z.unknown().exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

@@ -131,6 +131,8 @@ export const JOB_FLAGS = [
   'unsupported_match',
   /** No description to read: the job waits for one (M6, ADR-048). */
   'needs_description',
+  /** `postedAt` is approximate: read from a relative age such as "3 days ago" (ADR-049). */
+  'posted_estimated',
 ] as const;
 export type JobFlag = (typeof JOB_FLAGS)[number];
 
