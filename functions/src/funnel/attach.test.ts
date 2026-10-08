@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { planAttachment } from './attach.js';
 import { testJob, TEST_NOW } from './testing.js';
 
-const posting = (patch: Partial<NormalisedJob> = {}): NormalisedJob => ({
-  ...normaliseRawJob({
+function basePosting(): NormalisedJob {
+  const posting = normaliseRawJob({
     sourceId: 'greenhouse',
     externalId: '5551234',
     url: 'https://job-boards.greenhouse.io/acmeanalytics/jobs/5551234',
@@ -14,7 +14,13 @@ const posting = (patch: Partial<NormalisedJob> = {}): NormalisedJob => ({
     locationText: 'London, UK',
     postedAt: new Date('2026-09-28T09:00:00Z'),
     description: { kind: 'full', format: 'text', body: 'The full posting text.' },
-  })!,
+  });
+  if (!posting) throw new Error('fixture does not normalise');
+  return posting;
+}
+
+const posting = (patch: Partial<NormalisedJob> = {}): NormalisedJob => ({
+  ...basePosting(),
   ...patch,
 });
 
