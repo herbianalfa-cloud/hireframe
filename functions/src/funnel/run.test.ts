@@ -15,7 +15,7 @@ import { fakeTransport } from '../llm/fake-transport.js';
 import type { LlmRequest, LlmResponse, LlmTransport } from '../llm/transport.js';
 import { emptyUsage } from '../llm/usage-store.js';
 import { setLogSink, type LogFields } from '../log.js';
-import { runFunnel, type FunnelDeps, type Hydrator, type StoredJob } from './run.js';
+import { mergeQueued, runFunnel, type FunnelDeps, type Hydrator, type StoredJob } from './run.js';
 import {
   daysAgo,
   memoryFunnelStore,
@@ -1268,5 +1268,111 @@ describe('needs-description state (ADR-048)', () => {
     expect(store.get('fresh').next).toBe('description');
     expect(result.perStage.s3.expired).toBe(1);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('jobs the owner added from Lookup', () => {
+  const TRIAGE: JobTriage = {
+    lane: 'primary',
+    seniority: 'junior',
+    blockers: [],
+    pass: true,
+    triageScore: 1,
+    note: 'A fit.',
+  };
+  const queuedS2 = (days: number, addedDaysAgo?: number) =>
+    testJob({
+      stage: 's1',
+      next: 's2',
+      sortAt: daysAgo(days),
+      postedAt: daysAgo(days),
+      ...(addedDaysAgo === undefined ? {} : { addedAt: daysAgo(addedDaysAgo) }),
+    });
+  const queuedS3 = (days: number, score: number, addedDaysAgo?: number) =>
+    testJob({
+      stage: 's2',
+      next: 's3',
+      sortAt: daysAgo(days),
+      postedAt: daysAgo(days),
+      triage: { ...TRIAGE, triageScore: score },
+      ...(addedDaysAgo === undefined ? {} : { addedAt: daysAgo(addedDaysAgo) }),
+    });
+
+  it('are judged first at S2, newest addedAt first, then the usual order', async () => {
+    const store = memoryFunnelStore();
+    store.add('fresh', queuedS2(1));
+    store.add('fresher', queuedS2(0.5));
+    store.add('addedOld', queuedS2(6, 2));
+    store.add('addedNew', queuedS2(5, 1));
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport, limits: { s2MaxJobs: 3, s3MaxJobs: 0 } }));
+    const judged = store.patches
+      .filter(({ patch }) => patch.set.triage !== undefined)
+      .map(({ jobId }) => jobId);
+    expect(judged).toEqual(['addedNew', 'addedOld', 'fresher']);
+    expect(store.get('fresh').next).toBe('s2');
+    // Three S2 calls, none repeated.
+    expect(sent.filter((request) => request.purpose === 'triage')).toHaveLength(3);
+  });
+
+  it('take the S3 slots first, whatever their triage score', async () => {
+    const store = memoryFunnelStore();
+    store.add('best', queuedS3(1, 9));
+    store.add('added', queuedS3(3, 0.5, 1));
+    store.add('good', queuedS3(2, 5));
+    await run(deps(store, { limits: { s2MaxJobs: 0, s3MaxJobs: 1 } }));
+    expect(store.get('added')).toMatchObject({ stage: 's3', next: null });
+    expect(store.get('added').verdict).toBeDefined();
+    expect(store.get('best').next).toBe('s3');
+    expect(store.get('good').next).toBe('s3');
+  });
+
+  it('read nothing twice when added jobs also fall inside the usual window', async () => {
+    const store = memoryFunnelStore();
+    store.add('a', queuedS2(1, 1));
+    store.add('b', queuedS2(2));
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport, limits: { s3MaxJobs: 0 } }));
+    expect(sent.filter((request) => request.purpose === 'triage')).toHaveLength(2);
+  });
+
+  it('fall back to the usual order, logged, when the added-first read fails', async () => {
+    const store = memoryFunnelStore();
+    store.add('fresh', queuedS2(1));
+    store.add('added', queuedS2(6, 1));
+    store.queuedAdded = () => Promise.reject(new Error('missing index'));
+    await run(deps(store, { limits: { s2MaxJobs: 1, s3MaxJobs: 0 } }));
+    expect(store.get('fresh').stage).toBe('s2');
+    expect(store.get('added').next).toBe('s2');
+    expect(
+      logs.some((entry) => entry.event === 'funnel.failed' && entry.step === 'queued_added'),
+    ).toBe(true);
+  });
+
+  it('keep their estimated-date flag through a re-score', async () => {
+    const store = memoryFunnelStore();
+    store.add(
+      'est',
+      testJob({
+        stage: 's1',
+        next: null,
+        firstSeenAt: daysAgo(2),
+        postedAt: daysAgo(3),
+        flags: ['posted_estimated'],
+        addedAt: daysAgo(2),
+      }),
+    );
+    await run(deps(store, { limits: { s2MaxJobs: 0, s3MaxJobs: 0 } }), daysAgo(14));
+    expect(store.get('est').flags).toContain('posted_estimated');
+  });
+
+  it('mergeQueued puts added jobs first, drops repeats and respects the limit', () => {
+    const entry = (id: string): StoredJob => ({ id, job: testJob() });
+    expect(
+      mergeQueued([entry('a'), entry('b')], [entry('b'), entry('c'), entry('d')], 3).map(
+        (found) => found.id,
+      ),
+    ).toEqual(['a', 'b', 'c']);
+    expect(mergeQueued([], [entry('c')], 5).map((found) => found.id)).toEqual(['c']);
   });
 });

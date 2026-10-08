@@ -22,7 +22,7 @@ import type { HostPause } from '../http/client.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 import type { JobPatch } from './judgement.js';
-import { staleQueuedSpec } from './queries.js';
+import { addedQueuedSpec, staleQueuedSpec } from './queries.js';
 import type { CompanyInfo, FunnelStore, StoredJob } from './run.js';
 
 /**
@@ -127,6 +127,20 @@ export function firestoreFunnelStore(db: Firestore): FirestoreFunnelStore {
           ? base.orderBy('sortAt', 'desc').limit(limit)
           : base.orderBy('triage.triageScore', 'desc').orderBy('sortAt', 'desc').limit(limit),
       );
+    },
+
+    queuedAdded(stage, limit) {
+      if (limit <= 0) return Promise.resolve([]);
+      const spec = addedQueuedSpec(stage);
+      const filtered = spec.filters.reduce<Query>(
+        (query, filter) => query.where(filter.field, filter.op, filter.value),
+        jobs,
+      );
+      const ordered = spec.orderBy.reduce(
+        (query, order) => query.orderBy(order.field, order.direction),
+        filtered,
+      );
+      return read(ordered.limit(limit));
     },
 
     staleQueued(stage, before, limit) {

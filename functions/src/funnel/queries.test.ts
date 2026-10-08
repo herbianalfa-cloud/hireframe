@@ -4,7 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { indexServes, WAIT_STATES, type CompositeIndex } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
-import { JOBS_BY_KEYS_SELECT, jobsByKeysSpec, staleQueuedSpec } from './queries.js';
+import {
+  addedQueuedSpec,
+  JOBS_BY_KEYS_SELECT,
+  jobsByKeysSpec,
+  staleQueuedSpec,
+  watchedCompaniesSpec,
+} from './queries.js';
 
 const { indexes } = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../../firestore.indexes.json', import.meta.url)), 'utf8'),
@@ -40,6 +46,25 @@ describe('funnel query specs', () => {
       orderBy: [],
     });
     expect(indexServes(spec, [])).toBe(true);
+  });
+
+  it.each(['s2', 's3'] as const)(
+    'serves the user-added %s queue from the (next, addedAt desc) composite',
+    (stage) => {
+      const spec = addedQueuedSpec(stage);
+      expect(spec).toEqual({
+        collection: 'jobs',
+        filters: [{ field: 'next', op: '==', value: stage }],
+        orderBy: [{ field: 'addedAt', direction: 'desc' }],
+      });
+      expect(indexServes(spec, indexes)).toBe(true);
+      // Without the declared composite the query is not served: the index is what makes it work.
+      expect(indexServes(spec, [])).toBe(false);
+    },
+  );
+
+  it('serves the watched companies read without a composite', () => {
+    expect(indexServes(watchedCompaniesSpec(), [])).toBe(true);
   });
 
   it('reads only what the dedupe and the description upgrade need', () => {

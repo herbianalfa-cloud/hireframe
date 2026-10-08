@@ -37,6 +37,20 @@
           "order": "ASCENDING"
         },
         {
+          "fieldPath": "addedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "next",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "triage.triageScore",
           "order": "DESCENDING"
         },
