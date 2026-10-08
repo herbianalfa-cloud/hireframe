@@ -33,7 +33,7 @@ import {
 } from 'firebase/firestore';
 
 import { getFirebase } from './firebase';
-import { parseJobs, type JobView } from './jobs';
+import { addedByYouSpec, parseJobs, type JobView } from './jobs';
 import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints, type QuerySpec } from './query-spec';
@@ -49,6 +49,8 @@ import { timestampsToDates } from './timestamps';
 export type { TodayCountResults };
 
 export const TODAY_LIST_SIZE = 10;
+/** Jobs the Added by you section shows (ADR-049). */
+export const ADDED_BY_YOU_SIZE = 5;
 const READ_TIMEOUT_MS = 15_000;
 /** Most rows read for agreement: a fortnight of one person's feedback is far below this. */
 const AGREEMENT_READ_LIMIT = 500;
@@ -140,6 +142,7 @@ export function dashboardQuerySpecs(now: Date): Record<string, QuerySpec> {
   const since = Timestamp.fromMillis(now.getTime());
   return {
     ...Object.fromEntries(TODAY_LISTS.map((list) => [`list:${list}`, todayListSpec(list)])),
+    'list:added-by-you': addedByYouSpec,
     ...Object.fromEntries(Object.entries(kpiSpecs(now)).map(([k, v]) => [`count:${k}`, v])),
     ...Object.fromEntries(
       Object.entries(agreementSpecs(since)).map(([k, v]) => [`agreement:${k}`, v]),
@@ -165,6 +168,33 @@ export function watchTodayList(
         (error) => {
           logError('dashboard.list_failed', { list, code: error.code });
           callback({ status: 'error', message: "Couldn't load this list. Reload to try again." });
+        },
+      );
+    },
+    (message) => {
+      callback({ status: 'error', message });
+    },
+  );
+}
+
+/**
+ * The newest jobs added from Lookup, live, with their state. A separate query that Today starts
+ * only after `hf:usable`, so it never delays it.
+ */
+export function watchAddedByYou(callback: (state: LiveState<JobView[]>) => void): Unsubscribe {
+  callback({ status: 'loading' });
+  return listen(
+    async () => {
+      const { db } = await getFirebase();
+      return onSnapshot(
+        run(db, addedByYouSpec, limit(ADDED_BY_YOU_SIZE)),
+        (snapshot) => {
+          const { jobs: views, invalid } = parseJobs(snapshot.docs);
+          callback({ status: 'ready', data: views, invalid });
+        },
+        (error) => {
+          logError('dashboard.added_failed', { code: error.code });
+          callback({ status: 'error', message: "Couldn't load the jobs you added." });
         },
       );
     },

@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { ADOPTED_S1_RULE_IDS } from '@hireframe/shared';
 import { dashboardQuerySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
-import { jobFilterSpec } from './jobs';
+import { addedByYouSpec, jobFilterSpec } from './jobs';
+import { lookupKeysSpec, lookupUrlSpec, needsDescriptionSpec } from './lookup';
 import { needsDescriptionCountSpec } from './system';
 import { indexServes, type CompositeIndex, type QuerySpec } from './query-spec';
 
@@ -61,6 +62,31 @@ describe('firestore.indexes.json', () => {
     });
     expect(indexServes(needsDescriptionCountSpec, indexes)).toBe(true);
     expect(indexServes(needsDescriptionCountSpec, [])).toBe(true);
+  });
+
+  it('serves every Lookup query', () => {
+    const specs: Record<string, QuerySpec> = {
+      'lookup:keys': lookupKeysSpec(['linkedin:4012345678', 'greenhouse:1']),
+      'lookup:url': lookupUrlSpec('https://www.linkedin.com/jobs/view/4012345678'),
+      'lookup:waiting': needsDescriptionSpec,
+      'lookup:added-by-you': addedByYouSpec,
+      'jobs:added-by-you': jobFilterSpec({ addedByYou: true }),
+    };
+    for (const [name, spec] of Object.entries(specs)) {
+      expect(indexServes(spec, indexes), name).toBe(true);
+    }
+  });
+
+  it('serves the Lookup key and URL matches and Added by you without a composite index', () => {
+    expect(lookupKeysSpec(['a']).filters[0]?.op).toBe('array-contains-any');
+    expect(indexServes(lookupKeysSpec(['a']), [])).toBe(true);
+    expect(indexServes(lookupUrlSpec('https://example.test/'), [])).toBe(true);
+    expect(indexServes(addedByYouSpec, [])).toBe(true);
+    // The waiting list is ordered under an equality filter: it needs (next, sortAt desc).
+    expect(indexServes(needsDescriptionSpec, [])).toBe(false);
+    expect(
+      indexes.some((index) => index.fields.map((f) => f.fieldPath).join() === 'next,sortAt'),
+    ).toBe(true);
   });
 
   it('serves every Jobs filter combination', () => {

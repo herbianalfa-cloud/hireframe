@@ -2,6 +2,7 @@ import { CALLABLE_TIMEOUT_SECONDS } from '@hireframe/shared';
 import { httpsCallable } from 'firebase/functions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { lookupAdd, lookupDescribe, lookupParse } from './lookup';
 import { addFact, parseCv, resetProfile } from './profile';
 import { scanNow } from './system';
 
@@ -22,6 +23,9 @@ describe('callable clients', () => {
     ['addFact', () => addFact('A note')],
     ['resetProfile', () => resetProfile('RESET')],
     ['scanNow', () => scanNow()],
+    ['lookup', () => lookupAdd([{ kind: 'url', url: 'https://boards.greenhouse.io/acme/jobs/1' }])],
+    ['lookup', () => lookupDescribe('job1', 'A description')],
+    ['lookup', () => lookupParse('Some pasted page', [])],
   ] as const)(
     '%s waits longer than the server timeout and uses a limited-use App Check token',
     async (name, invoke) => {

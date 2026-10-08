@@ -51,6 +51,8 @@ export interface JobFilters {
   status?: JobStatus;
   /** Jobs whose model output was unusable and wait for a human (`review.stage` set). */
   needsReview?: boolean;
+  /** Jobs added from Lookup (`addedAt` set), newest added first. Stands alone, like needsReview. */
+  addedByYou?: boolean;
 }
 
 export const JOBS_PAGE_SIZE = 25;
@@ -78,8 +80,19 @@ export function parseJobs(docs: readonly QueryDocumentSnapshot[]): {
   return { jobs, invalid };
 }
 
-/** The query for a filter set: newest judged first. */
+/**
+ * Jobs added from Lookup, newest added first (ADR-049). One ordered field and no filter, so the
+ * automatic index serves it; Firestore leaves out jobs without `addedAt`, which is the filter.
+ */
+export const addedByYouSpec: QuerySpec = {
+  collection: COLLECTIONS.jobs,
+  filters: [],
+  orderBy: [{ field: 'addedAt', direction: 'desc' }],
+};
+
+/** The query for a filter set: newest judged first, or newest added for Added by you. */
 export function jobFilterSpec(filters: JobFilters): QuerySpec {
+  if (filters.addedByYou) return addedByYouSpec;
   return {
     collection: COLLECTIONS.jobs,
     filters: [
