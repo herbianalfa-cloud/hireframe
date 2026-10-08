@@ -75,6 +75,8 @@ function setup(
     onAddedStart?: () => void;
     onCountsStart?: () => void;
     deferApply?: boolean;
+    /** Holds the Apply list's first snapshot until this resolves. */
+    applyGate?: Promise<void>;
   } = {},
 ) {
   vi.mocked(watchAddedByYou).mockImplementation((callback) => {
@@ -89,7 +91,8 @@ function setup(
       callback(lists[list] ?? ready());
     };
     // The real snapshot arrives after the first render; `deferApply` mimics that for ordering.
-    if (options.deferApply && list === 'apply') setTimeout(deliver, 0);
+    if (options.applyGate && list === 'apply') void options.applyGate.then(deliver);
+    else if (options.deferApply && list === 'apply') setTimeout(deliver, 0);
     else deliver();
     return () => undefined;
   });
@@ -261,10 +264,11 @@ describe('TodayPage', () => {
       expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
     });
     expect(hfMarks().map(([name]) => name)).not.toContain('hf:counts');
-    expect(screen.getByRole('status', { name: 'Loading numbers' })).toBeDefined();
+    // The bar is already there; only the counts wait.
+    expect(screen.getByRole('region', { name: 'Summary' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Open Apply, loading' })).toBeDefined();
     release(COUNTS);
-    expect(await screen.findByRole('region', { name: 'Summary' })).toBeDefined();
-    expect(screen.queryByRole('status', { name: 'Loading numbers' })).toBeNull();
+    expect(await screen.findByRole('link', { name: 'Open Apply 3' })).toBeDefined();
   });
 
   it('starts no count query before hf:usable', async () => {
@@ -279,6 +283,28 @@ describe('TodayPage', () => {
       expect(loadSummaryCounts).toHaveBeenCalledTimes(1);
     });
     expect(order).toEqual(['measure:hf:usable', 'counts']);
+  });
+
+  it('starts no count, last-run or spend read until the Apply snapshot arrives', async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    setup({ apply: ready(makeView('a1')) }, { applyGate: gate });
+    await Promise.resolve();
+    expect(loadSummaryCounts).toHaveBeenCalledTimes(0);
+    expect(watchLastRun).toHaveBeenCalledTimes(0);
+    expect(watchSpend).toHaveBeenCalledTimes(0);
+    expect(performance.getEntriesByName('hf:usable')).toHaveLength(0);
+    open();
+    await waitFor(() => {
+      expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(loadSummaryCounts).toHaveBeenCalledTimes(1);
+    });
+    expect(watchLastRun).toHaveBeenCalledTimes(1);
+    expect(watchSpend).toHaveBeenCalledTimes(1);
   });
 
   it('shows no count query or last run while the Apply list is loading', () => {
