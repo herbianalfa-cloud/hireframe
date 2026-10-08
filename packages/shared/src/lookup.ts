@@ -319,6 +319,8 @@ export const LookupOutcomeSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('review'), jobId: z.string() }),
   /** A URL that isn't a supported job board, or a posting the board no longer lists. */
   z.object({ status: z.literal('not_found') }),
+  /** The row couldn't become a job (unusable text), or its write failed. Nothing was created. */
+  z.object({ status: z.literal('invalid') }),
 ]);
 export type LookupOutcome = z.infer<typeof LookupOutcomeSchema>;
 

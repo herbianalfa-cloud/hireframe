@@ -15,7 +15,7 @@ import {
   emptyUsage,
   type LeaseStore,
 } from '../llm/usage-store.js';
-import type { JobPatch } from './judgement.js';
+import { applyPatch, type JobPatch } from './judgement.js';
 import type { CompanyInfo, FunnelStore, StoredJob } from './run.js';
 
 /** Test doubles for the funnel: an in-memory store and lease store with Firestore's semantics. */
@@ -84,16 +84,6 @@ export function testJob(patch: Partial<Job> = {}): Job {
     schemaVersion: 1,
     ...patch,
   };
-}
-
-function applyPatch(job: Job, patch: JobPatch): Job {
-  const cleared = new Set<string>(patch.clear);
-  const next: Record<string, unknown> = Object.fromEntries(
-    Object.entries({ ...job, ...patch.set }).filter(([name]) => !cleared.has(name)),
-  );
-  if (patch.addCostPence) next.costPence = (job.costPence ?? 0) + patch.addCostPence;
-  next.updatedAt = TEST_NOW;
-  return JobSchema.parse(next);
 }
 
 export interface MemoryFunnelStore extends FunnelStore {
@@ -191,7 +181,7 @@ export function memoryFunnelStore(
     apply: (updates) => {
       for (const update of updates) {
         patches.push(update);
-        jobs.set(update.jobId, applyPatch(store.get(update.jobId), update.patch));
+        jobs.set(update.jobId, applyPatch(store.get(update.jobId), update.patch, TEST_NOW));
       }
       return Promise.resolve(0);
     },

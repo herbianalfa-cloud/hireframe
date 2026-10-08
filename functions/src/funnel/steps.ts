@@ -41,6 +41,8 @@ export interface DeepReadInput {
   descriptionKind: Job['descriptionKind'];
   company?: CompanyFacts;
   now: Date;
+  /** Cache the system prompt (the default): worth it for a run's many reads, not a one-off. */
+  cacheSystem?: boolean;
 }
 
 export interface JudgeOptions {
@@ -135,7 +137,7 @@ export function buildFunnelContext(
           ...(input.company?.stage ? { companyStage: input.company.stage } : {}),
         }),
         schema: DeepReadOutputSchema,
-        cacheSystem: true,
+        cacheSystem: input.cacheSystem ?? true,
       });
       const { deep, downgraded, unknownRefs } = resolveDeepRead(result.data, toId);
       if (downgraded > 0 || unknownRefs > 0) {

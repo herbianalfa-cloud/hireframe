@@ -29,7 +29,8 @@ export const INGEST_HMAC_SECRET_NAME = 'INGEST_HMAC_SECRET';
 /** Deliberately high, so costs in pence are overstated rather than understated. */
 export const DEFAULT_FX_USD_TO_GBP = 0.85;
 
-export type LlmPurpose = 'parseCv' | 'addFact' | 'triage' | 'deepRead' | 'alertParse';
+export type LlmPurpose =
+  'parseCv' | 'addFact' | 'triage' | 'deepRead' | 'alertParse' | 'pasteParse';
 
 export interface ModelConfig {
   id: string;
@@ -71,6 +72,8 @@ export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
   },
   /** Alert emails from senders with no deterministic parser (ADR-047). */
   alertParse: { id: 'claude-haiku-4-5', maxTokens: 3_000, timeoutMs: 15_000, budgetMs: 35_000 },
+  /** A pasted LinkedIn results page the deterministic parser couldn't read (ADR-049). */
+  pasteParse: { id: 'claude-haiku-4-5', maxTokens: 6_000, timeoutMs: 40_000, budgetMs: 80_000 },
 };
 
 /** The callable whose timeout bounds each purpose's calls. */
@@ -80,6 +83,7 @@ export const PURPOSE_CALLABLE = {
   triage: 'scanNow',
   deepRead: 'scanNow',
   alertParse: 'ingestEmailJobs',
+  pasteParse: 'lookup',
 } as const satisfies Record<LlmPurpose, CallableName>;
 
 export const LLM = {
@@ -379,6 +383,8 @@ export const SHORT_LOCK = {
   /** A scheduled scan waits this often, and this long, for an `email` or `lookup` holder. */
   scheduledWaitIntervalMs: 15_000,
   scheduledWaitMaxMs: 4 * 60_000,
+  /** A Lookup create step takes seconds; a killed one blocks scans for this long (ADR-049). */
+  lookupStaleMs: 2 * 60_000,
 } as const;
 
 /**
@@ -415,3 +421,34 @@ export const SCHEDULE = {
   cron: '30 7,17 * * 1-5',
   timeZone: 'Europe/London',
 } as const;
+
+// ---- Lookup (M6, ADR-049) ----
+
+export const LOOKUP = {
+  /** Daily spend on Lookup's model calls; `config/app.lookup.dailyCapPence` overrides it. */
+  dailyCapPence: 25,
+  /** How long `add` waits for a scan or import to release the lock before answering `busy`. */
+  lockWaitMs: 20_000,
+  lockPollMs: 2_000,
+  /**
+   * No model call starts after this much of the callable. The last one (a deep read) ends within
+   * its budget plus the callable margin, inside the callable's timeout (config.test.ts).
+   */
+  deadlineMs: 200_000,
+  s2Concurrency: 4,
+  s3Concurrency: 2,
+  /** Watched boards one `add` may read to find postings (one request each, cached). */
+  atsBoardsPerCall: 12,
+  /** What `busy` tells the client, by who holds the lock (seconds). */
+  busyRetrySeconds: { scan: 240, rescore: 240, email: 60, lookup: 30 },
+  /** A claimed description older than this, still unfinished, may be claimed again. */
+  describeClaimStaleMs: 10 * 60_000,
+} as const;
+
+/**
+ * Optional `config/app.lookup` override, parsed on its own like `config/app.funnel` so a typo
+ * can't fail the owner check: an invalid object is ignored.
+ */
+export const LookupOverridesSchema = z
+  .object({ dailyCapPence: z.number().min(0).max(200) })
+  .partial();
