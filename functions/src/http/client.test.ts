@@ -301,6 +301,63 @@ describe('http client', () => {
     ).resolves.toEqual({ ok: true });
   });
 
+  it('refuses LinkedIn with no options at all: the forbidden list is the default', async () => {
+    const h = harness({ '*': [json({ ok: true })] });
+    for (const url of [
+      'https://www.linkedin.com/jobs/view/4012345678',
+      'https://lnkd.in/abc',
+      'https://angel.co/jobs',
+      'https://www.indeed.ie/viewjob',
+      'https://www.glassdoor.ca/job',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts)).rejects.toMatchObject({
+        code: 'forbidden_host',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it('checks every redirect hop: a board that redirects to LinkedIn is never followed there', async () => {
+    const redirect = (to: string, status = 302) =>
+      new Response('', { status, headers: { Location: to } });
+    const h = harness({
+      '/robots.txt': NO_ROBOTS,
+      '/start': [redirect('https://boards.example.com/hop')],
+      '/hop': [redirect('https://uk.linkedin.com/jobs/view/1')],
+    });
+    await expect(
+      h.client.getJson('https://boards.example.com/start', Schema, opts),
+    ).rejects.toMatchObject({ code: 'forbidden_host' });
+    expect(h.calls.map((call) => new URL(call.url).host)).not.toContain('uk.linkedin.com');
+    expect(h.logs.some((entry) => entry.event === 'http.forbidden_host')).toBe(true);
+  });
+
+  it('follows up to 3 redirect hops by hand and no more', async () => {
+    const redirect = (to: string) => new Response('', { status: 301, headers: { Location: to } });
+    const ok = harness({
+      '/robots.txt': NO_ROBOTS,
+      '/a': [redirect('/b')],
+      '/b': [redirect('/c')],
+      '/c': [redirect('/d')],
+      '/d': [json({ ok: true })],
+    });
+    await expect(ok.client.getJson('https://api.example.com/a', Schema, opts)).resolves.toEqual({
+      ok: true,
+    });
+    const tooMany = harness({
+      '/robots.txt': NO_ROBOTS,
+      '/a': [redirect('/b')],
+      '/b': [redirect('/c')],
+      '/c': [redirect('/d')],
+      '/d': [redirect('/e')],
+      '/e': [json({ ok: true })],
+    });
+    await expect(
+      tooMany.client.getJson('https://api.example.com/a', Schema, opts),
+    ).rejects.toMatchObject({ code: 'http_status' });
+    expect(tooMany.calls.map((call) => new URL(call.url).pathname)).not.toContain('/e');
+  });
+
   it('builds a Basic auth header with an empty password', () => {
     expect(basicAuth('key')).toBe(`Basic ${Buffer.from('key:').toString('base64')}`);
   });

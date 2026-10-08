@@ -191,9 +191,21 @@ export const FORBIDDEN_FETCH_HOSTS = [
   'linkedin.com',
   'indeed.com',
   'indeed.co.uk',
+  'indeed.ie',
+  'indeed.ca',
+  'indeed.com.au',
+  'indeed.de',
+  'indeed.fr',
   'wellfound.com',
+  'angel.co',
+  'lnkd.in',
   'glassdoor.com',
   'glassdoor.co.uk',
+  'glassdoor.ie',
+  'glassdoor.ca',
+  'glassdoor.com.au',
+  'glassdoor.de',
+  'glassdoor.fr',
 ] as const;
 
 export interface HostPolicyConfig {

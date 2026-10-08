@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 
+import { FORBIDDEN_FETCH_HOSTS } from '../config.js';
 import { ALLOW_ALL, robotsFromResponse, type RobotsPolicy } from './robots.js';
 
 /**
@@ -81,8 +82,9 @@ export interface HttpClientDeps {
   /** Epoch ms after which no request starts. */
   deadline?: number;
   /**
-   * Hosts (and their subdomains) this client never requests: `getJson` throws `forbidden_host`
-   * before any fetch, robots.txt included (ADR-004, ADR-049).
+   * Hosts (and their subdomains) this client never requests, redirects included: `getJson`
+   * throws `forbidden_host` before any fetch, robots.txt included (ADR-004, ADR-049). Defaults to
+   * `FORBIDDEN_FETCH_HOSTS`; a client can only be made laxer by passing a shorter list on purpose.
    */
   forbiddenHosts?: readonly string[];
   /** Pauses carried over from earlier runs: no request goes to these hosts until then. */
@@ -104,6 +106,9 @@ export interface HttpClient {
   pauses(): HostPause[];
 }
 
+/** Redirect hops followed by hand, each checked against the forbidden hosts. */
+const MAX_REDIRECTS = 3;
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 function retryAfterMs(header: string | null, now: number): number | null {
@@ -179,18 +184,44 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       logPause(url.host, label);
       throw new HttpError('host_paused');
     }
-    const timeoutMs = Math.min(policy.timeoutMs, remaining());
-    if (timeoutMs <= 0) throw new HttpError('deadline');
-    if (counted) requestCount += 1;
-    try {
-      return await deps.fetch(url, {
-        headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...headers },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      const name = error instanceof Error ? error.name : '';
-      throw new HttpError(name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network');
+    // Redirects are followed by hand, a few hops at most, and every hop is checked against the
+    // forbidden list: a board API must not be able to send us to LinkedIn (ADR-049).
+    let target = url;
+    for (let hop = 0; ; hop++) {
+      const timeoutMs = Math.min(policy.timeoutMs, remaining());
+      if (timeoutMs <= 0) throw new HttpError('deadline');
+      if (counted) requestCount += 1;
+      let response: Response;
+      try {
+        response = await deps.fetch(target, {
+          headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...headers },
+          redirect: 'manual',
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        const name = error instanceof Error ? error.name : '';
+        throw new HttpError(
+          name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network',
+        );
+      }
+      if (!REDIRECT_STATUS.has(response.status)) return response;
+      void response.body?.cancel().catch(() => undefined);
+      const location = response.headers.get('location');
+      let next: URL | null = null;
+      try {
+        next = location ? new URL(location, target) : null;
+      } catch {
+        next = null;
+      }
+      if (!next || hop >= MAX_REDIRECTS || !/^https?:$/.test(next.protocol)) {
+        throw new HttpError('http_status', response.status);
+      }
+      if (isForbidden(next.hostname)) {
+        deps.log('warn', 'http.forbidden_host', { host: next.host, label });
+        throw new HttpError('forbidden_host');
+      }
+      target = next;
+      await slot(target.host, Math.max(intervalMs, deps.hostPolicy(target.host).intervalMs));
     }
   }
 
@@ -236,7 +267,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
 
   function isForbidden(hostname: string): boolean {
     const host = hostname.toLowerCase();
-    return (deps.forbiddenHosts ?? []).some(
+    return (deps.forbiddenHosts ?? FORBIDDEN_FETCH_HOSTS).some(
       (banned) => host === banned || host.endsWith(`.${banned}`),
     );
   }
