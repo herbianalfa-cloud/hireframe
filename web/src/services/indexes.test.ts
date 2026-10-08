@@ -57,12 +57,11 @@ describe('firestore.indexes.json', () => {
     for (const [name, spec] of Object.entries(specs)) {
       expect(indexServes(spec, indexes), name).toBe(true);
     }
-    // Near miss and wildcard are separate equality counts served by (verdict, status, judgedAt desc).
-    expect(
-      indexes.some(
-        (index) => index.fields.map((f) => f.fieldPath).join() === 'verdict,status,judgedAt',
-      ),
-    ).toBe(true);
+    // The open counts are equality-only with no orderBy: served by merging the single-field
+    // indexes on verdict and status, so they need no composite index.
+    for (const key of ['apply', 'nearMiss', 'wildcard'] as const) {
+      expect(summarySpecs(NOW)[key].orderBy, key).toEqual([]);
+    }
     expect(Object.keys(dashboardQuerySpecs(NOW))).toContain('last-run');
   });
 
