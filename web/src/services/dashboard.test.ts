@@ -6,7 +6,9 @@ import { hfMarks, resetMarksForTest } from '@/lib/perf';
 
 import {
   loadAgreement,
-  loadTodayCounts,
+  loadSummaryCounts,
+  summarySpecs,
+  lastRunSpec,
   resolveCapPence,
   spendViewFrom,
   watchTodayList,
@@ -119,13 +121,13 @@ describe('per-step marks', () => {
   it('marks each count as it settles, then all four', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.mocked(getCountFromServer).mockResolvedValue({ data: () => ({ count: 7 }) } as never);
-    await loadTodayCounts(NOW);
+    await loadSummaryCounts(NOW);
     const names = hfMarks().map(([name]) => name);
     expect(names.slice(0, 4).sort()).toEqual([
       'hf:count:appliedThisWeek',
-      'hf:count:judgedToday',
-      'hf:count:toApply',
-      'hf:count:toReview',
+      'hf:count:apply',
+      'hf:count:nearMiss',
+      'hf:count:wildcard',
     ]);
     expect(names[4]).toBe('hf:counts');
   });
@@ -135,8 +137,8 @@ describe('per-step marks', () => {
     vi.mocked(getCountFromServer).mockRejectedValue(
       Object.assign(new Error('denied'), { code: 'permission-denied' }),
     );
-    await loadTodayCounts(NOW);
-    const [entry] = performance.getEntriesByName('hf:count:toApply');
+    await loadSummaryCounts(NOW);
+    const [entry] = performance.getEntriesByName('hf:count:apply');
     expect((entry as PerformanceMark).detail).toEqual({ ok: false });
     expect(hfMarks().map(([name]) => name)).toContain('hf:counts');
   });
@@ -164,6 +166,31 @@ describe('per-step marks', () => {
       docs: 2,
       fromCache: true,
       bytes: '{"a":1}'.length + '{"b":22}'.length,
+    });
+  });
+});
+
+describe('summary bar queries', () => {
+  it('counts open Apply, near miss and wildcard separately, and applied this week', () => {
+    const specs = summarySpecs(NOW);
+    expect(Object.keys(specs).sort()).toEqual(['appliedThisWeek', 'apply', 'nearMiss', 'wildcard']);
+    for (const [key, verdict] of [
+      ['apply', 'apply'],
+      ['nearMiss', 'near_miss'],
+      ['wildcard', 'wildcard'],
+    ] as const) {
+      expect(specs[key].filters).toEqual([
+        { field: 'verdict', op: '==', value: verdict },
+        { field: 'status', op: 'in', value: ['new', 'saved'] },
+      ]);
+    }
+  });
+
+  it('reads the newest run only, by startedAt', () => {
+    expect(lastRunSpec).toEqual({
+      collection: 'runs',
+      filters: [],
+      orderBy: [{ field: 'startedAt', direction: 'desc' }],
     });
   });
 });

@@ -6,7 +6,7 @@ import { Timestamp } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
 import { ADOPTED_S1_RULE_IDS } from '@hireframe/shared';
-import { dashboardQuerySpecs } from './dashboard';
+import { dashboardQuerySpecs, lastRunSpec, summarySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
 import { addedByYouSpec, jobFilterSpec } from './jobs';
 import { lookupKeysSpec, lookupUrlSpec, needsDescriptionSpec } from './lookup';
@@ -44,6 +44,26 @@ describe('firestore.indexes.json', () => {
     for (const [name, spec] of Object.entries(dashboardQuerySpecs(NOW))) {
       expect(indexServes(spec, indexes), name).toBe(true);
     }
+  });
+
+  it('serves the summary bar counts and the last run', () => {
+    const specs = {
+      ...Object.fromEntries(
+        Object.entries(summarySpecs(NOW)).map(([key, spec]) => [`count:${key}`, spec]),
+      ),
+      'last-run': lastRunSpec,
+    };
+    expect(Object.keys(specs)).toHaveLength(5);
+    for (const [name, spec] of Object.entries(specs)) {
+      expect(indexServes(spec, indexes), name).toBe(true);
+    }
+    // Near miss and wildcard are separate equality counts served by (verdict, status, judgedAt desc).
+    expect(
+      indexes.some(
+        (index) => index.fields.map((f) => f.fieldPath).join() === 'verdict,status,judgedAt',
+      ),
+    ).toBe(true);
+    expect(Object.keys(dashboardQuerySpecs(NOW))).toContain('last-run');
   });
 
   it('serves every funnel diagnostics query', () => {
