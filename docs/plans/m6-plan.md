@@ -2,7 +2,7 @@
 
 Two PRs, each branched from `main` (never stacked):
 1. **`feat/m6a-gmail-bridge` → tag `v0.6.0`**: Apps Script bridge, `ingestEmailJobs`, alert parsers, the "needs description" state in the funnel.
-2. **`feat/m6b-lookup` → tag `v0.6.1`**: one PR built in two sessions: (1) the funnel steps refactor, the `lookup` callable and the ATS board search; (2) the web (Lookup screen, Today section, Jobs filter, sheet control).
+2. (v0.6.1 was funnel-intake PR B.) **`feat/m6b-lookup` → tag `v0.6.2`**: one PR built in two sessions: (1) the funnel steps refactor, the `lookup` callable and the ATS board search; (2) the web (Lookup screen, Today section, Jobs filter, sheet control).
 
 **Sequencing:**
 - 6A branches from `main` now. It is merged and tagged only **after the Wed 7 Oct 17:30 scheduled run**, so that run still measures the pre-alert intake.
@@ -186,7 +186,7 @@ What exists to build on:
 
 ---
 
-## PR 6B: Lookup (`feat/m6b-lookup`, v0.6.1)
+## PR 6B: Lookup (`feat/m6b-lookup`, v0.6.2)
 
 ### Flows
 1. **Match (no callable, no spend):** the owner pastes one URL or many lines of text. Pure `parseLookupInput` (`packages/shared/src/lookup.ts`) pulls every URL, then `keysFromUrl` + `canonicalUrl` per URL. The browser reads jobs (the owner can already read `jobs`):
@@ -251,7 +251,7 @@ What exists to build on:
 - **Session 2: web.** `features/lookup/*` (with `pasteAnchors.ts`, the DOMParser-only helper), `features/today/AddedByYou.tsx`, `features/jobs` (filter, sheet control, search-link and unverified-link labels), `services/lookup.ts`, `app/App.tsx` (route), `app/nav.ts`. Ends with the full gate including `check:bundle`.
 - **Rules:** no new client writes (every job change goes through the callable).
 - **Dev seed:** one user-added job with a verdict, one at `next: 'description'`.
-- **Docs:** ADR-049; ARCHITECTURE (lookup function, data model, Lookup screen); FUNNEL (the lookup path, ATS hydrator); PRD unchanged; RUNBOOK Part H; ROADMAP (M6 done, parking lot); CHANGELOG `0.6.1`.
+- **Docs:** ADR-049; ARCHITECTURE (lookup function, data model, Lookup screen); FUNNEL (the lookup path, ATS hydrator); PRD unchanged; RUNBOOK Part H; ROADMAP (M6 done, parking lot); CHANGELOG `0.6.2`.
 
 ### Data model changes (6B)
 - `jobs`: `addedAt?` (server time, set once by `lookup`), `describingAt?` (claim time, cleared on finish), sources and `description/raw.sourceId` may be `lookup`, `sources[].searchLink?: true`, flag `posted_estimated`.
@@ -339,9 +339,9 @@ What exists to build on:
 - **G7. Gmail:** labels `hireframe/alerts` and `hireframe/done` in the primary account. A filter `from:jobalerts-noreply@linkedin.com` (plus any other alert senders you use: Work at a Startup, Escape the City, Wellfound, WTTJ, Reed, Indeed) → apply `hireframe/alerts`. **Second account:** keep its filter that auto-forwards `from:jobalerts-noreply@linkedin.com` to the primary; since Gmail keeps the original `From`, the primary's filter labels the forwarded copies too.
 - **G8. Check:** label one real alert, run `run` in the editor → **System** shows the email card (jobs new/merged); the message is under `hireframe/done`. Next scan: those jobs get S1/S2, and LinkedIn ones end at "Waiting for a description".
 
-### Before 6B's tag (`v0.6.1`)
+### Before 6B's tag (`v0.6.2`)
 - **H1.** Repeat G2 (invoker check on `scheduledScan`).
-- **H2.** Merge 6B, push `v0.6.1`, approve.
+- **H2.** Merge 6B, push `v0.6.2`, approve.
 
 ### After 6B's deploy
 - **H3. Invoker binding for `lookup`** (add it to step 28's list):
@@ -367,5 +367,5 @@ What exists to build on:
 5. **Over the daily Lookup cap**, jobs fall back to the scan queues **at the front** (user-added first in S2 and S3). The daily Lookup cap is **25p**.
 6. **Off-allowlist links in model-parsed alerts keep the job:** the https link is stored on the source ref only, marked unverified, shown with its host, never logged; `externalId` = hash of company|title|city; System shows counts per sender.
 7. **Lookup and the lock:** as planned (lock for the create step only, precondition writes for model results).
-8. **Versions:** sort/filter and the sweep already shipped as `v0.5.4` and `v0.5.5`; 6A fixes the CHANGELOG headings. 6A = `v0.6.0`, 6B = `v0.6.1`.
+8. **Versions:** sort/filter and the sweep already shipped as `v0.5.4` and `v0.5.5`; 6A fixes the CHANGELOG headings. 6A = `v0.6.0`, 6B = `v0.6.2`.
 9. **ADR-045** stays reserved for funnel-intake PR B; M6 uses ADR-046–049.

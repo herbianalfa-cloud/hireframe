@@ -21,7 +21,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - **Bundle:** initial JS 292.9 → 293.1 kB gzip (limit 300); Lookup (5.2 kB), its paste control (5.1 kB with the Functions SDK) and the job sheet (5.7 kB, now shared) are lazy chunks.
 
 ### Changed
-- **The results-page parser reads the real LinkedIn copy format.** A card is its title twice on one line (a verified job has ` (Verified job)` between the copies), then the company, the location (a bare town, or with `(Hybrid)` / `(Remote)` / `(On-site)`), badges and alumni lines, a salary such as `31K GBP/yr`, `Viewed`, and an age that is also doubled (`Posted 1 week ago1 week ago`). Cards are found by the doubled title, so bare towns work; the age is read once. The assumed format and its fixture are replaced (fake values only). A copy that begins mid-card loses that card.
+- **The results-page parser reads the real LinkedIn copy format.** A card is its title twice on one line (a verified job has ` (Verified job)` between the copies), then the company, the location (a bare town, or with `(Hybrid)` / `(Remote)` / `(On-site)`), badges and alumni lines, a salary such as `27K GBP/yr`, `Viewed`, and an age that is also doubled (`Posted 1 week ago1 week ago`). Cards are found by the doubled title, so bare towns work; the age is read once. The assumed format and its fixture are replaced (fake values only). A copy that begins mid-card loses that card.
 - The Lookup nav entry's text no longer says "Coming soon".
 
 ## [0.6.1]
