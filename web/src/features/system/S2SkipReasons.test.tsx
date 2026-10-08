@@ -7,15 +7,22 @@ import {
 } from '@hireframe/shared';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { IndexBuildingError, loadDiagnostics } from '@/services/funnel-diagnostics';
+import {
+  IndexBuildingError,
+  loadDiagnostics,
+  loadRecentS1Skips,
+} from '@/services/funnel-diagnostics';
 
+import { S1RecentSkips } from './S1RecentSkips';
 import { S2SkipReasons } from './S2SkipReasons';
 
 vi.mock('@/services/funnel-diagnostics', async () => ({
   ...(await vi.importActual<Record<string, unknown>>('@/services/funnel-diagnostics')),
   loadDiagnostics: vi.fn(),
+  loadRecentS1Skips: vi.fn(),
 }));
 
 const NOW = new Date('2026-10-05T08:00:00Z');
@@ -130,6 +137,30 @@ describe('S2SkipReasons', () => {
       expect(container.textContent).not.toContain(secret);
     }
     expect(await screen.findByText('Copied.')).toBeDefined();
+  });
+
+  it('never copies the titles and companies the S1 spot-check list shows', async () => {
+    load.mockResolvedValue(report());
+    vi.mocked(loadRecentS1Skips).mockResolvedValue({
+      sdr: [{ id: 'job-1', title: 'Gossamer Pipeline Rep', company: 'Tumbleweed Fake Ltd' }],
+    });
+    const user = userEvent.setup();
+    const { container } = render(
+      <MemoryRouter>
+        <S1RecentSkips />
+        <S2SkipReasons />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Load recent skips' }));
+    await screen.findByText(/Gossamer Pipeline Rep/);
+    await user.click(screen.getByRole('button', { name: 'Load' }));
+    await user.click(await screen.findByRole('button', { name: 'Copy counts' }));
+
+    const copied = await navigator.clipboard.readText();
+    expect(container.textContent).toContain('Tumbleweed Fake Ltd');
+    for (const secret of ['Gossamer Pipeline Rep', 'Tumbleweed Fake Ltd', 'job-1']) {
+      expect(copied).not.toContain(secret);
+    }
   });
 
   it('says the index is building when Firestore is still creating it', async () => {

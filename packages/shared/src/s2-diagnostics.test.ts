@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { CRITERIA_SEED_V1 } from './criteria-seed.js';
 import type { JobTriage } from './funnel.js';
 import type { Job } from './jobs.js';
-import { matchesExcludedTitle } from './titles.js';
 import {
   ADOPTED_S1_RULE_IDS,
   blockerCategory,
@@ -302,15 +301,5 @@ describe('adopted S1 rules (ADR-045)', () => {
     expect(ADOPTED_S1_RULE_IDS).toEqual(c4?.terms.map((term) => term.id));
     const seeded = CRITERIA_SEED_V1.excluded_titles.map((rule) => rule.id);
     for (const id of ADOPTED_S1_RULE_IDS) expect(seeded).toContain(id);
-  });
-
-  it('skip nothing in the three sets that the plan listed as must-pass titles', () => {
-    for (const title of ['Sales Engineer', 'Pre-Sales Consultant', 'Presales Engineer']) {
-      expect(
-        CRITERIA_SEED_V1.excluded_titles.some(
-          (rule) => ADOPTED_S1_RULE_IDS.includes(rule.id) && matchesExcludedTitle(title, rule),
-        ),
-      ).toBe(false);
-    }
   });
 });

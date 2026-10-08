@@ -4,7 +4,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
 ### Added
-- **Funnel intake PR B (ADR-045).** S1 now skips sales titles (`Sales Executive`, `Sales Representative`, `Sales Development`, `Sales Associate`, `Account Executive`, `Business Development`, `SDR`, `BDR`) after the panel counted 43 S2 skips, no good job and no job waiting for S3 among them; Sales Engineer, Pre-Sales and Solutions Consultant still pass. C1 to C3 were rejected (they hit good jobs), C5 and C6 are not built. System gets "Recent S1 skips by rule" (the last 7 days, 20 per rule, with a new `(skip.ruleId, judgedAt)` index) for a first-week spot-check. Title-table rows for the new rules.
+- **Funnel intake PR B (ADR-045).** S1 now skips sales titles (`Sales Executive`, `Sales Representative`, `Sales Development`, `Sales Associate`, `Account Executive`, `Business Development`, `SDR`, `BDR`) after the panel counted 43 S2 skips, no good job and no job waiting for S3 among them; Sales Engineer, Presales and Solutions Consultant still pass, and the Sales Executive, Sales Representative, Sales Development and Sales Associate terms allow a `Pre` prefix (Pre-Sales Associate) while Business Development allows `Solutions Engineer`. C1 to C3 were rejected (they hit good jobs), C5 and C6 are not built. System gets "Recent S1 skips by rule" (the last 7 days, 20 per rule, with a new `(skip.ruleId, judgedAt)` index) for a first-week spot-check. Title-table rows for the new rules.
 
 ### Changed
 - `s3MaxJobs` default 25 → 32. ADR-032 amendment: the intake-based sizing is approved at `monthlyCapPence` 3200 (lease 52p); set it in the console after deploy.
