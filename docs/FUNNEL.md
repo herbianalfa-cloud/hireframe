@@ -12,11 +12,11 @@ Principle: **spend in proportion to promise.** Each stage is cheaper than the ne
 
 Target pass-through: S1 keeps ~40%, S2 keeps ~30% of those.
 
-**Per-run limits (ADR-032).** Each run reserves a spend lease on `usage/{month}`: by default 75% of the monthly cap over 46 scheduled runs (24p at £15). Every model call in the run reserves its worst case against the lease and settles its actual cost, so a run never spends more than its lease, and the month's worst case is runs × lease. S2 may use at most 40% of the lease. A stage doesn't stop on the first refused reservation: it waits for in-flight calls to settle until its largest worst case so far fits, and stops only when that can't fit with nothing in flight, or at its deadline (ADR-039). A cached prompt reserves its input at the cache-write rate. Each stage records its own stop reason (`budget.stops`). Expect about 55–60 S2 calls and 8–10 S3 calls at 24p when the queues are that long. Count caps are upper bounds: S1 ≤ 2,000, S2 ≤ 300, S3 ≤ 25 jobs a run. Overflow stays queued (`next`): S2 takes the newest first (`sortAt`: posting date, else first seen), S3 the highest S2 score first. At 80% of the monthly cap a run is flagged; from 90% S3 pauses and S2 continues to the cap. Overrides live in `config/app.funnel`. Before the lease, the expiry sweep skips queued jobs past `freshness_days` for free (up to 2,000 per stage and run); it counts into `s2.expired` and `s3.expired`.
+**Per-run limits (ADR-032).** Each run reserves a spend lease on `usage/{month}`: by default 75% of the monthly cap over 46 scheduled runs (24p at £15). Every model call in the run reserves its worst case against the lease and settles its actual cost, so a run never spends more than its lease, and the month's worst case is runs × lease. S2 may use at most 40% of the lease. A stage doesn't stop on the first refused reservation: it waits for in-flight calls to settle until its largest worst case so far fits, and stops only when that can't fit with nothing in flight, or at its deadline (ADR-039). A cached prompt reserves its input at the cache-write rate. Each stage records its own stop reason (`budget.stops`). Expect about 55–60 S2 calls and 8–10 S3 calls at 24p when the queues are that long (at the approved 52p lease, up to about 99 and 32). Count caps are upper bounds: S1 ≤ 2,000, S2 ≤ 300, S3 ≤ 32 jobs a run (ADR-045). Overflow stays queued (`next`): S2 takes the newest first (`sortAt`: posting date, else first seen), S3 the highest S2 score first. At 80% of the monthly cap a run is flagged; from 90% S3 pauses and S2 continues to the cap. Overrides live in `config/app.funnel`. Before the lease, the expiry sweep skips queued jobs past `freshness_days` for free (up to 2,000 per stage and run); it counts into `s2.expired` and `s3.expired`.
 
 ## Sizing the run budget to the intake (method, ADR-032 amendment)
 
-The lease is sized to the cap by default (24p at £15). This is the method for sizing it to what a day brings instead, so a run clears the intake and no good job waits in a queue. **Nothing here changes `monthlyCapPence`, `defaultRunBudgetPence` or any override**: the method produces a figure from real runs, the owner approves it, and the cap is then a console edit of `config/app.monthlyCapPence`.
+The lease is sized to the cap by default (24p at £15). This is the method for sizing it to what a day brings instead, so a run clears the intake and no good job waits in a queue. **The method itself changes no cap, `defaultRunBudgetPence` or override**: it produces a figure from real runs, the owner approves it, and the cap is then a console edit of `config/app.monthlyCapPence` (approved figures below).
 
 **Inputs** come from System → Recent runs, as aggregate numbers only. `scheduledScan` only started on 5 Oct, so use the first 6 scheduled runs (they must include a Monday 07:30 run, which carries the weekend's postings), and re-check at 10 runs. For each run read `s0.new`, `s1.passed`, `s2.in`, `s2.passed`, `s3.in`, `s2.costPence`, `s3.costPence` and `budget.stops`.
 
@@ -27,6 +27,8 @@ The lease is sized to the cap by default (24p at £15). This is the method for s
 
 **Unit costs** (ADR-032, ADR-039, FX 0.85): S2 actual c₂ = 0.151p, worst case w₂ ≈ 0.55p; S3 actual c₃ = 1.5p (conservative: the first prod run saw about 1.0p), worst case w₃ ≈ 5.5p.
 
+**Approved figures (ADR-032 amendment, 8 Oct).** Inputs: f·P = 105 S1 passes in the bigger run of the largest day, q = 0.30 (66/217), c₃ = 1.0p (owner-approved; five runs, 5–7 Oct: 76 S3 calls at 0.74–1.01p per run; S3's worst-case headroom is then 5.5 − 1.0 = 4.5p, not 4.0p), t = 0.06 (43 C4 skips ÷ about 713 S2 calls, 499 skips ÷ (1 − q)), so n₂ = 105 × 0.94 = 99 and n₃ = 105 × 0.30 = 32 (the new `s3MaxJobs`). L = 0.151 × 99 + 1.0 × 32 + 4.5 = 51.5 → **52p**; the S2 share check gives (14.95 + 0.40) / 0.4 = 38.4, which is less. `monthlyCapPence` = ceil(46 × 52 / 0.75) = 3,189 → **3200**, and floor(3200 × 0.75 / 46) = 52 ✓. Setting it is a console edit of `config/app.monthlyCapPence` (RUNBOOK). Re-check at 10 scheduled runs, or sooner if S3 averages above 1.0p. That 32 S3 calls fit inside 450 s is unproven: check `stops.s3` and the stage durations on the first 52p runs and at the re-check; the levers are `s3Concurrency` or the deadline.
+
 **Arithmetic.** The peak run must clear n₂ = f · P · (1 − t) S2 calls and n₃ = f · P · q S3 calls (adopted rules only remove S2 skips, so S3's volume doesn't change). Back-pressure (ADR-039) admits a stage's last call only if its worst case fits with nothing in flight, so each stage needs headroom of (w − c) on top of its spend:
 
 - S2 share: 0.4 · L ≥ n₂ · c₂ + (w₂ − c₂), so L ≥ (0.151 · n₂ + 0.40) / 0.4
@@ -34,7 +36,7 @@ The lease is sized to the cap by default (24p at £15). This is the method for s
 - L is the larger of the two, rounded up to a whole penny. S3 has no 60% cap of its own: `createRunLease` (`functions/src/llm/lease.ts`) limits only S2 to its share and the whole lease.
 - **monthlyCapPence = ceil(46 · L / 0.75)**, rounded up to the next 100. Then check that floor(cap × 0.75 / 46) ≥ L.
 
-Ceilings: n₂ ≤ 300; n₃ ≤ `s3MaxJobs` (25, override up to 60); and S3 must finish inside the 450 s deadline, so check `stops.s3 != 'deadline'` in the sample (if it was hit, raise `s3MaxJobs` or move the deadline, not the budget).
+Ceilings: n₂ ≤ 300; n₃ ≤ `s3MaxJobs` (32 since ADR-045; override up to 60); and S3 must finish inside the 450 s deadline, so check `stops.s3 != 'deadline'` in the sample (if it was hit, raise `s3MaxJobs` or move the deadline, not the budget).
 
 Worked example, f = 0.6, q = 0.26, t = 0.3, P = 100: n₂ = 0.6 × 100 × 0.7 = 42; n₃ = 0.6 × 100 × 0.26 = 15.6 → 16; L = 42 × 0.151 + 16 × 1.5 + 4.0 = 34.3 → 35 (the S2 check gives 16.9, which is less); cap = 46 × 35 / 0.75 = 2,146.7 → **2200**; floor(2200 × 0.75 / 46) = 35 ✓.
 
@@ -54,7 +56,7 @@ Expected *actual* spend is about 46 × the mean run's (n₂ · c₂ + n₃ · c�
 **S2 skip-reasons panel.** System → "S2 skip reasons" reads the owner's own jobs on demand (press Load) and shows counts only: the size and date range of each set (the model's S2 skips and good jobs from the last 30 days, and the jobs waiting for S3), the skips by lane, seniority, lane × seniority and blocker category, what each criteria-only candidate S1 rule (C1 seniority markers, C2 plain Product Manager, C3 engineering titles, C4 sales titles) would have skipped in each set, and the queued jobs without a `sortAt`. "Copy counts" copies the same numbers as JSON (rule IDs, enum values, category names and integers; no title, company, note or text). A rule is worth adopting only if it skips no good job and none waiting for S3, and at least two S2 skips (ADR-043).
 
 ## S1 — hard rules (from criteria, all editable)
-- Excluded titles/keywords (word-boundary match): e.g. plain `Business Analyst` without junior/graduate/associate prefix, `Data Analyst`, `Product Owner` (mid), `Growth`/`Performance Marketing`/`Digital Marketing`, `Senior`, `Lead`, `Principal`, `Head of`, `Director`, `Manager` unless preceded by `Product`/`Account`/`Associate`/`Junior`.
+- Excluded titles/keywords (word-boundary match): e.g. sales titles (`Sales Executive`, `Sales Representative`, `Sales Development`, `Sales Associate`, `Account Executive`, `Business Development`, `SDR`, `BDR`; ADR-045; plain `Sales` is not a term, so Sales Engineer stays in the Solutions lane; `Pre` before Sales Executive, Sales Representative, Sales Development or Sales Associate, and `Solutions Engineer` before Business Development, allow the title. Pre-Sales titles that don't match those four terms pass because they contain no term), plain `Business Analyst` without junior/graduate/associate prefix, `Data Analyst`, `Product Owner` (mid), `Growth`/`Performance Marketing`/`Digital Marketing`, `Senior`, `Lead`, `Principal`, `Head of`, `Director`, `Manager` unless preceded by `Product`/`Account`/`Associate`/`Junior`.
 - Explicit blockers in text: SC/DV clearance required, full driving licence required, "must have indefinite right to work" or other wording that excludes {profile.work_rights}. Work rights are an owner setting on `profile/main` (no restrictions, time-limited with an optional end date, needs sponsorship); until it's set, such wording is flagged, never skipped (ADR-033).
 - Experience: regex for "(\d+)\+? years" → skip only if min **>** criteria cap (default 2, so 3+ years) **and** phrased as required, not "nice to have". A required ask equal to the cap (e.g. "2+ years") passes to S2/S3 and takes the luckScore penalty below. Ambiguous → pass to S2.
 - Location: outside UK and not remote-UK → skip (Indonesia lane is Wave 3).
@@ -64,6 +66,8 @@ Expected *actual* spend is about 46 × the mean run's (n₂ · c₂ + n₃ · c�
 **Unknown titles are never skipped at S1** — they go to S2 so wildcards survive.
 
 Rule IDs: `title:<excluded title id>`, `company`, `keyword:<term>`, `location`, `freshness`, `blocker:sc-clearance`, `blocker:dv-clearance`, `blocker:driving-licence`, `blocker:right-to-work`, `blocker:<custom>`, `experience`.
+
+**First-week spot-check (ADR-045).** A false skip at S1 is silent and free. System's "Recent S1 skips by rule" lists up to 20 jobs per sales-title rule from the last 7 days (title and company, on screen only, each opening the job sheet). For the first 7 days after the rules reach prod, read each list once a day; if a rule skipped a job it shouldn't have, delete or narrow that term in Criteria and press Re-score (free, and the job goes back to S2). Re-score restamps `judgedAt` on every S1 skip, so older jobs that are skipped again appear in the lists too.
 
 ## S2 — triage prompt (cheap model)
 System (not cached: at about 1,000 tokens it's under Haiku 4.5's 4,096-token caching minimum, ADR-035). The candidate summary is built in code from the profile facts, with no model call:
@@ -164,6 +168,14 @@ excluded_titles:
   - { id: principal, term: Principal }
   - { id: head-of, term: Head of }
   - { id: director, term: Director }
+  - { id: sales-executive, term: Sales Executive, unless_prefixed_by: [Pre] }          # sales titles: ADR-045
+  - { id: sales-representative, term: Sales Representative, unless_prefixed_by: [Pre] }
+  - { id: sales-development, term: Sales Development, unless_prefixed_by: [Pre] }
+  - { id: sales-associate, term: Sales Associate, unless_prefixed_by: [Pre] }
+  - { id: account-executive, term: Account Executive }
+  - { id: business-development, term: Business Development, unless_prefixed_by: [Solutions Engineer] }
+  - { id: sdr, term: SDR }
+  - { id: bdr, term: BDR }
   - { id: manager, term: Manager, unless_prefixed_by: [Product, Account, Associate, Junior] }
 excluded_keywords: []
 excluded_companies: [Big Four graduate schemes, Sparta Global and train-and-deploy consultancies]

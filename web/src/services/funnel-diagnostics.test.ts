@@ -7,9 +7,24 @@ import {
   diagnosticsSpecs,
   IndexBuildingError,
   queuedCountSpecs,
+  s1SkipsByRuleSpec,
 } from './funnel-diagnostics';
 
 const NOW = new Date('2026-10-05T08:00:00Z');
+
+describe('s1SkipsByRuleSpec', () => {
+  it("reads one rule's skips from the last 7 days, newest judged first", () => {
+    const since = Timestamp.fromMillis(NOW.getTime() - 7 * 86_400_000);
+    expect(s1SkipsByRuleSpec('title:sdr', NOW)).toEqual({
+      collection: 'jobs',
+      filters: [
+        { field: 'skip.ruleId', op: '==', value: 'title:sdr' },
+        { field: 'judgedAt', op: '>=', value: since },
+      ],
+      orderBy: [{ field: 'judgedAt', direction: 'desc' }],
+    });
+  });
+});
 
 describe('diagnosticsSpecs', () => {
   it('reads the last 30 days of S2 skips and good jobs, newest judged first', () => {

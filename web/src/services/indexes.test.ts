@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Timestamp } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
+import { ADOPTED_S1_RULE_IDS } from '@hireframe/shared';
 import { dashboardQuerySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
 import { jobFilterSpec } from './jobs';
@@ -46,7 +47,7 @@ describe('firestore.indexes.json', () => {
 
   it('serves every funnel diagnostics query', () => {
     const specs = diagnosticsQuerySpecs(NOW);
-    expect(Object.keys(specs)).toHaveLength(7);
+    expect(Object.keys(specs)).toHaveLength(7 + ADOPTED_S1_RULE_IDS.length);
     for (const [name, spec] of Object.entries(specs)) {
       expect(indexServes(spec, indexes), name).toBe(true);
     }

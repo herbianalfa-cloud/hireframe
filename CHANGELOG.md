@@ -3,6 +3,13 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Added
+- **Funnel intake PR B (ADR-045).** S1 now skips sales titles (`Sales Executive`, `Sales Representative`, `Sales Development`, `Sales Associate`, `Account Executive`, `Business Development`, `SDR`, `BDR`) after the panel counted 43 S2 skips, no good job and no job waiting for S3 among them; Sales Engineer, Presales and Solutions Consultant still pass, and the Sales Executive, Sales Representative, Sales Development and Sales Associate terms allow a `Pre` prefix (Pre-Sales Associate) while Business Development allows `Solutions Engineer`. C1 to C3 were rejected (they hit good jobs), C5 and C6 are not built. System gets "Recent S1 skips by rule" (the last 7 days, 20 per rule, with a new `(skip.ruleId, judgedAt)` index) for a first-week spot-check. Title-table rows for the new rules.
+
+### Changed
+- `s3MaxJobs` default 25 → 32. ADR-032 amendment: the intake-based sizing is approved at `monthlyCapPence` 3200 (lease 52p); set it in the console after deploy.
+- Recent runs show expired jobs apart from skips (`S2 3 passed, 4 skipped, 1 expired`).
+
 ### Fixed
 - **Gmail bridge: "Could not decode string".** The Advanced Gmail service's `payload.body.data` can be a byte array, unpadded base64url or standard base64, not only padded base64url. Decoding now reads bytes as UTF-8 directly, tries `base64DecodeWebSafe`, then standard base64 (`-_` mapped to `+/`, padded), and honours the part's charset (UTF-8 by default). `readMessage` never throws: an undecodable part is skipped, a message with no readable part stays under `hireframe/alerts` and is counted as `unreadable` in the run summary, and the other messages are still sent. Logs carry only a fixed code, `typeof data` and the branch that worked. RUNBOOK G6 uses `--rootDir build` and says to open the project by its script ID, and notes the temporary `roles/cloudfunctions.admin` grant a new non-callable HTTPS function needs on its first deploy.
 

@@ -4,6 +4,7 @@ import { CRITERIA_SEED_V1 } from './criteria-seed.js';
 import type { JobTriage } from './funnel.js';
 import type { Job } from './jobs.js';
 import {
+  ADOPTED_S1_RULE_IDS,
   blockerCategory,
   buildReport,
   CANDIDATE_RULES,
@@ -291,5 +292,14 @@ describe('buildReport', () => {
       queuedWithoutSortAt: { s2: null, s3: null },
     });
     expect(empty.sets.good).toEqual({ size: 0, from: null, to: null });
+  });
+});
+
+describe('adopted S1 rules (ADR-045)', () => {
+  it('are exactly the seed rows that C4 adds, so the spot-check list names real rules', () => {
+    const c4 = CANDIDATE_RULES.find((rule) => rule.id === 'C4');
+    expect(ADOPTED_S1_RULE_IDS).toEqual(c4?.terms.map((term) => term.id));
+    const seeded = CRITERIA_SEED_V1.excluded_titles.map((rule) => rule.id);
+    for (const id of ADOPTED_S1_RULE_IDS) expect(seeded).toContain(id);
   });
 });

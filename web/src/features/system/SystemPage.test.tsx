@@ -253,7 +253,7 @@ describe('System screen', () => {
     const runs = screen.getByRole('region', { name: 'Recent runs' });
     expect(runs.textContent).toContain('Scheduled');
     expect(runs.textContent).toContain(
-      'S1 8 passed, 4 skipped · S2 3 passed, 5 skipped · S3 1 apply, 1 near miss, 0 wildcard, 1 skip · 3 queued · 1 for review · 5.7p',
+      'S1 8 passed, 4 skipped · S2 3 passed, 4 skipped, 1 expired · S3 1 apply, 1 near miss, 0 wildcard, 1 skip · 3 queued · 1 for review · 5.7p',
     );
     expect(runs.textContent).toContain('80% of the monthly AI cap used');
     expect(runs.textContent).toContain('Stopped early: run budget used');

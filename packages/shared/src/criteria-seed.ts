@@ -65,6 +65,18 @@ export const CRITERIA_SEED_V1: CriteriaContent = {
     { id: 'principal', term: 'Principal' },
     { id: 'head-of', term: 'Head of' },
     { id: 'director', term: 'Director' },
+    { id: 'sales-executive', term: 'Sales Executive', unless_prefixed_by: ['Pre'] },
+    { id: 'sales-representative', term: 'Sales Representative', unless_prefixed_by: ['Pre'] },
+    { id: 'sales-development', term: 'Sales Development', unless_prefixed_by: ['Pre'] },
+    { id: 'sales-associate', term: 'Sales Associate', unless_prefixed_by: ['Pre'] },
+    { id: 'account-executive', term: 'Account Executive' },
+    {
+      id: 'business-development',
+      term: 'Business Development',
+      unless_prefixed_by: ['Solutions Engineer'],
+    },
+    { id: 'sdr', term: 'SDR' },
+    { id: 'bdr', term: 'BDR' },
     {
       id: 'manager',
       term: 'Manager',

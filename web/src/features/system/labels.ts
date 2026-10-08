@@ -60,15 +60,21 @@ export function penceText(pence: number): string {
   return `${rounded.toFixed(rounded < 10 && rounded % 1 !== 0 ? 1 : 0)}p`;
 }
 
+/** Jobs skipped for age, not judged: counted apart from the model's skips (ADR-045). */
+const expiredText = (expired: number): string =>
+  expired > 0 ? `, ${String(expired)} expired` : '';
+
 /** One line for the funnel part of a run (PRD R12: counts per stage and cost). */
 export function funnelText(run: Run): string | null {
   const { s1, s2, s3 } = run.perStage;
   if (!s1 && !s2 && !s3) return null;
   const parts = [
     s1 ? `S1 ${String(s1.passed)} passed, ${String(s1.skipped)} skipped` : null,
-    s2 ? `S2 ${String(s2.passed)} passed, ${String(s2.skipped + s2.expired)} skipped` : null,
+    s2
+      ? `S2 ${String(s2.passed)} passed, ${String(s2.skipped)} skipped${expiredText(s2.expired)}`
+      : null,
     s3
-      ? `S3 ${String(s3.apply)} apply, ${String(s3.near_miss)} near miss, ${String(s3.wildcard)} wildcard, ${String(s3.skip + s3.expired)} skip`
+      ? `S3 ${String(s3.apply)} apply, ${String(s3.near_miss)} near miss, ${String(s3.wildcard)} wildcard, ${String(s3.skip)} skip${expiredText(s3.expired)}`
       : null,
   ].filter((part): part is string => part !== null);
   const queued = (s2?.queued ?? 0) + (s3?.queued ?? 0);
