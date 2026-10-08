@@ -1,5 +1,5 @@
 import { spendMeter, type Run } from '@hireframe/shared';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -105,10 +105,13 @@ describe('SummaryBar', () => {
   });
 
   it('says so when there has been no run, or the run could not be read', async () => {
-    expect(
-      (await setup({ run: { status: 'ready', data: null, invalid: 0 } })).getByText('No runs yet'),
-    ).toBeDefined();
-    document.body.innerHTML = '';
+    const none = await setup({ run: { status: 'ready', data: null, invalid: 0 } });
+    expect(none.getByText('No runs yet')).toBeDefined();
+    cleanup();
+    const failed = await setup({
+      run: { status: 'error', message: "Couldn't load the last run." },
+    });
+    expect(failed.getByText('Unavailable')).toBeDefined();
   });
 
   it('links the spend chip to System and warns from 80%', async () => {
