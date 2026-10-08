@@ -6,6 +6,16 @@ All notable changes. Format: Keep a Changelog, SemVer.
 ### Changed
 - Docs: billing-guards plan for M8 (`docs/plans/m8-billing-guards.md`) and a new hard rule against self-triggering code in `CLAUDE.md`.
 
+## [0.7.0] - 2026-10-08
+### Changed
+- **M7 PR 7A: Today summary bar, loaded after `hf:usable`** (ADR-051; plan `docs/plans/m7-plan.md`).
+  - `hf:usable` now marks the first render with the Apply list's first snapshot; the counts no longer gate it. RUNBOOK step 89 notes that v0.7.0 numbers are not comparable with v0.6.x.
+  - `SummaryBar` replaces the four tiles and mounts only after `hf:usable` (a skeleton row until then): open Apply, near miss and wildcard counts (links to Jobs), applied this week against the target, last run (status in words, "Timed out" for a killed run), next run, and the spend meter as a compact chip linking to System. *Judged today* is dropped. *Things to do* stays hidden until the pipeline.
+  - Shared: `SCHEDULE` moved to `packages/shared/src/schedule.ts` (re-exported by `functions/src/config.ts`) with the pure `nextScheduledRun`; `todayKpis` became `summaryCounts` with near miss and wildcard split.
+  - Services: `summarySpecs`, `loadSummaryCounts` (replaces `kpiSpecs`/`loadTodayCounts`), `lastRunSpec` and `watchLastRun`. No new index.
+  - Tests: `nextScheduledRun` with both clock changes, `summaryCounts`, `SummaryBar` roles and names, `TodayPage` (`hf:usable` with the counts pending, no count query before the mark, one failing count, mark order), `indexes.test.ts` for the new specs.
+- Docs: ADR-051, PRD R7, DESIGN, ARCHITECTURE, ROADMAP M7 row (now the application pipeline plus the digest), RUNBOOK step 89.
+
 ## [0.6.3] - 2026-10-08
 ### Added
 - **Per-step timing marks for Today** (plan: `docs/plans/hf-usable-plan.md`, step 1). `hf:usable` was 2,891 ms median on v0.6.2 against the 2,000 ms limit (ADR-038); these marks show which hop of the load is slow before anything is changed. No behaviour change.

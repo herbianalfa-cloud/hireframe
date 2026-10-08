@@ -17,7 +17,7 @@ Goal: feels like a paid product (Linear / Vercel / Attio tier). Calm, dense wher
 - Command palette (⌘K): jump to job, paste link to look up, "add fact", "scan now".
 
 ## Key screens
-- **Today:** 4 KPI tiles → Apply list → Near misses → Wildcards. Each row: company logo/initial, title, location, age, fit/luck chips, one-line reason.
+- **Today:** summary bar → Apply list → Near misses → Wildcards → Added by you. The bar shows a skeleton row until the Apply list is in, then: open Apply, near miss and wildcard counts (each a link to Jobs, with the verdict icon and colour), applied this week vs target, last run (time and status in words, "Timed out" for a killed run), next run (07:30 or 17:30 on weekdays) and a compact spend chip linking to System (amber with a warning icon from 80%). Every item has a label and a number or icon, never colour alone. A "Things to do" slot arrives with the pipeline. Each row: company logo/initial, title, location, age, fit/luck chips, one-line reason.
 - **Job detail:** verdict + reason at top; requirements table (met/partial/missing with fact links); gaps; talking points; actions bar (Open posting, Applied, Skip, 👍/👎, Generate CV).
 - **System:** run history, source health, spend meter vs cap, errors.
 
