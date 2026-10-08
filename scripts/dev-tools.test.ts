@@ -188,6 +188,16 @@ describe('dev dashboard seed (M5)', () => {
     expect(jobs.some((job) => job.next === 's2')).toBe(true);
   });
 
+  it('seeds two jobs added from Lookup: one with a verdict, one waiting for a description', () => {
+    const jobs = seeded.map((item) => JobSchema.parse(item.job)).filter((job) => job.addedAt);
+    expect(jobs).toHaveLength(2);
+    expect(jobs.every((job) => job.sources.every((source) => source.id === 'lookup'))).toBe(true);
+    expect(jobs.some((job) => job.verdict === 'apply' && job.next === null)).toBe(true);
+    expect(jobs.some((job) => job.next === 'description' && job.descriptionKind === 'none')).toBe(
+      true,
+    );
+  });
+
   it('seeds one rating and one applied-on-Apply that agreement counts', () => {
     const jobs = seeded.map((item) => JobSchema.parse(item.job));
     expect(jobs.filter((job) => job.feedback)).toHaveLength(1);
