@@ -1,8 +1,16 @@
 import { DEFAULT_MONTHLY_CAP_PENCE } from '@hireframe/shared';
-import { getDocs } from 'firebase/firestore';
+import { getCountFromServer, getDocs, onSnapshot } from 'firebase/firestore';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadAgreement, resolveCapPence, spendViewFrom } from './dashboard';
+import { hfMarks, resetMarksForTest } from '@/lib/perf';
+
+import {
+  loadAgreement,
+  loadTodayCounts,
+  resolveCapPence,
+  spendViewFrom,
+  watchTodayList,
+} from './dashboard';
 
 vi.mock('./firebase', () => ({ getFirebase: () => Promise.resolve({ db: {} }) }));
 vi.mock('firebase/firestore', async (importOriginal) => {
@@ -15,6 +23,8 @@ vi.mock('firebase/firestore', async (importOriginal) => {
     orderBy: vi.fn(),
     limit: vi.fn(),
     getDocs: vi.fn(),
+    getCountFromServer: vi.fn(),
+    onSnapshot: vi.fn(),
   };
 });
 
@@ -24,6 +34,9 @@ const doc = (id: string, data: Record<string, unknown>) => ({ id, data: () => da
 
 beforeEach(() => {
   vi.mocked(getDocs).mockReset();
+  vi.mocked(getCountFromServer).mockReset();
+  vi.mocked(onSnapshot).mockReset();
+  resetMarksForTest();
 });
 
 describe('loadAgreement', () => {
@@ -99,5 +112,58 @@ describe('spend meter cap', () => {
 
   it('returns null for a usage document that fails its schema', () => {
     expect(spendViewFrom({ spendPence: 'lots' }, undefined)).toBeNull();
+  });
+});
+
+describe('per-step marks', () => {
+  it('marks each count as it settles, then all four', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(getCountFromServer).mockResolvedValue({ data: () => ({ count: 7 }) } as never);
+    await loadTodayCounts(NOW);
+    const names = hfMarks().map(([name]) => name);
+    expect(names.slice(0, 4).sort()).toEqual([
+      'hf:count:appliedThisWeek',
+      'hf:count:judgedToday',
+      'hf:count:toApply',
+      'hf:count:toReview',
+    ]);
+    expect(names[4]).toBe('hf:counts');
+  });
+
+  it('marks a failed count with ok false and still marks hf:counts', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(getCountFromServer).mockRejectedValue(
+      Object.assign(new Error('denied'), { code: 'permission-denied' }),
+    );
+    await loadTodayCounts(NOW);
+    const [entry] = performance.getEntriesByName('hf:count:toApply');
+    expect((entry as PerformanceMark).detail).toEqual({ ok: false });
+    expect(hfMarks().map(([name]) => name)).toContain('hf:counts');
+  });
+
+  it('marks the first snapshot of a list with its size, and only the first', async () => {
+    const snapshot = (docs: Record<string, unknown>[], fromCache: boolean) => ({
+      size: docs.length,
+      metadata: { fromCache },
+      docs: docs.map((data, i) => ({ id: `j${String(i)}`, data: () => data })),
+    });
+    let emit: ((s: unknown) => void) | undefined;
+    vi.mocked(onSnapshot).mockImplementation(((_q: unknown, next: (s: unknown) => void) => {
+      emit = next;
+      return () => undefined;
+    }) as never);
+    watchTodayList('apply', () => undefined);
+    await vi.waitFor(() => {
+      expect(emit).toBeDefined();
+    });
+    emit?.(snapshot([{ a: 1 }, { b: 22 }], true));
+    emit?.(snapshot([{ a: 1 }], false));
+    const entries = performance.getEntriesByName('hf:list:apply');
+    expect(entries).toHaveLength(1);
+    expect((entries[0] as PerformanceMark).detail).toEqual({
+      docs: 2,
+      fromCache: true,
+      bytes: '{"a":1}'.length + '{"b":22}'.length,
+    });
   });
 });

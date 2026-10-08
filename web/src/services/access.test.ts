@@ -1,6 +1,8 @@
 import { Timestamp } from 'firebase/firestore';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resetMarksForTest } from '@/lib/perf';
+
 import { checkAccess, evaluateAccess, type AppConfigRead } from './access';
 import { timestampsToDates } from './timestamps';
 
@@ -49,6 +51,12 @@ describe('evaluateAccess', () => {
 });
 
 describe('checkAccess', () => {
+  it('marks hf:owner once the check resolves, owner or not', async () => {
+    resetMarksForTest();
+    await checkAccess('someone-else', read(consoleConfig()));
+    expect(performance.getEntriesByName('hf:owner')).toHaveLength(1);
+  });
+
   it('converts console Timestamps before parsing and returns owner for the matching UID', async () => {
     await expect(checkAccess(OWNER, read(consoleConfig()))).resolves.toEqual({ status: 'owner' });
   });

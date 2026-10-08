@@ -1,11 +1,18 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app';
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
+import {
+  initializeAppCheck,
+  onTokenChanged,
+  ReCaptchaEnterpriseProvider,
+  type AppCheck,
+} from 'firebase/app-check';
 import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
 import type { Functions } from 'firebase/functions';
 import type { FirebaseStorage } from 'firebase/storage';
 import { FUNCTIONS_REGION } from '@hireframe/shared';
 import { z } from 'zod';
+
+import { markOnce } from '@/lib/perf';
 
 import { isTransient, withRetry, withTimeout } from './resilience';
 
@@ -41,10 +48,16 @@ let functionsClient: Promise<Functions> | undefined;
 let storageClient: Promise<FirebaseStorage> | undefined;
 
 export function getFirebase(): Promise<FirebaseServices> {
-  services ??= (import.meta.env.DEV ? initEmulators() : initHosted()).catch((error: unknown) => {
-    services = undefined; // allow a retry from the UI
-    throw error;
-  });
+  services ??= (import.meta.env.DEV ? initEmulators() : initHosted()).then(
+    (ready) => {
+      markOnce('hf:firebase');
+      return ready;
+    },
+    (error: unknown) => {
+      services = undefined; // allow a retry from the UI
+      throw error;
+    },
+  );
   return services;
 }
 
@@ -108,6 +121,18 @@ async function fetchHostingConfig(): Promise<z.infer<typeof HostingConfigSchema>
   return HostingConfigSchema.parse(await response.json());
 }
 
+/** Marks `hf:appcheck` at the first token callback, then stops listening. */
+function markOnFirstAppCheckToken(appCheck: AppCheck): void {
+  const state: { unsubscribe?: () => void; done: boolean } = { done: false };
+  const first = () => {
+    markOnce('hf:appcheck');
+    state.done = true;
+    state.unsubscribe?.();
+  };
+  state.unsubscribe = onTokenChanged(appCheck, first, first);
+  if (state.done) state.unsubscribe();
+}
+
 async function initHosted(): Promise<FirebaseServices> {
   const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
   if (!siteKey) throw new Error('VITE_RECAPTCHA_SITE_KEY is not set for this build');
@@ -115,9 +140,10 @@ async function initHosted(): Promise<FirebaseServices> {
   const config = await fetchHostingConfig();
   // Serve the auth handler from our own host so sign-in works without third-party storage.
   const app = initializeApp({ ...config, authDomain: window.location.host });
-  initializeAppCheck(app, {
+  const appCheck = initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(siteKey),
     isTokenAutoRefreshEnabled: true,
   });
+  markOnFirstAppCheckToken(appCheck);
   return { app, auth: getAuth(app), db: getFirestore(app) };
 }

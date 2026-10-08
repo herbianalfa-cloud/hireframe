@@ -4,6 +4,17 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-08
+### Added
+- **Per-step timing marks for Today** (plan: `docs/plans/hf-usable-plan.md`, step 1). `hf:usable` was 2,891 ms median on v0.6.2 against the 2,000 ms limit (ADR-038); these marks show which hop of the load is slow before anything is changed. No behaviour change.
+  - `web/src/lib/perf.ts`: `markOnce(name, detail?)` (each name once per page load, never throws, a detail may be a function so a size is computed only for the mark kept) and `hfMarks()` (`[name, ms]` in time order, including the `hf:usable` measure).
+  - Marks: `hf:boot`, `hf:firebase`, `hf:appcheck` (hosted only), `hf:auth`, `hf:owner`, `hf:today-mount`, `hf:count:<key>` (`{ok}`), `hf:counts`, `hf:list:<list>` (`{docs, fromCache, bytes}`, first snapshot only). Details are numbers and flags, never job text.
+  - RUNBOOK step 89 also prints the marks table after the 3 reloads; `hf:usable` stays the pass/fail.
+  - Tests: `perf.test.ts`, the count and list marks in `dashboard.test.ts`, `hf:owner` in `access.test.ts`, `hf:today-mount` before `hf:usable` in `TodayPage.test.tsx`.
+
+### Docs
+- Parking lot: limit on the Today counts, the duplicate `config/app` read in SpendMeter, a Firestore persistent cache, counting Today's lazy graph in `check:bundle`, and dedupe across a town and a postcode.
+
 ## [0.6.2] - 2026-10-08
 ### Added
 - **M6 PR 6B, session 1: Lookup, the server** (ADR-049). The Lookup screen comes in the web session.
