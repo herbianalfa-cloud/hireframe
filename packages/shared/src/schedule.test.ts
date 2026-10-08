@@ -15,7 +15,9 @@ describe('nextScheduledRun', () => {
   it('skips the weekend', () => {
     expect(next('2026-10-16T16:31:00Z')).toBe('2026-10-19T06:30:00.000Z'); // Fri 17:31 -> Mon
     expect(next('2026-10-17T10:00:00Z')).toBe('2026-10-19T06:30:00.000Z'); // Sat -> Mon
-    expect(next('2026-10-18T23:59:00Z')).toBe('2026-10-19T06:30:00.000Z'); // Sun -> Mon
+    expect(next('2026-10-18T22:00:00Z')).toBe('2026-10-19T06:30:00.000Z'); // Sun 23:00 BST -> Mon
+    // 23:59Z is already Monday 00:59 BST, before the 07:30 run.
+    expect(next('2026-10-18T23:59:00Z')).toBe('2026-10-19T06:30:00.000Z');
   });
 
   it('follows the March clock change (Sunday 29 Mar 2026)', () => {
@@ -36,11 +38,24 @@ describe('nextScheduledRun', () => {
 
   it('throws on a cron form it does not support', () => {
     const at = new Date('2026-10-12T06:29:00Z');
-    for (const cron of ['*/10 7-23 * * *', '30 7,17 1 * 1-5', '30 7,17 * * *', '61 7 * * 1-5']) {
+    for (const cron of [
+      '*/10 7-23 * * *',
+      '30 7,17 1 * 1-5',
+      '30 7,17 * * *',
+      '61 7 * * 1-5',
+      '30 7,17 * * 1-7',
+    ]) {
       expect(() => nextScheduledRun(at, { cron, timeZone: 'Europe/London' }), cron).toThrow(
         'Unsupported cron form',
       );
     }
+  });
+
+  it('throws on a time zone it does not support', () => {
+    const at = new Date('2026-10-12T06:29:00Z');
+    expect(() => nextScheduledRun(at, { cron: SCHEDULE.cron, timeZone: 'Asia/Kolkata' })).toThrow(
+      'Unsupported time zone',
+    );
   });
 
   it('uses the app schedule by default', () => {

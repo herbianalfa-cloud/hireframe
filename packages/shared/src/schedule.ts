@@ -22,6 +22,8 @@ interface ParsedCron {
 }
 
 const CRON_FORM = /^(\d{1,2}) (\d{1,2}(?:,\d{1,2})*) \* \* ([0-7])-([0-7])$/;
+/** `zoneInstant` assumes the zone is at most an hour ahead of UTC, true of this one only. */
+const SUPPORTED_TIME_ZONE = 'Europe/London';
 const SEARCH_DAYS = 8;
 
 /** Only `M H1,H2 * * D1-D5` is supported, the one form the app uses. Anything else throws. */
@@ -32,7 +34,7 @@ function parseCron(cron: string): ParsedCron {
   const hours = (match[2] ?? '').split(',').map(Number);
   const firstDay = Number(match[3]);
   const lastDay = Number(match[4]);
-  if (minute > 59 || hours.some((hour) => hour > 23) || firstDay > lastDay) {
+  if (minute > 59 || hours.some((hour) => hour > 23) || firstDay > lastDay || lastDay > 6) {
     throw new Error(`Unsupported cron form: ${cron}`);
   }
   return { minute, hours, firstDay, lastDay };
@@ -91,6 +93,9 @@ function zoneInstant(day: ZoneParts, hour: number, minute: number, timeZone: str
 
 /** The first run strictly after `now`, in the schedule's time zone (it follows the clock change). */
 export function nextScheduledRun(now: Date, schedule: Schedule = SCHEDULE): Date {
+  if (schedule.timeZone !== SUPPORTED_TIME_ZONE) {
+    throw new Error(`Unsupported time zone: ${schedule.timeZone}`);
+  }
   const { minute, hours, firstDay, lastDay } = parseCron(schedule.cron);
   const today = zoneParts(now, schedule.timeZone);
   const sortedHours = [...hours].sort((a, b) => a - b);
