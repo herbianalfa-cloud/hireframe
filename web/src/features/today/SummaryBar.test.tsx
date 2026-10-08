@@ -1,9 +1,14 @@
 import { spendMeter, type Run } from '@hireframe/shared';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadSummaryCounts, watchLastRun, watchSpend } from '@/services/dashboard';
+import {
+  loadSummaryCounts,
+  watchLastRun,
+  watchSpend,
+  type SummaryCountResults,
+} from '@/services/dashboard';
 import type { LiveState } from '@/services/profile';
 
 import { SummaryBar } from './SummaryBar';
@@ -18,13 +23,17 @@ vi.mock('@/services/dashboard', async (importOriginal) => ({
 const run = (overrides: Partial<Run>): Run =>
   ({ trigger: 'schedule', status: 'succeeded', startedAt: new Date(), ...overrides }) as Run;
 
-function setup(options: { run?: LiveState<Run | null>; cents?: number; target?: number } = {}) {
-  vi.mocked(loadSummaryCounts).mockResolvedValue({
-    apply: 3,
-    nearMiss: 5,
-    wildcard: 0,
-    appliedThisWeek: 2,
-  });
+const COUNTS: SummaryCountResults = { apply: 3, nearMiss: 5, wildcard: 0, appliedThisWeek: 2 };
+
+function setup(
+  options: {
+    run?: LiveState<Run | null>;
+    cents?: number;
+    target?: number;
+    counts?: Promise<SummaryCountResults> | SummaryCountResults;
+  } = {},
+) {
+  vi.mocked(loadSummaryCounts).mockImplementation(async () => options.counts ?? COUNTS);
   vi.mocked(watchLastRun).mockImplementation((callback) => {
     callback(options.run ?? { status: 'ready', data: run({}), invalid: 0 });
     return () => undefined;
@@ -44,6 +53,10 @@ function setup(options: { run?: LiveState<Run | null>; cents?: number; target?: 
   );
   return screen.findByRole('region', { name: 'Summary' }).then((region) => within(region));
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
   vi.mocked(loadSummaryCounts).mockReset();
@@ -119,5 +132,88 @@ describe('SummaryBar', () => {
     const chip = await bar.findByRole('link', { name: /£12\.30 of £15\.00/ });
     expect(chip.getAttribute('href')).toBe('/system');
     expect(chip.textContent).toContain('82% used');
+  });
+
+  it('renders the row at once: counts pending, last run and spend already shown', async () => {
+    let release: (counts: SummaryCountResults) => void = () => undefined;
+    const pending = new Promise<SummaryCountResults>((resolve) => {
+      release = resolve;
+    });
+    const bar = await setup({ counts: pending });
+    expect(bar.getByRole('link', { name: 'Open Apply, loading' })).toBeDefined();
+    expect(bar.getByRole('link', { name: 'Open near miss, loading' })).toBeDefined();
+    expect(bar.getByRole('link', { name: 'Open wildcard, loading' })).toBeDefined();
+    expect(bar.getByRole('status', { name: 'Loading applied this week' })).toBeDefined();
+    expect(bar.getByText('Last run').closest('li')?.textContent).toContain('Succeeded');
+    expect(await bar.findByRole('link', { name: /£5\.00 of £15\.00/ })).toBeDefined();
+    await act(async () => {
+      release(COUNTS);
+      await pending;
+    });
+    expect(await bar.findByRole('link', { name: 'Open Apply 3' })).toBeDefined();
+    expect(bar.queryByRole('link', { name: /loading/ })).toBeNull();
+  });
+
+  it('shows a failed count as a dash with "unavailable" in the link name', async () => {
+    const bar = await setup({ counts: { ...COUNTS, nearMiss: null } });
+    const link = await bar.findByRole('link', { name: 'Open near miss unavailable' });
+    expect(link.textContent).toContain('–');
+    expect(link.textContent).toContain('unavailable');
+    expect(bar.getByRole('link', { name: 'Open Apply 3' })).toBeDefined();
+    expect(bar.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows applied this week as a dash when it could not be counted', async () => {
+    const bar = await setup({ counts: { ...COUNTS, appliedThisWeek: null } });
+    await bar.findByRole('link', { name: 'Open Apply 3' });
+    const item = bar.getByText('Applied this week').closest('li');
+    expect(item?.textContent).toContain('–');
+    expect(item?.textContent).toContain('unavailable');
+    expect(item?.textContent).not.toContain('to go');
+  });
+
+  it('keeps list semantics: every item is a direct child li of the list', async () => {
+    const bar = await setup();
+    await bar.findByRole('link', { name: 'Open Apply 3' });
+    const list = bar.getByRole('list');
+    expect(bar.getAllByRole('listitem')).toHaveLength(7);
+    for (const item of bar.getAllByRole('listitem')) expect(item.parentElement).toBe(list);
+  });
+
+  describe('clock', () => {
+    // Sunday 11 Oct 2026, 08:00 BST (07:00Z): next is Monday 07:30 BST.
+    it('moves Next run forward as time passes', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+      vi.setSystemTime(new Date('2026-10-12T06:29:30Z'));
+      const bar = await setup();
+      const next = () => bar.getByText('Next run').closest('li')?.textContent;
+      expect(next()).toContain('07:30');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(next()).toContain('17:30');
+    });
+
+    it('turns a running run into Timed out once it is stalled', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+      const start = new Date('2026-10-12T06:30:00Z');
+      vi.setSystemTime(new Date(start.getTime() + 60_000));
+      const bar = await setup({
+        run: { status: 'ready', data: run({ status: 'running', startedAt: start }), invalid: 0 },
+      });
+      expect(bar.queryByText('Timed out')).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2 * 3_600_000);
+      });
+      expect(bar.getByText('Timed out')).toBeDefined();
+    });
+
+    it('clears its timer on unmount', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+      await setup();
+      expect(vi.getTimerCount()).toBe(1);
+      cleanup();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });

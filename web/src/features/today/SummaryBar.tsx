@@ -1,6 +1,6 @@
 import { isRunStalled, nextScheduledRun, summaryCounts, type Run } from '@hireframe/shared';
 import { CalendarClock, CircleCheck, Clock, Loader2, Send, TriangleAlert } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,14 +26,30 @@ const OPEN_LINKS: readonly { list: TodayListId; label: string }[] = [
   { list: 'wildcard', label: `Open ${VERDICT_LABELS.wildcard.toLowerCase()}` },
 ];
 
-const ITEM = 'flex flex-col gap-1 px-4 py-3';
+const ITEM = 'flex min-w-0 flex-col gap-1 px-4 py-3';
+/** How often the bar re-reads the clock for "Next run" and the timed-out check. */
+const CLOCK_TICK_MS = 60_000;
 
-/** Shown until Today is usable, so the row's height doesn't jump when the numbers arrive. */
+/** Shown until Today is usable, so the row's height doesn't jump when the bar mounts. */
 export function SummaryBarSkeleton() {
   return (
     <div role="status" aria-label="Loading numbers">
       <Skeleton className="h-20" />
     </div>
+  );
+}
+
+/** Inside a count link the link's own name says "loading"; elsewhere it is announced itself. */
+function CountSkeleton({ label }: { label?: string }) {
+  return label ? (
+    <Skeleton
+      role="status"
+      aria-hidden={false}
+      aria-label={`Loading ${label}`}
+      className="h-8 w-16"
+    />
+  ) : (
+    <Skeleton aria-hidden="true" className="h-8 w-16" />
   );
 }
 
@@ -62,18 +78,25 @@ function CountLink({
 }: {
   list: TodayListId;
   label: string;
-  value: number | null;
+  /** undefined while the count is loading, null when it failed. */
+  value: number | null | undefined;
 }) {
   const Icon = VERDICT_ICONS[list];
+  const name =
+    value === undefined
+      ? `${label}, loading`
+      : `${label} ${value === null ? 'unavailable' : String(value)}`;
   return (
-    <li className="contents">
+    <li className="min-w-0">
       <Link
         to={`/jobs?verdict=${list}&status=new`}
-        aria-label={`${label} ${value === null ? 'unavailable' : String(value)}`}
-        className="flex flex-col gap-1 px-4 py-3 hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
+        aria-label={name}
+        className="flex h-full flex-col gap-1 px-4 py-3 hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
       >
         <span className="text-xs text-muted-foreground">{label}</span>
-        {value === null ? (
+        {value === undefined ? (
+          <CountSkeleton />
+        ) : value === null ? (
           <Unavailable />
         ) : (
           <span
@@ -135,14 +158,22 @@ export function SummaryBar({
 }) {
   const state = useSummaryCounts(refreshKey);
   const lastRun = useLastRun();
-  const [now] = useState(() => new Date());
-  const [next] = useState(() => nextScheduledRun(now));
-  if (state.status === 'loading') return <SummaryBarSkeleton />;
-  const summary = summaryCounts(state.counts, weeklyTarget);
-  const values: Record<TodayListId, number | null> = {
-    apply: summary.apply,
-    near_miss: summary.nearMiss,
-    wildcard: summary.wildcard,
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, CLOCK_TICK_MS);
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+  const next = useMemo(() => nextScheduledRun(now), [now]);
+  // The row renders at once; each count settles alone (undefined = still loading).
+  const summary = state.status === 'ready' ? summaryCounts(state.counts, weeklyTarget) : null;
+  const values: Record<TodayListId, number | null | undefined> = {
+    apply: summary?.apply,
+    near_miss: summary?.nearMiss,
+    wildcard: summary?.wildcard,
   };
   return (
     <section aria-label="Summary" className="rounded-lg border bg-surface">
@@ -151,7 +182,9 @@ export function SummaryBar({
           <CountLink key={list} list={list} label={label} value={values[list]} />
         ))}
         <Item label="Applied this week">
-          {summary.appliedThisWeek === null ? (
+          {summary === null ? (
+            <CountSkeleton label="applied this week" />
+          ) : summary.appliedThisWeek === null ? (
             <Unavailable />
           ) : (
             <>
@@ -168,7 +201,12 @@ export function SummaryBar({
         </Item>
         <Item label="Last run">
           {lastRun.status === 'loading' ? (
-            <Skeleton role="status" aria-label="Loading last run" className="h-6" />
+            <Skeleton
+              role="status"
+              aria-hidden={false}
+              aria-label="Loading last run"
+              className="h-6"
+            />
           ) : lastRun.status === 'error' ? (
             <span className="text-sm text-muted-foreground">Unavailable</span>
           ) : (
