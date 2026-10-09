@@ -659,7 +659,8 @@ export function morningRunSeedDocument(now: Date) {
   // 07:30 London is 06:30Z in summer and 07:30Z in winter: take the one that reads 07:30 there.
   const startedAt = [6, 7]
     .map((hour) => new Date(Date.UTC(year, month - 1, day, hour, 30)))
-    .find((candidate) => londonClock(candidate).minutes === 7 * 60 + 30) as Date;
+    .find((candidate) => londonClock(candidate).minutes === 7 * 60 + 30);
+  if (!startedAt) throw new Error(`No 07:30 London instant on ${today}`);
   const finishedAt = new Date(startedAt.getTime() + 9 * 60_000);
   const data = {
     trigger: 'schedule',

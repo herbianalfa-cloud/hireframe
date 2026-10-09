@@ -52,12 +52,16 @@ declare const UrlFetchApp: {
 };
 
 declare const PropertiesService: {
-  getScriptProperties(): { getProperty(name: string): string | null };
+  getScriptProperties(): {
+    getProperty(name: string): string | null;
+    setProperty(name: string, value: string): unknown;
+  };
 };
 
 declare const Utilities: {
   computeHmacSha256Signature(value: number[], key: number[]): number[];
   getUuid(): string;
+  formatDate(date: Date, timeZone: string, format: string): string;
   base64DecodeWebSafe(data: string): number[];
   base64Decode(data: string): number[];
   newBlob(bytes: number[]): { getDataAsString(charset: string): string };
@@ -69,10 +73,24 @@ interface Trigger {
 
 declare const ScriptApp: {
   getProjectTriggers(): Trigger[];
-  deleteTrigger(trigger: Trigger): void;
   newTrigger(name: string): {
-    timeBased(): { everyMinutes(minutes: number): { create(): unknown } };
+    timeBased(): {
+      everyMinutes(minutes: number): { create(): unknown };
+      atHour(hour: number): {
+        nearMinute(minute: number): { everyDays(days: number): { create(): unknown } };
+      };
+    };
   };
 };
+
+declare const LockService: {
+  getScriptLock(): { tryLock(timeoutMs: number): boolean; releaseLock(): void };
+};
+
+declare const MailApp: {
+  sendEmail(message: { to: string; subject: string; body: string; htmlBody?: string }): void;
+};
+
+declare const Session: { getEffectiveUser(): { getEmail(): string } };
 
 declare const Logger: { log(message: string): void };

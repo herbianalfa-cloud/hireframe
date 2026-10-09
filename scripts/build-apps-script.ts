@@ -1,8 +1,8 @@
 /**
  * Bundles the Gmail bridge for Apps Script (ADR-046): esbuild → `apps-script/build/Code.js` plus
  * `appsscript.json`, ready for `npm exec -w apps-script clasp -- push` (docs/RUNBOOK.md Part G). Apps Script calls
- * top-level functions by name, so the footer defines `run` and `setup` as plain globals over the
- * bundle's exports.
+ * top-level functions by name, so the footer defines `run`, `setup` and the three digest handlers as
+ * plain globals over the bundle's exports.
  */
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -28,7 +28,14 @@ await build({
   conditions: ['source'],
   logLevel: 'warning',
   footer: {
-    js: 'function run() { hireframeBridge.run(); }\nfunction setup() { hireframeBridge.setup(); }\n',
+    js: [
+      'function run() { hireframeBridge.run(); }',
+      'function setup() { hireframeBridge.setup(); }',
+      'function digestMorning() { hireframeBridge.digestMorningHandler(); }',
+      'function digestFallback() { hireframeBridge.digestFallbackHandler(); }',
+      'function digestNow() { hireframeBridge.digestNowHandler(); }',
+      '',
+    ].join('\n'),
   },
 });
 copyFileSync(join(dir, 'appsscript.json'), join(out, 'appsscript.json'));

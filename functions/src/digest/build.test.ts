@@ -121,10 +121,12 @@ describe('buildDigest', () => {
   });
 
   it('reports a corrupt morning run as failed with its code, not missing', async () => {
-    const { store, jobsSince } = fakeStore([
-      readRunDoc('today', { trigger: 'schedule', startedAt: new Date('2026-10-07T06:30:00Z') })!
-        .run,
-    ]);
+    const read = readRunDoc('today', {
+      trigger: 'schedule',
+      startedAt: new Date('2026-10-07T06:30:00Z'),
+    });
+    expect(read?.valid).toBe(false);
+    const { store, jobsSince } = fakeStore(read ? [read.run] : []);
     const out = await buildDigest(store, request, new Date('2026-10-07T07:20:00Z'));
     expect(out.state).toBe('failed');
     expect(out.text).toContain('run_invalid');
