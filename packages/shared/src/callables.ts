@@ -15,6 +15,8 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   lookup: 300,
   /** An HTTPS function, not a callable: the table is where timeout budgets are checked. */
   ingestEmailJobs: 120,
+  /** An HTTPS function: the digest reads Firestore and renders; no model call. */
+  getDigest: 60,
 } as const;
 
 export type CallableName = keyof typeof CALLABLE_TIMEOUT_SECONDS;

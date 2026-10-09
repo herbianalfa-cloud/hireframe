@@ -1,13 +1,20 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import { INGEST_WIRE, SIGNATURE_VERSION, trimSecret } from '@hireframe/shared';
+import {
+  DIGEST_WIRE,
+  INGEST_WIRE,
+  signingPrefix,
+  trimSecret,
+  type SignaturePurpose,
+} from '@hireframe/shared';
 
 import { HMAC } from '../config.js';
 
 /**
  * Verifies a signed `ingestEmailJobs` request (ADR-046, docs/SECURITY.md "Forged calls to
  * webhooks"), on the raw body bytes, never on re-serialised JSON. The signature is HMAC-SHA256
- * over `v1.<timestamp>.<nonce>.<raw body>` with the shared secret (trimmed, like the script's).
+ * over `v1.<timestamp>.<nonce>.<raw body>` with the shared secret (trimmed, like the script's);
+ * the digest uses `digest.v1.` instead, so a signature for one endpoint never verifies at the other.
  * Every signature, timestamp and header problem is the same 401 to the caller; the reason is a
  * fixed code for the log only. The nonce is checked afterwards, by the caller, and only for a
  * request that has already verified.
@@ -39,11 +46,12 @@ export function signRequest(
   timestamp: string,
   nonce: string,
   rawBody: Buffer | string,
+  purpose: SignaturePurpose = 'ingest',
 ): string {
   const body = typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody;
   return createHmac('sha256', trimSecret(secret))
     .update(
-      Buffer.concat([Buffer.from(`${SIGNATURE_VERSION}.${timestamp}.${nonce}.`, 'utf8'), body]),
+      Buffer.concat([Buffer.from(signingPrefix(timestamp, nonce, purpose), 'utf8'), body]),
     )
     .digest('hex');
 }
@@ -57,10 +65,11 @@ export function verifyRequest(
   secret: string,
   now: Date,
   compare: Compare = timingSafeEqual,
+  purpose: SignaturePurpose = 'ingest',
 ): VerifyResult {
   if (request.method !== 'POST') return fail(400, 'method');
   if (!/^application\/json\b/i.test(request.contentType ?? '')) return fail(400, 'content_type');
-  if (request.rawBody.length > INGEST_WIRE.serverMaxBytes) return fail(413, 'too_large');
+  if (request.rawBody.length > (purpose === 'digest' ? DIGEST_WIRE : INGEST_WIRE).serverMaxBytes) return fail(413, 'too_large');
 
   const timestamp = request.header('x-hireframe-timestamp');
   const nonce = request.header('x-hireframe-nonce');
@@ -77,7 +86,7 @@ export function verifyRequest(
   }
 
   const given = Buffer.from(signature, 'hex');
-  const expected = Buffer.from(signRequest(secret, timestamp, nonce, request.rawBody), 'hex');
+  const expected = Buffer.from(signRequest(secret, timestamp, nonce, request.rawBody, purpose), 'hex');
   // Both are 32 bytes when the header was well-formed; a length mismatch takes the same 401.
   if (given.length !== expected.length || !compare(given, expected)) return fail(401, 'signature');
 

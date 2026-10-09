@@ -19,6 +19,24 @@ describe('signingString', () => {
   });
 });
 
+describe('signature purposes (domain separation)', () => {
+  it('keeps ingest on v1. and gives the digest digest.v1.', () => {
+    expect(signingPrefix('1760000000', 'n-1')).toBe('v1.1760000000.n-1.');
+    expect(signingPrefix('1760000000', 'n-1', 'ingest')).toBe('v1.1760000000.n-1.');
+    expect(signingString('1760000000', 'n-1', '{"a":1}', 'digest')).toBe(
+      'digest.v1.1760000000.n-1.{"a":1}',
+    );
+  });
+
+  it('never lets one purpose’s signed bytes be a prefix of, or equal to, the other’s', () => {
+    const a = signingString('1760000000', 'n-1', '{}', 'ingest');
+    const b = signingString('1760000000', 'n-1', '{}', 'digest');
+    expect(a).not.toBe(b);
+    expect(a.startsWith('digest.')).toBe(false);
+    expect(b.startsWith('v1.')).toBe(false);
+  });
+});
+
 describe('trimSecret', () => {
   it('drops whitespace around the secret only', () => {
     expect(trimSecret('  ab cd\n')).toBe('ab cd');
