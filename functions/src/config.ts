@@ -428,11 +428,7 @@ export const AlertOverridesSchema = z
   .object({ dailyCapPence: z.number().min(0).max(200) })
   .partial();
 
-/** PRD R4: 07:30 and 17:30 on weekdays, UK time (Cloud Scheduler handles the clock change). */
-export const SCHEDULE = {
-  cron: '30 7,17 * * 1-5',
-  timeZone: 'Europe/London',
-} as const;
+export { SCHEDULE } from '@hireframe/shared';
 
 // ---- Lookup (M6, ADR-049) ----
 

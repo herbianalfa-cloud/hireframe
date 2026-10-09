@@ -1,5 +1,5 @@
-import { CRITERIA_SEED_V1, todayKpis, type Verdict } from '@hireframe/shared';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { CRITERIA_SEED_V1, type Verdict } from '@hireframe/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,8 +20,8 @@ import {
 import { FilterSelect, SortSelect } from '@/features/jobs/SortSelect';
 import { TODAY_LISTS, TODAY_LIST_SIZE, type TodayListId } from '@/services/dashboard';
 
-import { useTodayKpis, useTodayList, type KpiState } from './hooks';
-import { SpendMeter } from './SpendMeter';
+import { useTodayList } from './hooks';
+import { SummaryBar, SummaryBarSkeleton } from './SummaryBar';
 import { AddedByYou } from './AddedByYou';
 import { useTodaySort } from './sortPreference';
 
@@ -38,81 +38,6 @@ const EMPTY_TEXT: Readonly<Record<TodayListId, string>> = {
   near_miss: 'No near misses waiting.',
   wildcard: 'No wildcards waiting.',
 };
-
-function Tile({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="rounded-lg border bg-surface p-4">
-      <h2 className="text-xs text-muted-foreground">{label}</h2>
-      <div className="mt-2">{children}</div>
-    </div>
-  );
-}
-
-function Count({ value }: { value: number }) {
-  return <p className="font-mono text-2xl tabular-nums">{value}</p>;
-}
-
-function Tiles({ state, weeklyTarget }: { state: KpiState; weeklyTarget: number }) {
-  const counts = state.status === 'ready' ? todayKpis(state.counts, weeklyTarget) : null;
-  const pending = (
-    <div role="status" aria-label="Loading numbers">
-      <Skeleton className="h-12" />
-    </div>
-  );
-  /** One tile's body: a skeleton while loading, a dash and a note if its own read failed. */
-  const body = (value: number | null | undefined, render: (value: number) => ReactNode) => {
-    if (!counts) return pending;
-    if (value === null || value === undefined) {
-      return (
-        <div role="alert">
-          <p className="font-mono text-2xl text-muted-foreground">–</p>
-          <p className="mt-1 text-xs text-danger">Couldn&apos;t load this number.</p>
-        </div>
-      );
-    }
-    return render(value);
-  };
-  return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <Tile label="To apply">
-        {body(counts?.toApply, (value) => (
-          <>
-            <Count value={value} />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {counts?.judgedToday === null || counts?.judgedToday === undefined
-                ? 'judged today: unavailable'
-                : `${String(counts.judgedToday)} judged today`}
-            </p>
-          </>
-        ))}
-      </Tile>
-      <Tile label="To review">
-        {body(counts?.toReview, (value) => (
-          <>
-            <Count value={value} />
-            <p className="mt-1 text-xs text-muted-foreground">near misses and wildcards</p>
-          </>
-        ))}
-      </Tile>
-      <Tile label="Applied this week">
-        {body(counts?.appliedThisWeek, (value) => (
-          <>
-            <p className="font-mono text-2xl tabular-nums">
-              {value}
-              <span className="text-sm text-muted-foreground"> / {weeklyTarget}</span>
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {counts?.weeklyMet ? 'Target met' : `${String(counts?.weeklyRemaining ?? 0)} to go`}
-            </p>
-          </>
-        ))}
-      </Tile>
-      <Tile label="AI spend this month">
-        <SpendMeter />
-      </Tile>
-    </div>
-  );
-}
 
 /** The Jobs view for a list: open jobs, in the same sort and gap. Jobs sorts up to 300 exactly. */
 function seeAllPath(list: TodayListId, sort: JobSort, gap: GapFilter | ''): string {
@@ -225,8 +150,9 @@ function TodaySection({
 }
 
 /**
- * Today (PRD R7): four tiles, then the Apply, Near miss and Wildcard lists. `hf:usable` marks
- * the first render with the tiles' numbers and the Apply list filled (ADR-038, R7 measure).
+ * Today (PRD R7): the Apply, Near miss and Wildcard lists under a summary bar. `hf:usable` marks
+ * the first render with the Apply list filled; the bar and Added by you load after it (ADR-051,
+ * which amends ADR-038's R7 measure).
  */
 export function TodayPage() {
   const [params, setParams] = useSearchParams();
@@ -235,9 +161,8 @@ export function TodayPage() {
   const criteria = useCurrentCriteria();
   const weeklyTarget =
     criteria.status === 'ready' ? criteria.criteria.weekly_target : CRITERIA_SEED_V1.weekly_target;
-  const kpis = useTodayKpis(refreshKey);
   const [applyReady, setApplyReady] = useState(false);
-  // Set once `hf:usable` is marked; later reads (Added by you) start only after it.
+  // Set once `hf:usable` is marked; later reads (the summary bar, Added by you) start only after it.
   const [usable, setUsable] = useState(false);
   const measured = useRef(false);
   const [now] = useState(() => new Date());
@@ -249,7 +174,7 @@ export function TodayPage() {
     setApplyReady(true);
   }, []);
   useEffect(() => {
-    if (measured.current || kpis.status !== 'ready' || !applyReady) return;
+    if (measured.current || !applyReady) return;
     measured.current = true;
     try {
       performance.measure('hf:usable', { start: 0, end: performance.now() });
@@ -257,7 +182,7 @@ export function TodayPage() {
       // Measuring is a convenience; Today works without it.
     }
     setUsable(true);
-  }, [kpis.status, applyReady]);
+  }, [applyReady]);
 
   const changed = useCallback(() => {
     setRefreshKey((key) => key + 1);
@@ -275,7 +200,11 @@ export function TodayPage() {
         Today
       </h1>
       <div className="mt-6">
-        <Tiles state={kpis} weeklyTarget={weeklyTarget} />
+        {usable ? (
+          <SummaryBar weeklyTarget={weeklyTarget} refreshKey={refreshKey} />
+        ) : (
+          <SummaryBarSkeleton />
+        )}
       </div>
       {TODAY_LISTS.map((list) => (
         <TodaySection

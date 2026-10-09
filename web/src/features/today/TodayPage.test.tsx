@@ -1,18 +1,19 @@
-import { spendMeter } from '@hireframe/shared';
+import { spendMeter, type Run } from '@hireframe/shared';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeView } from '@/features/jobs/fixtures';
-import { hfMarks, resetMarksForTest } from '@/lib/perf';
+import { hfMarks, markOnce, resetMarksForTest } from '@/lib/perf';
 import {
   loadAgreement,
-  loadTodayCounts,
+  loadSummaryCounts,
   watchAddedByYou,
+  watchLastRun,
   watchSpend,
   watchTodayList,
-  type TodayCountResults,
+  type SummaryCountResults,
 } from '@/services/dashboard';
 import { setJobStatus, watchJob, type JobView } from '@/services/jobs';
 import type { LiveState } from '@/services/profile';
@@ -23,7 +24,8 @@ vi.mock('@/services/dashboard', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   watchTodayList: vi.fn(),
   watchAddedByYou: vi.fn(),
-  loadTodayCounts: vi.fn(),
+  loadSummaryCounts: vi.fn(),
+  watchLastRun: vi.fn(),
   watchSpend: vi.fn(),
   loadAgreement: vi.fn(),
 }));
@@ -41,12 +43,18 @@ vi.mock('@/features/criteria/hooks', () => ({
   useCurrentCriteria: () => ({ status: 'ready', criteria: { weekly_target: 10 } }),
 }));
 
-const COUNTS: TodayCountResults = {
-  toApply: 3,
-  toReview: 5,
-  judgedToday: 12,
+const COUNTS: SummaryCountResults = {
+  apply: 3,
+  nearMiss: 5,
+  wildcard: 1,
   appliedThisWeek: 4,
 };
+
+const RUN = {
+  trigger: 'schedule',
+  status: 'succeeded',
+  startedAt: new Date('2026-10-14T06:30:00Z'),
+} as Run;
 
 type Lists = Record<string, LiveState<JobView[]>>;
 const ready = (...views: JobView[]): LiveState<JobView[]> => ({
@@ -60,8 +68,15 @@ function setup(
   options: {
     search?: string;
     kpis?: 'ok' | 'one-fails';
+    /** Holds the counts back until resolved, to show the bar doesn't gate `hf:usable`. */
+    counts?: Promise<SummaryCountResults>;
+    run?: Run | null;
     added?: LiveState<JobView[]>;
     onAddedStart?: () => void;
+    onCountsStart?: () => void;
+    deferApply?: boolean;
+    /** Holds the Apply list's first snapshot until this resolves. */
+    applyGate?: Promise<void>;
   } = {},
 ) {
   vi.mocked(watchAddedByYou).mockImplementation((callback) => {
@@ -70,12 +85,29 @@ function setup(
     return () => undefined;
   });
   vi.mocked(watchTodayList).mockImplementation((list, callback) => {
-    callback(lists[list] ?? ready());
+    // The real service marks the first snapshot; the mock stands in for it.
+    const deliver = () => {
+      markOnce(`hf:list:${list}`);
+      callback(lists[list] ?? ready());
+    };
+    // The real snapshot arrives after the first render; `deferApply` mimics that for ordering.
+    if (options.applyGate && list === 'apply') void options.applyGate.then(deliver);
+    else if (options.deferApply && list === 'apply') setTimeout(deliver, 0);
+    else deliver();
     return () => undefined;
   });
-  vi.mocked(loadTodayCounts).mockResolvedValue(
-    options.kpis === 'one-fails' ? { ...COUNTS, toReview: null } : COUNTS,
-  );
+  vi.mocked(loadSummaryCounts).mockImplementation(async () => {
+    options.onCountsStart?.();
+    const counts =
+      (await options.counts) ??
+      (options.kpis === 'one-fails' ? { ...COUNTS, nearMiss: null } : COUNTS);
+    markOnce('hf:counts');
+    return counts;
+  });
+  vi.mocked(watchLastRun).mockImplementation((callback) => {
+    callback({ status: 'ready', data: options.run === undefined ? RUN : options.run, invalid: 0 });
+    return () => undefined;
+  });
   vi.mocked(watchSpend).mockImplementation((_now, callback) => {
     callback({
       status: 'ready',
@@ -110,7 +142,8 @@ function setup(
 beforeEach(() => {
   vi.mocked(watchTodayList).mockReset();
   vi.mocked(watchAddedByYou).mockReset();
-  vi.mocked(loadTodayCounts).mockReset();
+  vi.mocked(loadSummaryCounts).mockReset();
+  vi.mocked(watchLastRun).mockReset();
   vi.mocked(watchSpend).mockReset();
   vi.mocked(setJobStatus).mockReset().mockResolvedValue();
   vi.mocked(watchJob).mockReset();
@@ -121,16 +154,19 @@ beforeEach(() => {
 });
 
 describe('TodayPage', () => {
-  it('shows the four tiles and the three lists', async () => {
+  it('shows the summary bar and the three lists', async () => {
     setup({
       apply: ready(makeView('a1', { title: 'Apply role' })),
       near_miss: ready(makeView('n1', { title: 'Near role', verdict: 'near_miss' })),
       wildcard: ready(makeView('w1', { title: 'Wild role', verdict: 'wildcard' })),
     });
-    await screen.findByText('12 judged today');
+    await screen.findByRole('region', { name: 'Summary' });
+    await screen.findByText(/of £15\.00/);
     const text = document.body.textContent;
-    expect(text).toContain('To apply');
-    expect(text).toContain('To review');
+    expect(text).toContain('Open Apply');
+    expect(text).toContain('Open near miss');
+    expect(text).toContain('Open wildcard');
+    expect(text).not.toContain('judged today');
     expect(text).toContain('Applied this week');
     expect(text).toContain('4 / 10');
     expect(text).toContain('6 to go');
@@ -148,7 +184,7 @@ describe('TodayPage', () => {
 
   it('warns amber from 80% of the cap', async () => {
     setup({});
-    await screen.findByText(/82% of the monthly cap used/);
+    await screen.findByText(/82% used/);
     expect(
       screen
         .getByRole('progressbar', { name: 'AI spend this month' })
@@ -169,13 +205,14 @@ describe('TodayPage', () => {
     );
   });
 
-  it('fails one tile on its own and keeps the other numbers and the lists', async () => {
+  it('fails one count on its own and keeps the other numbers and the lists', async () => {
     setup({ apply: ready(makeView('a1', { title: 'Apply role' })) }, { kpis: 'one-fails' });
-    expect(
-      (await screen.findByText(/Couldn.t load this number/)).closest('[role="alert"]'),
-    ).not.toBeNull();
-    expect(screen.getAllByText(/Couldn.t load this number/)).toHaveLength(1);
-    expect(screen.getByText('12 judged today')).toBeDefined();
+    const bar = within(await screen.findByRole('region', { name: 'Summary' }));
+    expect(bar.getAllByText('unavailable')).toHaveLength(1);
+    expect(bar.getByRole('link', { name: /Open near miss.*unavailable/ })).toBeDefined();
+    expect(bar.getByRole('link', { name: 'Open Apply 3' })).toBeDefined();
+    expect(bar.getByRole('link', { name: 'Open wildcard 1' })).toBeDefined();
+    expect(bar.getByText('4')).toBeDefined();
     expect(screen.getByText('Apply role')).toBeDefined();
   });
 
@@ -208,30 +245,89 @@ describe('TodayPage', () => {
 
   it('refreshes the numbers after a keyboard action', async () => {
     setup({ apply: ready(makeView('a1')) });
-    await screen.findByText('12 judged today');
-    expect(loadTodayCounts).toHaveBeenCalledTimes(1);
+    await screen.findByRole('region', { name: 'Summary' });
+    expect(loadSummaryCounts).toHaveBeenCalledTimes(1);
     screen.getByText('Data Analyst').closest('button')?.focus();
     await userEvent.keyboard('a');
     await waitFor(() => {
-      expect(loadTodayCounts).toHaveBeenCalledTimes(2);
+      expect(loadSummaryCounts).toHaveBeenCalledTimes(2);
     });
   });
 
-  it('marks hf:usable once the tiles and the Apply list are filled', async () => {
-    setup({ apply: ready(makeView('a1')) });
+  it('marks hf:usable with the Apply list filled and the counts still pending', async () => {
+    let release: (counts: SummaryCountResults) => void = () => undefined;
+    const pending = new Promise<SummaryCountResults>((resolve) => {
+      release = resolve;
+    });
+    setup({ apply: ready(makeView('a1')) }, { counts: pending });
     await waitFor(() => {
       expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
     });
+    expect(hfMarks().map(([name]) => name)).not.toContain('hf:counts');
+    // The bar is already there; only the counts wait.
+    expect(screen.getByRole('region', { name: 'Summary' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Open Apply, loading' })).toBeDefined();
+    release(COUNTS);
+    expect(await screen.findByRole('link', { name: 'Open Apply 3' })).toBeDefined();
+  });
+
+  it('starts no count query before hf:usable', async () => {
+    const order: string[] = [];
+    const measure = performance.measure.bind(performance);
+    vi.spyOn(performance, 'measure').mockImplementation((...args) => {
+      order.push(`measure:${args[0]}`);
+      return measure(...args);
+    });
+    setup({ apply: ready(makeView('a1')) }, { onCountsStart: () => order.push('counts') });
+    await waitFor(() => {
+      expect(loadSummaryCounts).toHaveBeenCalledTimes(1);
+    });
+    expect(order).toEqual(['measure:hf:usable', 'counts']);
+  });
+
+  it('starts no count, last-run or spend read until the Apply snapshot arrives', async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    setup({ apply: ready(makeView('a1')) }, { applyGate: gate });
+    await Promise.resolve();
+    expect(loadSummaryCounts).toHaveBeenCalledTimes(0);
+    expect(watchLastRun).toHaveBeenCalledTimes(0);
+    expect(watchSpend).toHaveBeenCalledTimes(0);
+    expect(performance.getEntriesByName('hf:usable')).toHaveLength(0);
+    open();
+    await waitFor(() => {
+      expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(loadSummaryCounts).toHaveBeenCalledTimes(1);
+    });
+    expect(watchLastRun).toHaveBeenCalledTimes(1);
+    expect(watchSpend).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows no count query or last run while the Apply list is loading', () => {
+    setup({ apply: { status: 'loading' } });
+    expect(screen.getByRole('status', { name: 'Loading numbers' })).toBeDefined();
+    expect(loadSummaryCounts).not.toHaveBeenCalled();
+    expect(watchLastRun).not.toHaveBeenCalled();
   });
 
   it('marks hf:today-mount before hf:usable', async () => {
-    setup({ apply: ready(makeView('a1')) });
+    setup({ apply: ready(makeView('a1')) }, { deferApply: true });
     await waitFor(() => {
       expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
     });
+    await waitFor(() => {
+      expect(hfMarks().map(([name]) => name)).toContain('hf:counts');
+    });
     const names = hfMarks().map(([name]) => name);
-    expect(names).toContain('hf:today-mount');
-    expect(names.indexOf('hf:today-mount')).toBeLessThan(names.indexOf('hf:usable'));
+    const at = (name: string) => names.indexOf(name);
+    expect(at('hf:today-mount')).toBeGreaterThanOrEqual(0);
+    expect(at('hf:today-mount')).toBeLessThan(at('hf:list:apply'));
+    expect(at('hf:list:apply')).toBeLessThan(at('hf:usable'));
+    expect(at('hf:usable')).toBeLessThan(at('hf:counts'));
   });
 
   it('links to the full list when a list is truncated', () => {
@@ -254,7 +350,7 @@ describe('Added by you', () => {
 
   it('is hidden when nothing was added from Lookup', async () => {
     setup({ apply: ready(makeView('a1')) });
-    await screen.findByText('12 judged today');
+    await screen.findByRole('region', { name: 'Summary' });
     await waitFor(() => {
       expect(watchAddedByYou).toHaveBeenCalledTimes(1);
     });
@@ -299,9 +395,9 @@ describe('Added by you', () => {
     expect(order).toEqual(['measure:hf:usable', 'added']);
   });
 
-  it('does not start while the Apply list is still loading', async () => {
+  it('does not start while the Apply list is still loading', () => {
     setup({ apply: { status: 'loading' } });
-    await screen.findByText('12 judged today');
+    expect(screen.getByRole('status', { name: 'Loading numbers' })).toBeDefined();
     expect(watchAddedByYou).not.toHaveBeenCalled();
   });
 

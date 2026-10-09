@@ -3,7 +3,6 @@ import {
   DEFAULT_MONTHLY_CAP_PENCE,
   DOCS,
   JobSchema,
-  londonDayStart,
   londonWeekStart,
   monthKey,
   PATHS,
@@ -13,8 +12,10 @@ import {
   AGREEMENT_DAYS,
   type Agreement,
   type SpendMeter,
-  type TodayCountResults,
-  type TodayCounts,
+  type Run,
+  RunSchema,
+  type SummaryCountResults,
+  type SummaryCounts,
   type Verdict,
 } from '@hireframe/shared';
 import {
@@ -43,12 +44,12 @@ import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
 
 /**
- * Dashboard services (PRD R7, R11; ADR-038): the Today lists, the tile counts, the month's spend
+ * Dashboard services (PRD R7, R11; ADR-038): the Today lists, the summary bar's counts and last run, the month's spend
  * and verdict agreement. Lists and spend are live; counts and agreement are one-shot reads that
  * the screen repeats after an action.
  */
 
-export type { TodayCountResults };
+export type { SummaryCountResults };
 
 export const TODAY_LIST_SIZE = 10;
 /** Jobs the Added by you section shows (ADR-049). */
@@ -66,8 +67,6 @@ const OPEN_STATUSES = ['new', 'saved'];
 const jobs = (db: Firestore) => collection(db, COLLECTIONS.jobs);
 const run = (db: Firestore, spec: QuerySpec, ...extra: QueryConstraint[]): Query =>
   query(jobs(db), ...specConstraints(spec), ...extra);
-
-const JUDGED_VERDICTS: readonly Verdict[] = ['apply', 'near_miss', 'wildcard'];
 
 /** Open means still waiting for a decision. */
 function openSpec(verdicts: readonly Verdict[]): QuerySpec {
@@ -89,23 +88,17 @@ export function todayListSpec(list: TodayListId): QuerySpec {
 }
 
 /**
- * The tile counts. The two range counts carry an explicit descending order so the existing
- * descending indexes serve them; unordered, a range query scans ascending and needs its own.
+ * The summary bar's counts (ADR-051). Apply, near miss and wildcard are separate equality-only
+ * counts with no orderBy, so Firestore serves them by merging the single-field indexes on
+ * `verdict` and `status`; they need no composite index. The applied count carries an explicit descending order so
+ * its descending index serves it; unordered, a range query scans ascending and needs its own.
  */
-export function kpiSpecs(now: Date) {
-  const dayStart = Timestamp.fromDate(londonDayStart(now));
+export function summarySpecs(now: Date) {
   const weekStart = Timestamp.fromDate(londonWeekStart(now));
   return {
-    toApply: openSpec(['apply']),
-    toReview: openSpec(['near_miss', 'wildcard']),
-    judgedToday: {
-      collection: COLLECTIONS.jobs,
-      filters: [
-        { field: 'verdict', op: 'in', value: JUDGED_VERDICTS },
-        { field: 'judgedAt', op: '>=', value: dayStart },
-      ],
-      orderBy: [{ field: 'judgedAt', direction: 'desc' }],
-    },
+    apply: openSpec(['apply']),
+    nearMiss: openSpec(['near_miss']),
+    wildcard: openSpec(['wildcard']),
     appliedThisWeek: {
       collection: COLLECTIONS.jobs,
       filters: [
@@ -114,8 +107,15 @@ export function kpiSpecs(now: Date) {
       ],
       orderBy: [{ field: 'appliedAt', direction: 'desc' }],
     },
-  } satisfies Record<keyof TodayCounts, QuerySpec>;
+  } satisfies Record<keyof SummaryCounts, QuerySpec>;
 }
+
+/** The newest run, for the bar's "Last run": a single-field order, so no composite index. */
+export const lastRunSpec: QuerySpec = {
+  collection: COLLECTIONS.runs,
+  filters: [],
+  orderBy: [{ field: 'startedAt', direction: 'desc' }],
+};
 
 /** The two agreement reads (ratings, and jobs applied) since `since`. */
 export function agreementSpecs(since: Timestamp) {
@@ -145,7 +145,8 @@ export function dashboardQuerySpecs(now: Date): Record<string, QuerySpec> {
   return {
     ...Object.fromEntries(TODAY_LISTS.map((list) => [`list:${list}`, todayListSpec(list)])),
     'list:added-by-you': addedByYouSpec,
-    ...Object.fromEntries(Object.entries(kpiSpecs(now)).map(([k, v]) => [`count:${k}`, v])),
+    ...Object.fromEntries(Object.entries(summarySpecs(now)).map(([k, v]) => [`count:${k}`, v])),
+    'last-run': lastRunSpec,
     ...Object.fromEntries(
       Object.entries(agreementSpecs(since)).map(([k, v]) => [`agreement:${k}`, v]),
     ),
@@ -225,14 +226,14 @@ async function count(label: string, source: Query): Promise<number> {
   }
 }
 
-/** The four tile counts, measured at `now` (London day and week). One aggregation read each. */
-export async function loadTodayCounts(now: Date): Promise<TodayCountResults> {
+/** The summary bar's four counts, measured at `now` (London week). One aggregation read each. */
+export async function loadSummaryCounts(now: Date): Promise<SummaryCountResults> {
   const { db } = await getFirebase();
-  const specs = kpiSpecs(now);
-  const keys = Object.keys(specs) as (keyof TodayCounts)[];
+  const specs = summarySpecs(now);
+  const keys = Object.keys(specs) as (keyof SummaryCounts)[];
   const settled = await Promise.allSettled(keys.map((key) => count(key, run(db, specs[key]))));
   markOnce('hf:counts');
-  const results = {} as TodayCountResults;
+  const results = {} as SummaryCountResults;
   keys.forEach((key, i) => {
     const outcome = settled[i];
     if (outcome?.status === 'fulfilled') {
@@ -246,6 +247,41 @@ export async function loadTodayCounts(now: Date): Promise<TodayCountResults> {
     }
   });
   return results;
+}
+
+/** The newest run, live (null when there is none yet). Today starts it only after `hf:usable`. */
+export function watchLastRun(callback: (state: LiveState<Run | null>) => void): Unsubscribe {
+  callback({ status: 'loading' });
+  return listen(
+    async () => {
+      const { db } = await getFirebase();
+      return onSnapshot(
+        query(collection(db, COLLECTIONS.runs), ...specConstraints(lastRunSpec), limit(1)),
+        (snapshot) => {
+          const first = snapshot.docs[0];
+          if (!first) {
+            callback({ status: 'ready', data: null, invalid: 0 });
+            return;
+          }
+          const parsed = RunSchema.safeParse(timestampsToDates(first.data()));
+          if (!parsed.success) {
+            // An unreadable run is not "no runs yet": the bar says "Unavailable".
+            logError('dashboard.last_run_invalid', {});
+            callback({ status: 'error', message: "The last run couldn't be read." });
+            return;
+          }
+          callback({ status: 'ready', data: parsed.data, invalid: 0 });
+        },
+        (error) => {
+          logError('dashboard.last_run_failed', { code: error.code });
+          callback({ status: 'error', message: "Couldn't load the last run." });
+        },
+      );
+    },
+    (message) => {
+      callback({ status: 'error', message });
+    },
+  );
 }
 
 export interface SpendView {

@@ -2,7 +2,7 @@ import type { Job } from './jobs.js';
 
 /**
  * Dashboard numbers as pure functions (ADR-038): London calendar boundaries, verdict agreement
- * and the Today tiles. No clock reads and no Firestore: callers pass `now` and the jobs.
+ * and the Today summary bar. No clock reads and no Firestore: callers pass `now` and the jobs.
  */
 
 /** Verdict agreement looks back this many days (PRD metric: ≥ 85%). */
@@ -130,29 +130,30 @@ export function verdictAgreement(
 
 // ---- Today ----
 
-/** What the Today tiles count; the web service fills it with server-side counts. */
-export interface TodayCounts {
+/** What the Today summary bar counts; the web service fills it with server-side counts. */
+export interface SummaryCounts {
   /** Apply verdicts still waiting for a decision (status new or saved). */
-  toApply: number;
-  /** Near misses and wildcards still waiting for a decision (status new or saved). */
-  toReview: number;
-  /** Non-skip verdicts judged since London midnight. */
-  judgedToday: number;
+  apply: number;
+  /** Near misses still waiting for a decision (status new or saved). */
+  nearMiss: number;
+  /** Wildcards still waiting for a decision (status new or saved). */
+  wildcard: number;
   /** Jobs marked applied since Monday 00:00 London. */
   appliedThisWeek: number;
 }
 
 /** Each count, or null when that one read failed (the others still show). */
-export type TodayCountResults = { [K in keyof TodayCounts]: number | null };
+export type SummaryCountResults = { [K in keyof SummaryCounts]: number | null };
 
-export interface TodayKpis extends TodayCountResults {
+export interface Summary extends SummaryCountResults {
   weeklyTarget: number;
   /** Applications still needed this week to reach the target (never below 0); null if unknown. */
   weeklyRemaining: number | null;
   weeklyMet: boolean | null;
 }
 
-export function todayKpis(counts: TodayCountResults, weeklyTarget: number): TodayKpis {
+/** The bar's numbers plus how far the week is from its target. `judgedToday` moved to the digest. */
+export function summaryCounts(counts: SummaryCountResults, weeklyTarget: number): Summary {
   const applied = counts.appliedThisWeek;
   return {
     ...counts,

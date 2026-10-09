@@ -4,7 +4,7 @@ import {
   londonDayStart,
   londonWeekStart,
   spendMeter,
-  todayKpis,
+  summaryCounts,
   verdictAgreement,
   type AgreementJob,
 } from './metrics.js';
@@ -132,11 +132,11 @@ describe('verdictAgreement (ADR-038)', () => {
   });
 });
 
-describe('todayKpis', () => {
-  const counts = { toApply: 4, toReview: 2, judgedToday: 6, appliedThisWeek: 3 };
+describe('summaryCounts', () => {
+  const counts = { apply: 4, nearMiss: 2, wildcard: 1, appliedThisWeek: 3 };
 
   it('adds how far the week is from its target', () => {
-    expect(todayKpis(counts, 5)).toEqual({
+    expect(summaryCounts(counts, 5)).toEqual({
       ...counts,
       weeklyTarget: 5,
       weeklyRemaining: 2,
@@ -145,15 +145,25 @@ describe('todayKpis', () => {
   });
 
   it('never goes below zero once the target is met', () => {
-    expect(todayKpis(counts, 3)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
-    expect(todayKpis(counts, 2)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
+    expect(summaryCounts(counts, 3)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
+    expect(summaryCounts(counts, 2)).toMatchObject({ weeklyRemaining: 0, weeklyMet: true });
+  });
+
+  it('keeps near misses and wildcards apart and has no judged-today count', () => {
+    const result = summaryCounts(counts, 5);
+    expect(result).toMatchObject({ nearMiss: 2, wildcard: 1 });
+    expect(result).not.toHaveProperty('judgedToday');
   });
 
   it('keeps a failed count unknown instead of guessing', () => {
-    expect(todayKpis({ ...counts, appliedThisWeek: null }, 5)).toMatchObject({
+    expect(summaryCounts({ ...counts, appliedThisWeek: null }, 5)).toMatchObject({
       appliedThisWeek: null,
       weeklyRemaining: null,
       weeklyMet: null,
+    });
+    expect(summaryCounts({ ...counts, nearMiss: null }, 5)).toMatchObject({
+      nearMiss: null,
+      apply: 4,
     });
   });
 });
