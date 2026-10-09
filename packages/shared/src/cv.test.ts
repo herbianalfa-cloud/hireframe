@@ -13,6 +13,8 @@ import {
   figuresIn,
   formatFactDates,
   hasContactDetails,
+  isPrintable,
+  isWinAnsi,
   issueCodes,
   trimOrder,
   validateCv,
@@ -94,6 +96,14 @@ describe('validateCv', () => {
           at(at(cv.experience, 0).bullets, 0).text = 'Led onboarding. '.repeat(20);
         }),
       path: 'experience[0].bullets[0]',
+    },
+    unsupported_char: {
+      cv: () =>
+        edited((cv) => {
+          // Not in WinAnsi, so Helvetica can't print it: a Greek letter in a bullet.
+          at(at(cv.experience, 0).bullets, 2).text = 'Wrote 25 help-centre articles (α release).';
+        }),
+      path: 'experience[0].bullets[2]',
     },
   };
 
@@ -204,6 +214,26 @@ describe('validateCv', () => {
       { path: 'coverNote.paragraphs', code: 'too_long' },
       { path: 'experience[0].bullets', code: 'too_long' },
     ]);
+  });
+
+  it('checks the cover note against its word limit', () => {
+    const words = (n: number) => Array.from({ length: n }, () => 'ab').join(' ');
+    const note = (first: number, second: number) =>
+      edited((c) => {
+        at(c.coverNote.paragraphs, 0).text = words(first);
+        at(c.coverNote.paragraphs, 1).text = words(second);
+      });
+    expect(issuesOf(note(126, 125))).toEqual([{ path: 'coverNote.paragraphs', code: 'too_long' }]);
+    expect(check(note(125, 125))).toEqual({ ok: true });
+  });
+
+  it('accepts the characters WinAnsi can print and refuses a newline, a tab and anything else', () => {
+    expect(['café — “quoted” €5 · £3', 'naïve Ångström'].every(isPrintable)).toBe(true);
+    expect(isPrintable('line\nbreak')).toBe(false);
+    expect(isPrintable('tab\there')).toBe(false);
+    expect(isPrintable('日本語')).toBe(false);
+    expect(isPrintable('emoji 🚀')).toBe(false);
+    expect(isWinAnsi('\u200b')).toBe(false);
   });
 
   it('does not put the offending text in an issue', () => {

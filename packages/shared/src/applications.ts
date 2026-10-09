@@ -50,6 +50,7 @@ export const CV_ISSUE_CODES = [
   'unsupported_number',
   'contact_in_text',
   'too_long',
+  'unsupported_char',
 ] as const;
 export type CvIssueCode = (typeof CV_ISSUE_CODES)[number];
 

@@ -26,6 +26,8 @@ export const CV_LIMITS = {
   noteParagraph: 600,
   noteParagraphsMin: 2,
   noteParagraphsMax: 4,
+  /** Words across the cover note's paragraphs (the note is one page). */
+  noteWords: 250,
   /** Citations on one text. */
   refs: 8,
   /** Longest alias the model may write (`F999`); anything longer is cut by the schema. */
@@ -185,6 +187,32 @@ export function formatFactDates(dates: FactContent['dates']): string {
   return '';
 }
 
+// ---- Characters the PDF can print ----
+
+/** What Windows-1252 (WinAnsi) maps 0x80–0x9F to; the standard PDF fonts can print these and nothing else outside Latin-1. */
+const WIN_ANSI_EXTRA = new Set(
+  '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'.split('').map((char) => char.codePointAt(0)),
+);
+
+/** Whether the standard PDF fonts (Helvetica) can print `char`: printable ASCII, Latin-1, or a WinAnsi extra. */
+export function isWinAnsi(char: string): boolean {
+  const code = char.codePointAt(0);
+  if (code === undefined) return false;
+  if (code >= 0x20 && code <= 0x7e) return true;
+  if (code >= 0xa1 && code <= 0xff) return true;
+  return code === 0xa0 || WIN_ANSI_EXTRA.has(code);
+}
+
+/** True when every character of `text` can be printed; a newline or tab is not printable. */
+export function isPrintable(text: string): boolean {
+  for (const char of text) if (!isWinAnsi(char)) return false;
+  return true;
+}
+
+export function wordCount(text: string): number {
+  return text.split(/\s+/).filter((word) => word !== '').length;
+}
+
 // ---- Validation ----
 
 /** The part of a fact `validateCv` reads. `status` is there so an archived fact can't be cited. */
@@ -311,7 +339,9 @@ function cites(content: CvContent): Cite[] {
 function countIssues(content: CvContent): CvIssue[] {
   const issues: CvIssue[] = [];
   const over = (path: string, count: number, max: number, min = 0) => {
-    if (count > max || count < min) issues.push({ path, code: 'too_long' });
+    if ((count > max || count < min) && !issues.some((issue) => issue.path === path)) {
+      issues.push({ path, code: 'too_long' });
+    }
   };
   over('experience', content.experience.length, CV_LIMITS.experienceEntries);
   over('projects', content.projects.length, CV_LIMITS.projectEntries);
@@ -323,6 +353,11 @@ function countIssues(content: CvContent): CvIssue[] {
     CV_LIMITS.noteParagraphsMax,
     CV_LIMITS.noteParagraphsMin,
   );
+  const noteWords = content.coverNote.paragraphs.reduce(
+    (total, paragraph) => total + wordCount(paragraph.text),
+    0,
+  );
+  over('coverNote.paragraphs', noteWords, CV_LIMITS.noteWords);
   for (const section of ['experience', 'projects'] as const) {
     content[section].forEach((entry, i) => {
       over(`${section}[${String(i)}].bullets`, entry.bullets.length, CV_LIMITS.bulletsPerEntry);
@@ -356,6 +391,8 @@ export function validateCv(
     for (const text of cite.texts) {
       if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
       if (hasContactDetails(text.value)) add(text.path, 'contact_in_text');
+      // Never dropped or swapped silently: the PDF fonts can't print it (ADR-054).
+      if (!isPrintable(text.value)) add(text.path, 'unsupported_char');
     }
 
     const cited: CvFact[] = [];
