@@ -165,11 +165,11 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
 28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
     ```bash
-    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs lookup; do
+    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs lookup getDigest; do
       gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers --project=hireframe-f6b03
     done
     ```
-    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `lookup` (M6, 6B) is a callable like the others. `ingestEmailJobs` (M6) is an HTTPS function, not a callable: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
+    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `lookup` (M6, 6B) is a callable like the others. `ingestEmailJobs` (M6) and `getDigest` (M7B) are HTTPS functions, not callables: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
 29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` (and `scanNow` from M3) are listed in `europe-west2`.
 30. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
 31. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
@@ -362,24 +362,35 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest). Steps I3 to I5 belong to PR 7
 
 91. **Deploy `getDigest` and give it its invoker** (I3). A new non-callable HTTPS function needs the temporary `cloudfunctions.admin` grant for its first deploy (Part G step 80). Run all of this in Cloud Shell, with the deploy account `github-deployer`, project `hireframe-f6b03`, region `europe-west2`.
     1. Before the tag, repeat the invoker check on `scheduledScan` (Part G step 77): the bundle changes, so the deploy rewrites the invoker unless it is exact.
-    2. Grant, then merge the 7B PR and push `v0.7.1`, and approve the deploy (Part C step 27):
+    2. Save the deploy account's current roles, then grant, then merge the 7B PR and push `v0.7.1`, and approve the deploy (Part C step 27):
        ```bash
-       gcloud config set project hireframe-f6b03
        SA=github-deployer@hireframe-f6b03.iam.gserviceaccount.com
+       gcloud config set project hireframe-f6b03
+       gcloud projects get-iam-policy hireframe-f6b03 --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$SA" --format='value(bindings.role)' | sort > /tmp/roles-before.txt
+       cat /tmp/roles-before.txt
        gcloud projects add-iam-policy-binding hireframe-f6b03 --member="serviceAccount:$SA" --role=roles/cloudfunctions.admin --condition=None
        ```
+       If Cloud Shell reconnects between this step and step 5, `/tmp` may be empty. So also paste the `roles-before` list that `cat` printed into a note (or the chat) now.
     3. After the deploy finishes (or if it failed with "Failed to set invoker function getDigest", run this and re-run it), bind the invoker, then remove the grant:
        ```bash
+       SA=github-deployer@hireframe-f6b03.iam.gserviceaccount.com
        gcloud functions add-invoker-policy-binding getDigest --region=europe-west2 --member=allUsers --project=hireframe-f6b03
        gcloud projects remove-iam-policy-binding hireframe-f6b03 --member="serviceAccount:$SA" --role=roles/cloudfunctions.admin --condition=None
        ```
        Public invocation is safe: the HMAC is the authentication, and a request without a valid signature gets a 401 and writes nothing.
     4. Read the function URL and check that an unsigned request is refused with a 401 (a 403 means the invoker binding is missing):
        ```bash
+       SA=github-deployer@hireframe-f6b03.iam.gserviceaccount.com
        gcloud functions describe getDigest --region=europe-west2 --gen2 --format='value(serviceConfig.uri)'
        curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' -d '{}' "$(gcloud functions describe getDigest --region=europe-west2 --gen2 --format='value(serviceConfig.uri)')"
        ```
-    5. Check that the grant is gone: `gcloud projects get-iam-policy hireframe-f6b03 --flatten='bindings[].members' --filter="bindings.members:$SA AND bindings.role:roles/cloudfunctions.admin" --format='value(bindings.role)'` prints nothing.
+    5. Check that the deploy account's roles are exactly what they were. Save them again and compare with the list from step 2:
+       ```bash
+       SA=github-deployer@hireframe-f6b03.iam.gserviceaccount.com
+       gcloud projects get-iam-policy hireframe-f6b03 --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$SA" --format='value(bindings.role)' | sort > /tmp/roles-after.txt
+       diff /tmp/roles-before.txt /tmp/roles-after.txt
+       ```
+       `diff` must print nothing. If `/tmp/roles-before.txt` is gone, compare `roles-after.txt` with the list you pasted in step 2, and check that `roles/cloudfunctions.admin` is not in it.
 92. **Push the mailer and install the triggers** (I4). In the repo folder:
     ```bash
     npm run build:apps-script
@@ -388,9 +399,9 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest). Steps I3 to I5 belong to PR 7
     `clasp push` asks to overwrite the manifest because the scopes changed: accept. Then, in the Apps Script editor (open it by its script ID, as Part G step 81):
     1. **Project Settings → Script Properties:** add `HIREFRAME_DIGEST_URL`, the URL from step 91.4 (nothing else is new: the mailer reuses `HIREFRAME_HMAC_SECRET`, and it needs no email address, because it mails the account the script runs as).
     2. Select `setup` and **Run** once. Google asks you to accept two new permissions, **send email as you** and **see your email address**; accept. `setup` adds the two digest triggers and leaves `run`'s as it is. Open **Triggers** and check that there are exactly three: `run` (every 30 minutes), `digestMorning` (daily, 7am to 8am) and `digestFallback` (daily, 8am to 9am). If one is missing or doubled, delete the extra by hand in **Triggers** and run `setup` again; no handler does it for you.
-    3. Select `digestNow` and **Run**. Check **Executions** says Completed, and that the email arrives in your own inbox (not Spam) with the subject `Hireframe <day>: …`. If today's morning run hasn't happened yet (or it is the weekend) you get the in-progress or missing notice, which proves the path too. `digestNow` ignores the weekday and the `lastDigestDay` property, so run it as often as you like.
+    3. Select `digestNow` and **Run**. Check **Executions** says Completed, and that its log has a `digest.now` line whose `isoWeekday` is today's weekday in London (1 is Monday, 7 is Sunday): that proves the mailer reads the London weekday correctly. Check that the email arrives in your own inbox (not Spam) with the subject `Hireframe <day>: …`. If today's morning run hasn't happened yet (or it is the weekend) you get the in-progress or missing notice, which proves the path too. `digestNow` ignores the weekday and the `lastDigestDay` property, so run it as often as you like.
     4. If `digestNow` fails: a Script Property error is a missing `HIREFRAME_DIGEST_URL`; a mail error "Authorization is required" means the new permissions weren't accepted (run `setup` again and accept); an email "Hireframe digest unavailable (http_401)" means the secrets differ (Recovery, Gmail bridge), `http_403` the missing invoker (step 91.3), `network_error` a wrong URL.
-93. **The next weekday** (I5). Between 07:40 and 08:00 the 07:50 digest arrives, or, if the 07:30 scan was still running or the first request failed, the 08:20 one arrives (with an in-progress notice if the scan still hadn't finished). In **Executions**, `digestMorning` shows `digest.sent` or `digest.skipped` in its log, never a failure. The email's links open the app on the job. If nothing arrives by 08:45, see Recovery. Report to Claude which of the two arrived and when.
+93. **The next weekday** (I5). Between 07:35 and 08:05 the 07:50 digest arrives, or, if the 07:30 scan was still running or the first request failed (the log says `digest.request_failed`), the 08:20 one arrives (with an in-progress notice if the scan still hadn't finished). In **Executions**, `digestMorning` shows `digest.sent` or `digest.skipped` in its log, never a failure. The email's links open the app on the job. If nothing arrives by 08:45, see Recovery. Report to Claude which of the two arrived and when.
 
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
@@ -409,7 +420,7 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest). Steps I3 to I5 belong to PR 7
 - **A source card says "Paused until <time>":** that site sent a long Retry-After (a rate limit), so scans skip it until then and it resumes on its own. If it keeps happening, switch the source off with `disabledSources` for a while.
 - **Scan now says "A scan is already running"** long after the last one: a scan that died leaves `locks/scan` for 12 minutes, then the next scan takes over. "Importing alerts, try again in a minute" is the Gmail bridge holding the lock, which a killed ingest keeps for at most 3 minutes.
 - **The Gmail bridge isn't ingesting** (System → Gmail alerts shows an old "Last ingest", or none): open the Apps Script project → **Executions**. A `run` that failed with a Script Property error is a missing `HIREFRAME_INGEST_URL` or `HIREFRAME_HMAC_SECRET` (Part G step 81); "label does not exist" is a missing Gmail label. A **403** from the function means the invoker binding is missing (step 80). A **401** means the secrets differ: set the script property to the secret's current value (`gcloud secrets versions access latest --secret=INGEST_HMAC_SECRET` in Cloud Shell); a 401 only on some runs can also be the trigger's clock being more than 5 minutes off. A **503 `busy`** is a scan or another ingest holding the lock; the next trigger retries, nothing is lost. The 30-minute trigger is gone after a project copy: run `setup` again.
-- **No digest arrived** (Part I step 93): open the Apps Script project → **Executions**. No `digestMorning` or `digestFallback` execution at all means the triggers are missing: open **Triggers** and run `setup`. A failed execution with a Script Property error is a missing `HIREFRAME_DIGEST_URL` or `HIREFRAME_HMAC_SECRET`. The log lines are `digest.skipped` (`weekend`, `already_sent`, `in_progress`, `locked`), `digest.request_failed` (with a `code`) and `digest.sent` (with the state). A `digest.request_failed` morning with a sent fallback email "unavailable (code)" is the code to chase: `http_401` secrets differ or the clock is more than 5 minutes off, `http_403` the invoker binding (step 91.3), `http_400` the day (the function only answers for the London day), `http_500` see the `getDigest` logs. `digest.send_failed` is Gmail's mail quota or an unaccepted permission. A digest saying the scan is missing or failed is correct: look at System.
+- **No digest arrived** (Part I step 93): open the Apps Script project → **Executions**. No `digestMorning` or `digestFallback` execution at all means the triggers are missing: open **Triggers** and run `setup`. A failed execution with a Script Property error is a missing `HIREFRAME_DIGEST_URL` or `HIREFRAME_HMAC_SECRET`. The log lines are `digest.skipped` (`weekend`, `already_sent`, `in_progress`, `locked`; a fallback or `digestNow` that can't get the lock in 120 s fails with `digest_lock_unavailable` instead), `digest.now` (with `isoWeekday`), `digest.request_failed` (with a `code`) and `digest.sent` (with the state). A `digest.request_failed` morning with a sent fallback email "unavailable (code)" is the code to chase: `http_401` secrets differ or the clock is more than 5 minutes off, `http_403` the invoker binding (step 91.3), `http_400` the day (the function only answers for the London day), `http_500` see the `getDigest` logs. `digest.send_failed` is Gmail's mail quota or an unaccepted permission. A digest saying the scan is missing or failed is correct: look at System.
 - **System shows "Gmail alerts" Failing or Degraded, "some alert emails could not be read":** a sender changed its layout (the Unread count and the sender table say which). LinkedIn emails with job links but no readable card are counted, relabelled `hireframe/done` and not guessed. Send Claude a real alert with the values replaced by fake ones (never the raw email) so the parser and its fixture can be updated.
 - **"…waiting for the daily AI limit":** alert emails from senders other than LinkedIn are read with the cheap model, capped at 10p a day (`config/app.alerts.dailyCapPence` overrides it). Over the cap they stay under `hireframe/alerts` and are tried again on the next trigger, so they catch up the next day.
 - **Deploy fails with 403 on a Reed or Adzuna secret:** Part D step 39 hasn't run.
