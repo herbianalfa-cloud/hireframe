@@ -1,4 +1,5 @@
 import {
+  APPLICATION_LIMITS,
   FUNCTIONS_REGION,
   INGEST_WIRE,
   type CallableName,
@@ -30,7 +31,14 @@ export const INGEST_HMAC_SECRET_NAME = 'INGEST_HMAC_SECRET';
 export const DEFAULT_FX_USD_TO_GBP = 0.85;
 
 export type LlmPurpose =
-  'parseCv' | 'addFact' | 'triage' | 'deepRead' | 'alertParse' | 'pasteParse';
+  | 'parseCv'
+  | 'addFact'
+  | 'triage'
+  | 'deepRead'
+  | 'alertParse'
+  | 'pasteParse'
+  | 'cvWrite'
+  | 'answerFact';
 
 export interface ModelConfig {
   id: string;
@@ -74,6 +82,20 @@ export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
   alertParse: { id: 'claude-haiku-4-5', maxTokens: 3_000, timeoutMs: 15_000, budgetMs: 35_000 },
   /** A pasted LinkedIn results page the deterministic parser couldn't read (ADR-049). */
   pasteParse: { id: 'claude-haiku-4-5', maxTokens: 6_000, timeoutMs: 40_000, budgetMs: 80_000 },
+  /**
+   * A tailored CV and cover note, written by the scheduled worker (M7, ADR-053). The budget is the
+   * call plus one retry inside `llm.call()`; the worker's start deadline leaves room for it
+   * (APPLICATIONS.workerStartDeadlineMs, config.test.ts).
+   */
+  cvWrite: {
+    id: 'claude-sonnet-5-5',
+    effort: 'medium',
+    maxTokens: 8_000,
+    timeoutMs: 150_000,
+    budgetMs: 300_000,
+  },
+  /** An application answer turned into facts, with the `addFact` prompt (M7). */
+  answerFact: { id: 'claude-haiku-4-5', maxTokens: 4_000, timeoutMs: 45_000, budgetMs: 90_000 },
 };
 
 /** The callable whose timeout bounds each purpose's calls. */
@@ -84,6 +106,8 @@ export const PURPOSE_CALLABLE = {
   deepRead: 'scanNow',
   alertParse: 'ingestEmailJobs',
   pasteParse: 'lookup',
+  cvWrite: 'generateCvs',
+  answerFact: 'application',
 } as const satisfies Record<LlmPurpose, CallableName>;
 
 export const LLM = {
@@ -480,3 +504,28 @@ export const DIGEST = {
   /** Fallback look-back when there is no earlier morning run to measure from. */
   defaultLookbackMs: 24 * 3_600_000,
 } as const;
+
+// ---- Applications and CV writing (M7, ADR-053) ----
+
+export const APPLICATIONS = {
+  /** Daily spend on CV writing and answers; `config/app.applications.dailyCapPence` overrides it. */
+  dailyCapPence: 60,
+  maxQuestions: APPLICATION_LIMITS.maxQuestions,
+  /** Model calls one job may cost, kills included: the worker counts an attempt before it calls. */
+  maxAttempts: APPLICATION_LIMITS.maxAttempts,
+  workerMaxPerRun: 10,
+  /**
+   * No new CV call starts after this much of the worker's run. A call started at the deadline
+   * still ends within its budget plus the margin, inside the worker's timeout (config.test.ts):
+   * 540 s - 300 s budget - 30 s margin.
+   */
+  workerStartDeadlineMs: 210_000,
+} as const;
+
+/**
+ * Optional `config/app.applications` override, parsed on its own like `config/app.funnel` so a
+ * typo can't fail the owner check: an invalid object is ignored.
+ */
+export const ApplicationOverridesSchema = z
+  .object({ dailyCapPence: z.number().min(0).max(200) })
+  .partial();
