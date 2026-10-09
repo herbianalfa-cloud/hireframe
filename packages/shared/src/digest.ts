@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+import { COLLECTIONS } from './firestore.js';
+import type { QuerySpec } from './query-spec.js';
+
 /**
  * The `getDigest` request and response (ADR-052, M7B). The Apps Script mailer posts
  * `{ kind, day }` signed with the `digest.v1.` purpose and sends whatever comes back. The server
@@ -29,7 +32,10 @@ export const DigestRequestSchema = z.strictObject({
   day: z
     .string()
     .regex(DAY)
-    .refine((day) => new Date(`${day}T00:00:00Z`).toISOString().startsWith(day)),
+    .refine((day) => {
+      const time = Date.parse(`${day}T00:00:00Z`);
+      return !Number.isNaN(time) && new Date(time).toISOString().startsWith(day);
+    }),
 });
 export type DigestRequest = z.infer<typeof DigestRequestSchema>;
 
@@ -44,3 +50,47 @@ export type DigestResponse = z.infer<typeof DigestResponseSchema>;
 /** Error bodies carry a fixed code only, never detail (docs/SECURITY.md). */
 export const DIGEST_ERROR_CODES = ['unauthorized', 'too_large', 'malformed', 'internal'] as const;
 export type DigestErrorCode = (typeof DIGEST_ERROR_CODES)[number];
+
+// ---- The digest's Firestore reads (query specs, checked against firestore.indexes.json) ----
+
+/** Verdicts the digest lists, with the statuses that still count as open. */
+export const DIGEST_VERDICTS = ['apply', 'near_miss', 'wildcard'] as const;
+export type DigestVerdict = (typeof DIGEST_VERDICTS)[number];
+export const DIGEST_OPEN_STATUSES = ['new', 'saved'] as const;
+
+/** The newest runs, newest first (single-field index on `startedAt`). */
+export const digestRunsSpec: QuerySpec = {
+  collection: COLLECTIONS.runs,
+  filters: [],
+  orderBy: [{ field: 'startedAt', direction: 'desc' }],
+};
+
+/**
+ * Open jobs of one verdict judged since `since`, newest judged first: the
+ * `(verdict, status, judgedAt desc)` composite. Also the count behind "+n more".
+ */
+export function digestJobsSpec(verdict: DigestVerdict, since: Date): QuerySpec {
+  return {
+    collection: COLLECTIONS.jobs,
+    filters: [
+      { field: 'verdict', op: '==', value: verdict },
+      { field: 'status', op: 'in', value: [...DIGEST_OPEN_STATUSES] },
+      { field: 'judgedAt', op: '>=', value: since },
+    ],
+    orderBy: [{ field: 'judgedAt', direction: 'desc' }],
+  };
+}
+
+/** Jobs S3 sent to wait for a description (equality only, merged single-field indexes). */
+export const digestWaitingSpec: QuerySpec = {
+  collection: COLLECTIONS.jobs,
+  filters: [{ field: 'next', op: '==', value: 'description' }],
+  orderBy: [],
+};
+
+/** Source health documents: a whole small collection, no filter and no order. */
+export const digestSourcesSpec: QuerySpec = {
+  collection: COLLECTIONS.sources,
+  filters: [],
+  orderBy: [],
+};

@@ -5,7 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { Timestamp } from 'firebase/firestore';
 import { describe, expect, it } from 'vitest';
 
-import { ADOPTED_S1_RULE_IDS } from '@hireframe/shared';
+import {
+  ADOPTED_S1_RULE_IDS,
+  DIGEST_VERDICTS,
+  digestJobsSpec,
+  digestRunsSpec,
+  digestSourcesSpec,
+  digestWaitingSpec,
+} from '@hireframe/shared';
 import { dashboardQuerySpecs, lastRunSpec, summarySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
 import { addedByYouSpec, jobFilterSpec } from './jobs';
@@ -63,6 +70,27 @@ describe('firestore.indexes.json', () => {
       expect(summarySpecs(NOW)[key].orderBy, key).toEqual([]);
     }
     expect(Object.keys(dashboardQuerySpecs(NOW))).toContain('last-run');
+  });
+
+  it('serves every getDigest query', () => {
+    const specs: Record<string, QuerySpec> = {
+      'digest:runs': digestRunsSpec,
+      'digest:waiting': digestWaitingSpec,
+      'digest:sources': digestSourcesSpec,
+      ...Object.fromEntries(
+        DIGEST_VERDICTS.map((verdict) => [`digest:jobs:${verdict}`, digestJobsSpec(verdict, NOW)]),
+      ),
+    };
+    expect(Object.keys(specs)).toHaveLength(6);
+    for (const [name, spec] of Object.entries(specs)) {
+      expect(indexServes(spec, indexes), name).toBe(true);
+    }
+    // The job lists use the existing (verdict, status, judgedAt desc) composite.
+    expect(indexServes(digestJobsSpec('apply', NOW), [])).toBe(false);
+    // The runs, waiting and sources reads need no composite index.
+    for (const spec of [digestRunsSpec, digestWaitingSpec, digestSourcesSpec]) {
+      expect(indexServes(spec, [])).toBe(true);
+    }
   });
 
   it('serves every funnel diagnostics query', () => {
