@@ -1,4 +1,3 @@
-import type { DigestVerdict } from '@hireframe/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildDigest } from './build.js';
@@ -45,19 +44,23 @@ const list = (titles: string[]): DigestJobList => ({
 });
 
 function fakeStore(runs: StoredDigestRun[]) {
-  const jobsSince = vi.fn((verdict: DigestVerdict, _since: Date) =>
+  const jobsSince = vi.fn<DigestStore['jobsSince']>((verdict) =>
     Promise.resolve(list(verdict === 'apply' ? ['Analyst'] : [])),
+  );
+  const sources = vi.fn<DigestStore['sources']>(() =>
+    Promise.resolve([{ id: 'reed', status: 'failing', errorCode: 'http_429' }]),
+  );
+  const waitingForDescription = vi.fn<DigestStore['waitingForDescription']>(() =>
+    Promise.resolve(2),
   );
   const store: DigestStore = {
     recentRuns: () => Promise.resolve(runs),
     jobsSince,
     usage: () => Promise.resolve({ spendPence: 100, capPence: 1500 }),
-    sources: vi.fn(() =>
-      Promise.resolve([{ id: 'reed', status: 'failing', errorCode: 'http_429' }]),
-    ),
-    waitingForDescription: vi.fn(() => Promise.resolve(2)),
+    sources,
+    waitingForDescription,
   };
-  return { store, jobsSince };
+  return { store, jobsSince, sources, waitingForDescription };
 }
 
 const request = { kind: 'morning', day: DAY } as const;
@@ -90,14 +93,14 @@ describe('buildDigest', () => {
   });
 
   it('is in_progress with no job, source or description reads while the run is running', async () => {
-    const { store, jobsSince } = fakeStore([
+    const { store, jobsSince, sources, waitingForDescription } = fakeStore([
       run('today', '2026-10-07T06:45:00Z', { status: 'running' }),
     ]);
     const out = await buildDigest(store, request, NOW);
     expect(out.state).toBe('in_progress');
     expect(jobsSince).not.toHaveBeenCalled();
-    expect(store.sources).not.toHaveBeenCalled();
-    expect(store.waitingForDescription).not.toHaveBeenCalled();
+    expect(sources).not.toHaveBeenCalled();
+    expect(waitingForDescription).not.toHaveBeenCalled();
     expect(out.text).toContain('has not finished yet');
   });
 

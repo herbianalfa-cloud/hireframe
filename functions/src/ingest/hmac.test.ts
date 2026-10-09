@@ -266,4 +266,15 @@ describe('the digest purpose (digest.v1., domain separation)', () => {
     });
     expect(verifyDigest(digestRequest({ body: big }))).toMatchObject({ ok: false, status: 413 });
   });
+
+  it('agrees on the fixed vector 7B.2 pins in bridge-compat.test.ts', () => {
+    const secret = 'c0ffee11'.repeat(8);
+    const body = '{"kind":"morning","day":"2026-10-07"}';
+    expect(signRequest(secret, '1760000000', NONCE, body, 'digest')).toBe(
+      '4ff6dc7afc9c6fb781024ed08e74ad5d722a1c545dd183f87b19610c8e5a94d2',
+    );
+    expect(signRequest(secret, '1760000000', NONCE, body)).toBe(
+      'a5408cc32b2074752944e5128744c06835e22da069dba160ba178c3fef6a31c8',
+    );
+  });
 });

@@ -7,6 +7,7 @@ import {
   renderDigest,
   type DigestInput,
   type DigestJobLine,
+  type DigestRunSummary,
 } from './render.js';
 
 const job = (id: string, overrides: Partial<DigestJobLine> = {}): DigestJobLine => ({
@@ -22,18 +23,20 @@ const job = (id: string, overrides: Partial<DigestJobLine> = {}): DigestJobLine 
 
 const EMPTY = { jobs: [], total: 0 } as const;
 
+const RUN: DigestRunSummary = {
+  status: 'succeeded',
+  startedAt: new Date('2026-10-07T06:30:00Z'),
+  s2: { in: 40, passed: 12, skipped: 28, queued: 0 },
+  s3: { in: 12, apply: 2, near_miss: 1, wildcard: 1, skip: 8, queued: 0 },
+  errors: [],
+};
+
 function input(overrides: Partial<DigestInput> = {}): DigestInput {
   return {
     state: 'ready',
     day: '2026-10-07',
     partial: false,
-    run: {
-      status: 'succeeded',
-      startedAt: new Date('2026-10-07T06:30:00Z'),
-      s2: { in: 40, passed: 12, skipped: 28, queued: 0 },
-      s3: { in: 12, apply: 2, near_miss: 1, wildcard: 1, skip: 8, queued: 0 },
-      errors: [],
-    },
+    run: RUN,
     apply: { jobs: [job('a1'), job('a2')], total: 2 },
     nearMiss: { jobs: [job('n1')], total: 1 },
     wildcard: { jobs: [job('w1')], total: 1 },
@@ -45,8 +48,9 @@ function input(overrides: Partial<DigestInput> = {}): DigestInput {
 }
 
 function withoutRun(state: DigestInput['state']): DigestInput {
-  const { run: _run, ...rest } = input();
-  return { ...rest, state };
+  const rest: Partial<DigestInput> = input();
+  delete rest.run;
+  return { ...(rest as DigestInput), state };
 }
 
 /** Every href in the HTML. */
@@ -245,7 +249,7 @@ describe('renderDigest: run health and errors (R12)', () => {
       sourceId: 'reed',
       code: `code_${String(i)}`,
     }));
-    const out = renderDigest(input({ run: { ...input().run!, errors } }));
+    const out = renderDigest(input({ run: { ...RUN, errors } }));
     expect(out.text).toContain('reed: code_0');
     expect(out.text).toContain('reed: code_9');
     expect(out.text).not.toContain('code_10');
@@ -266,7 +270,7 @@ describe('renderDigest: the other states', () => {
     const out = renderDigest(
       input({
         state: 'failed',
-        run: { ...input().run!, status: 'failed', errors: [{ code: 'timeout' }] },
+        run: { ...RUN, status: 'failed', errors: [{ code: 'timeout' }] },
       }),
     );
     expect(out.subject).toContain('scan failed');

@@ -96,6 +96,8 @@ interface Section {
 const MAX_ERRORS = 10;
 const MAX_SOURCES = 12;
 const URLISH = /(?:https?:\/\/|www\.)\S*/gi;
+// Control characters are exactly what this strips from job-derived text.
+// eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f\u2028\u2029]+/g;
 
 /** Job-derived text as one clean line: no URLs, no control characters. */
