@@ -41,10 +41,13 @@ export async function buildDigest(
   const run = choice.run ? runs.find((candidate) => candidate.id === choice.run?.id) : undefined;
   const wantsDetail = choice.state === 'ready' || choice.state === 'failed';
 
-  // "New" means judged since the previous morning's run started (or a day before this one).
+  // "New" means judged since the previous morning run finished (started, if it never recorded a
+  // finish), or a day before this one's start when there is no earlier morning run.
   const previous = pickPreviousMorningRun(runs, request.day);
   const since =
-    previous?.startedAt ?? new Date((run?.startedAt ?? now).getTime() - DIGEST.defaultLookbackMs);
+    previous?.finishedAt ??
+    previous?.startedAt ??
+    new Date((run?.startedAt ?? now).getTime() - DIGEST.defaultLookbackMs);
 
   const list = (verdict: DigestVerdict) =>
     choice.state === 'ready' ? store.jobsSince(verdict, since) : Promise.resolve(NONE);

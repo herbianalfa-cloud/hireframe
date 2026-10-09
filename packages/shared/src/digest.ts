@@ -42,7 +42,7 @@ export type DigestRequest = z.infer<typeof DigestRequestSchema>;
 export const DigestResponseSchema = z.strictObject({
   state: z.enum(DIGEST_STATES),
   subject: z.string().min(1).max(200),
-  html: z.string().min(1).max(200_000),
+  html: z.string().min(1).max(100_000),
   text: z.string().min(1).max(100_000),
 });
 export type DigestResponse = z.infer<typeof DigestResponseSchema>;

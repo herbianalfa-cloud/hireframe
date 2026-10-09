@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chooseDigest,
   isMorningRun,
+  londonParts,
   pickMorningRun,
   pickPreviousMorningRun,
   type DigestRun,
@@ -116,5 +117,30 @@ describe('chooseDigest', () => {
       run('earlier', '2026-10-07T06:30:00Z', 'failed'),
     ];
     expect(chooseDigest(runs, DAY, now)).toMatchObject({ state: 'in_progress' });
+  });
+});
+
+describe('the clock change on Sunday 25 October 2026 (BST ends, GMT begins)', () => {
+  const MONDAY = '2026-10-26';
+
+  it('treats Monday 07:30Z (07:30 GMT) as a morning run on that day, and finds Friday’s as the previous', () => {
+    const monday = run('monday', '2026-10-26T07:30:00Z');
+    const friday = run('friday', '2026-10-23T06:30:00Z'); // 07:30 BST
+    expect(isMorningRun(monday)).toBe(true);
+    expect(londonParts(monday.startedAt).day).toBe(MONDAY);
+    expect(pickMorningRun([monday, friday], MONDAY)?.id).toBe('monday');
+    expect(pickPreviousMorningRun([monday, friday], MONDAY)?.id).toBe('friday');
+  });
+
+  it('places the day boundary by London time: 23:30Z on the 25th is still the 25th', () => {
+    expect(londonParts(at('2026-10-25T23:30:00Z')).day).toBe('2026-10-25');
+    expect(londonParts(at('2026-10-26T00:00:00Z')).day).toBe(MONDAY);
+    // BST still: 23:30Z on the 24th is 00:30 on the 25th.
+    expect(londonParts(at('2026-10-24T23:30:00Z')).day).toBe('2026-10-25');
+  });
+
+  it('has the 08:15 edge at 08:15Z in GMT', () => {
+    expect(chooseDigest([], MONDAY, at('2026-10-26T08:14:59Z')).state).toBe('in_progress');
+    expect(chooseDigest([], MONDAY, at('2026-10-26T08:15:00Z')).state).toBe('missing');
   });
 });

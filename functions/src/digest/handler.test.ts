@@ -97,6 +97,28 @@ describe('digestHandler (ADR-052)', () => {
     expect(build).not.toHaveBeenCalled();
   });
 
+  it('accepts the London day on the first Monday after the clocks go back', async () => {
+    // 07:50Z on Monday 26 October 2026 is 07:50 GMT; the Sunday before it was BST.
+    const monday = new Date('2026-10-26T07:50:00Z');
+    const { deps, build } = setup();
+    const body = JSON.stringify({ kind: 'morning', day: '2026-10-26' });
+    const timestamp = String(Math.floor(monday.getTime() / 1000));
+    const nonce = randomUUID();
+    const headers: Record<string, string> = {
+      'x-hireframe-timestamp': timestamp,
+      'x-hireframe-nonce': nonce,
+      'x-hireframe-signature': signRequest(SECRET, timestamp, nonce, body, 'digest'),
+    };
+    const signed: SignedRequest = {
+      method: 'POST',
+      contentType: 'application/json',
+      rawBody: Buffer.from(body),
+      header: (name) => headers[name],
+    };
+    expect((await digestHandler(signed, { ...deps, now: () => monday })).status).toBe(200);
+    expect(build).toHaveBeenCalledWith({ kind: 'morning', day: '2026-10-26' }, monday);
+  });
+
   it('accepts a timestamp at the 300 s edge', async () => {
     const { deps } = setup();
     expect((await digestHandler(request({ offsetSeconds: -300 }), deps)).status).toBe(200);

@@ -69,7 +69,8 @@ export interface DigestInput {
   wildcard: DigestJobList;
   sources: readonly DigestSourceLine[];
   waitingForDescription: number;
-  spend: { spendPence: number; capPence: number };
+  /** `null` when the usage record is invalid: the digest says the spend is unknown. */
+  spend: { spendPence: number; capPence: number } | null;
   pipeline?: DigestPipeline;
 }
 
@@ -96,13 +97,37 @@ interface Section {
 const MAX_ERRORS = 10;
 const MAX_SOURCES = 12;
 const URLISH = /(?:https?:\/\/|www\.)\S*/gi;
-// Control characters are exactly what this strips from job-derived text.
+// Control characters are exactly what this strips from job-derived text. It also strips what
+// reorders or hides text: the bidi embeddings and overrides (U+202A–202E), the isolates
+// (U+2066–2069) and the zero-width characters (U+200B–200D).
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f\u2028\u2029]+/g;
+const CONTROL = /[\u0000-\u001f\u007f\u2028\u2029\u202a-\u202e\u2066-\u2069\u200b-\u200d]+/g;
 
 /** Job-derived text as one clean line: no URLs, no control characters. */
 export function cleanText(value: string): string {
   return value.replace(URLISH, '[link removed]').replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The most characters of each job-derived field shown, so the worst case fits (HTML_BUDGET). */
+export const SHOW_MAX = {
+  title: 120,
+  company: 80,
+  reason: 200,
+  sourceId: 60,
+  sourceStatus: 30,
+  code: 60,
+} as const;
+
+/** `cleanText`, cut to `max` characters with an ellipsis. */
+export function clampText(value: string, max: number): string {
+  const clean = cleanText(value);
+  const chars = Array.from(clean);
+  return chars.length <= max
+    ? clean
+    : `${chars
+        .slice(0, max - 1)
+        .join('')
+        .trimEnd()}…`;
 }
 
 export function escapeHtml(value: string): string {
@@ -137,13 +162,13 @@ function score(value: number | undefined): string | undefined {
 }
 
 function jobLine(job: DigestJobLine, kind: 'apply' | 'near_miss' | 'wildcard'): Line {
-  const title = cleanText(job.title) || 'Untitled';
-  const company = cleanText(job.company);
+  const title = clampText(job.title, SHOW_MAX.title) || 'Untitled';
+  const company = clampText(job.company, SHOW_MAX.company);
   const scores = [
     job.fitScore === undefined ? undefined : `fit ${score(job.fitScore) ?? ''}`,
     job.luckScore === undefined ? undefined : `luck ${score(job.luckScore) ?? ''}`,
   ].filter((part): part is string => part !== undefined);
-  const why = cleanText((kind === 'near_miss' ? job.shortfall : job.reason) ?? '');
+  const why = clampText((kind === 'near_miss' ? job.shortfall : job.reason) ?? '', SHOW_MAX.reason);
   const detail = [scores.join(' · '), why].filter((part) => part !== '').join(' — ');
   return {
     text: `${title}${company ? ` · ${company}` : ''}${detail ? ` (${detail})` : ''}`,
@@ -183,7 +208,7 @@ function runHealthSection(input: DigestInput): Section {
   const failing = input.sources.filter((s) => s.status === 'failing' || s.status === 'degraded');
   for (const source of failing.slice(0, MAX_SOURCES)) {
     lines.push({
-      text: `Source ${cleanText(source.id)}: ${cleanText(source.status)}${source.errorCode ? ` (${cleanText(source.errorCode)})` : ''}`,
+      text: `Source ${clampText(source.id, SHOW_MAX.sourceId)}: ${clampText(source.status, SHOW_MAX.sourceStatus)}${source.errorCode ? ` (${clampText(source.errorCode, SHOW_MAX.code)})` : ''}`,
     });
   }
   if (failing.length === 0) lines.push({ text: 'All sources healthy' });
@@ -198,6 +223,13 @@ function runHealthSection(input: DigestInput): Section {
 }
 
 function spendSection(spend: DigestInput['spend']): Section {
+  if (!spend) {
+    return {
+      title: 'Spend',
+      notice: 'Warning: this month’s usage record could not be read.',
+      lines: [{ text: 'Spend unknown' }],
+    };
+  }
   const meter = spendMeter(spend.spendPence, spend.capPence);
   const percent = Math.round(meter.fraction * 100);
   const lines: Line[] = [
@@ -219,7 +251,7 @@ function spendSection(spend: DigestInput['spend']): Section {
 function errorsSection(run: DigestRunSummary | undefined): Section {
   const errors = run?.errors ?? [];
   const lines: Line[] = errors.slice(0, MAX_ERRORS).map((error) => ({
-    text: `${error.sourceId ? `${cleanText(error.sourceId)}: ` : ''}${cleanText(error.code)}`,
+    text: `${error.sourceId ? `${clampText(error.sourceId, SHOW_MAX.sourceId)}: ` : ''}${clampText(error.code, SHOW_MAX.code)}`,
   }));
   if (errors.length > MAX_ERRORS) {
     lines.push({ text: `+${String(errors.length - MAX_ERRORS)} more on the System screen` });

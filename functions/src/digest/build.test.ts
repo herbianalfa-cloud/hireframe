@@ -72,18 +72,42 @@ describe('buildDigest', () => {
     run('yesterday', '2026-10-06T06:30:00Z'),
   ];
 
-  it('is ready, lists open jobs judged since the previous morning run started', async () => {
+  it('is ready, lists open jobs judged since the previous morning run finished', async () => {
     const { store, jobsSince } = fakeStore(runs);
     const out = await buildDigest(store, request, NOW);
     expect(out.state).toBe('ready');
     expect(jobsSince).toHaveBeenCalledTimes(3);
     for (const [, since] of jobsSince.mock.calls) {
+      // The previous morning run's finishedAt (the fixture's equals its start).
       expect(since).toEqual(new Date('2026-10-06T06:30:00Z'));
     }
     expect(out.text).toContain('Analyst · Acme');
     expect(out.text).toContain('Some sources failed in this run.');
     expect(out.text).toContain('Source reed: failing (http_429)');
     expect(out.text).toContain('2 waiting for a description');
+  });
+
+  it('measures from the previous morning run’s finishedAt, and from startedAt without one', async () => {
+    const finished = [
+      run('today', '2026-10-07T06:30:00Z'),
+      run('yesterday', '2026-10-06T06:30:00Z', { finishedAt: new Date('2026-10-06T06:41:00Z') }),
+    ];
+    const first = fakeStore(finished);
+    await buildDigest(first.store, request, NOW);
+    expect(first.jobsSince.mock.calls[0]?.[1]).toEqual(new Date('2026-10-06T06:41:00Z'));
+
+    const unfinished = run('yesterday', '2026-10-06T06:30:00Z');
+    delete unfinished.finishedAt;
+    const second = fakeStore([run('today', '2026-10-07T06:30:00Z'), unfinished]);
+    await buildDigest(second.store, request, NOW);
+    expect(second.jobsSince.mock.calls[0]?.[1]).toEqual(new Date('2026-10-06T06:30:00Z'));
+  });
+
+  it('says the spend is unknown, not 0p, when the usage record is invalid', async () => {
+    const { store } = fakeStore(runs);
+    const out = await buildDigest({ ...store, usage: () => Promise.resolve(null) }, request, NOW);
+    expect(out.text).toContain('Spend unknown');
+    expect(out.text).not.toContain('0p of');
   });
 
   it('looks back 24 h from the run when there is no earlier morning run', async () => {

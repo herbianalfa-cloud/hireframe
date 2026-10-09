@@ -472,7 +472,9 @@ export const DIGEST = {
   /** With no morning run by this London time (minutes after midnight, 08:15) the digest says so. */
   missingAfterMinutes: 8 * 60 + 15,
   /** Runs read to find today's morning run and the previous one. */
-  runsRead: 10,
+  runsRead: 30,
+  /** Sources read for the health section. */
+  sourcesRead: 30,
   /** Jobs listed per verdict; one more is read, so the digest can say there are more. */
   jobsPerVerdict: 10,
   /** Fallback look-back when there is no earlier morning run to measure from. */

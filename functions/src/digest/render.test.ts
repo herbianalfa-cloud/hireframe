@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { APP_ORIGIN } from '../config.js';
 import {
+  SHOW_MAX,
   cleanText,
   escapeHtml,
   renderDigest,
@@ -178,6 +179,26 @@ describe('cleanText and escapeHtml', () => {
     );
     expect(cleanText('https://a.test, www.b.test.')).toBe('[link removed] [link removed]');
   });
+  it('strips bidi controls and zero-width characters', () => {
+    const hidden = [
+      '\u202a',
+      '\u202b',
+      '\u202c',
+      '\u202d',
+      '\u202e',
+      '\u2066',
+      '\u2067',
+      '\u2068',
+      '\u2069',
+      '\u200b',
+      '\u200c',
+      '\u200d',
+    ];
+    for (const mark of hidden)
+      expect(cleanText(`a${mark}b`), mark.charCodeAt(0).toString(16)).toBe('a b');
+    expect(cleanText('Pay\u202e 000,05£')).toBe('Pay 000,05£');
+    expect(cleanText('a\u200b\u200c\u200db\u2066\u2069c')).toBe('a b c');
+  });
   it('escapes the five HTML characters', () => {
     expect(escapeHtml(`<a href="x">'&'</a>`)).toBe(
       '&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;',
@@ -284,5 +305,63 @@ describe('renderDigest: the other states', () => {
     const out = renderDigest(withoutRun('missing'));
     expect(out.subject).toContain('no scan this morning');
     expect(out.text).toContain('No scan started this morning');
+  });
+});
+
+describe('renderDigest: spend unknown', () => {
+  it('says so, with a warning, instead of 0p', () => {
+    const out = renderDigest(input({ spend: null }));
+    expect(out.text).toContain('Spend unknown');
+    expect(out.text).toContain('Warning: this month’s usage record could not be read.');
+    expect(out.text).not.toMatch(/\dp of \d+p/);
+    expect(out.html).toContain('Spend unknown');
+  });
+});
+
+describe('renderDigest: the worst case fits the response limit', () => {
+  // The most each field can show, all of it a character that HTML-escapes to six (`"` → &quot;).
+  const worst = (max: number) => '"'.repeat(max);
+  const longId = (n: number, tag: string) => `${tag}-${'x'.repeat(40)}-${String(n)}`;
+  const heavy = (id: string): DigestJobLine => ({
+    id,
+    title: worst(SHOW_MAX.title * 2),
+    company: worst(SHOW_MAX.company * 2),
+    fitScore: 10,
+    luckScore: 10,
+    reason: worst(SHOW_MAX.reason * 2),
+    shortfall: worst(SHOW_MAX.reason * 2),
+  });
+  const jobs = (tag: string) => Array.from({ length: 10 }, (_, i) => heavy(longId(i, tag)));
+
+  it('keeps html and text within 100,000 characters', () => {
+    const out = renderDigest(
+      input({
+        partial: true,
+        apply: { jobs: jobs('a'), total: 999 },
+        nearMiss: { jobs: jobs('n'), total: 999 },
+        wildcard: { jobs: jobs('w'), total: 999 },
+        sources: Array.from({ length: 30 }, (_, i) => ({
+          id: worst(200) + String(i),
+          status: 'failing',
+          errorCode: worst(200),
+        })),
+        run: {
+          ...RUN,
+          errors: Array.from({ length: 50 }, () => ({ sourceId: worst(200), code: worst(200) })),
+        },
+        spend: { spendPence: 1499, capPence: 1500 },
+      }),
+    );
+    expect(out.html.length).toBeLessThanOrEqual(100_000);
+    expect(out.text.length).toBeLessThanOrEqual(100_000);
+    expect(out.html.length).toBeGreaterThan(50_000); // the fixture really is large
+  });
+
+  it('shows at most the clamped length of each field, with an ellipsis', () => {
+    const out = renderDigest(
+      input({ apply: { jobs: [job('a1', { title: 'T'.repeat(500) })], total: 1 } }),
+    );
+    expect(out.text).toContain(`${'T'.repeat(SHOW_MAX.title - 1)}…`);
+    expect(out.text).not.toContain('T'.repeat(SHOW_MAX.title));
   });
 });

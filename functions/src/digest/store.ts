@@ -34,7 +34,8 @@ export interface DigestStore {
   recentRuns(): Promise<StoredDigestRun[]>;
   /** Open jobs of a verdict judged since `since`, newest judged first. */
   jobsSince(verdict: DigestVerdict, since: Date): Promise<DigestJobList>;
-  usage(now: Date): Promise<{ spendPence: number; capPence: number }>;
+  /** This month's spend; `null` when the document exists but is invalid (the spend is unknown). */
+  usage(now: Date): Promise<{ spendPence: number; capPence: number } | null>;
   sources(): Promise<DigestSourceLine[]>;
   waitingForDescription(): Promise<number>;
 }
@@ -146,12 +147,15 @@ export function firestoreDigestStore(db: Firestore): DigestStore {
       if (parsed?.success) {
         return { spendPence: parsed.data.spendPence, capPence: parsed.data.capPence };
       }
-      if (parsed) log.warn('store.invalid_doc', { collection: 'usage', count: 1 });
+      if (parsed) {
+        log.warn('store.invalid_doc', { collection: 'usage', count: 1 });
+        return null;
+      }
       return { spendPence: 0, capPence: DEFAULT_MONTHLY_CAP_PENCE };
     },
 
     async sources() {
-      const snapshot = await toQuery(db, digestSourcesSpec).limit(30).get();
+      const snapshot = await toQuery(db, digestSourcesSpec).limit(DIGEST.sourcesRead).get();
       const lines: DigestSourceLine[] = [];
       let invalid = 0;
       for (const doc of snapshot.docs) {

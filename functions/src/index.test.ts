@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { CALLABLE_TIMEOUT_SECONDS } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
@@ -108,6 +110,12 @@ describe('getDigest (ADR-052)', () => {
     expect(endpoint?.availableMemoryMb).toBe(512);
     expect(endpoint?.maxInstances).toBe(1);
     expect(endpoint?.concurrency).toBe(1);
+  });
+
+  it('sets cors: false in its options (the manifest does not carry it, so the source is read)', () => {
+    const source = readFileSync(new URL('./digest/endpoint.ts', import.meta.url), 'utf8');
+    const options = /onRequest\(\s*\{([\s\S]*?)\},\s*async/.exec(source)?.[1] ?? '';
+    expect(options).toMatch(/^\s*cors: false,$/m);
   });
 
   it('mounts the HMAC secret and nothing else, in particular no model key', () => {
