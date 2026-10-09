@@ -133,8 +133,8 @@ export function staleReservationIds(
 
 // ---- Daily caps (M6, ADR-047) ----
 
-/** Purposes with their own daily cap besides the monthly one: `alertParse` now, `lookup` in 6B. */
-export const DAILY_CAP_KEYS = ['alertParse', 'lookup'] as const;
+/** Purposes with their own daily cap besides the monthly one: `alertParse`, `lookup` and `application` (M7: CV writing and answers). */
+export const DAILY_CAP_KEYS = ['alertParse', 'lookup', 'application'] as const;
 export type DailyCapKey = (typeof DAILY_CAP_KEYS)[number];
 
 /** A reservation belongs to a daily-capped purpose when its ID starts with `<key>-`. */

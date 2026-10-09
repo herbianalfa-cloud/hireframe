@@ -17,6 +17,10 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   ingestEmailJobs: 120,
   /** An HTTPS function: the digest reads Firestore and renders; no model call. */
   getDigest: 60,
+  /** The owner's pipeline actions; answers go through the `answerFact` model call (M7). */
+  application: 120,
+  /** The scheduled CV worker; an `onSchedule` function, so the table is where budgets are checked. */
+  generateCvs: 540,
 } as const;
 
 export type CallableName = keyof typeof CALLABLE_TIMEOUT_SECONDS;

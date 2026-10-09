@@ -1,0 +1,464 @@
+import { z } from 'zod';
+
+import { CV_ISSUE_CODES, type CvIssueCode } from './applications.js';
+import { EMAIL, PHONE, isPhoneLike } from './pii.js';
+import type { Fact, FactContent } from './profile.js';
+
+/**
+ * Generated CV content and the rules that gate it (M7, docs/plans/m7-plan.md; PRD R10, ADR-006).
+ * The model writes `CvContent`, citing facts by their `F12` alias; code resolves the aliases,
+ * checks every claim against the facts it cites (`validateCv`), takes dates from the facts and
+ * contact details from the owner's header, and trims to one page (`trimOrder`). Pure: no I/O.
+ */
+
+export const CV_LIMITS = {
+  summary: 300,
+  role: 80,
+  org: 80,
+  bullet: 220,
+  bulletsPerEntry: 5,
+  experienceEntries: 4,
+  projectEntries: 3,
+  educationLine: 160,
+  educationEntries: 3,
+  skillLabel: 40,
+  skills: 16,
+  noteParagraph: 600,
+  noteParagraphsMin: 2,
+  noteParagraphsMax: 4,
+  /** Citations on one text. */
+  refs: 8,
+  /** Longest alias the model may write (`F999`); anything longer is cut by the schema. */
+  alias: 8,
+} as const;
+
+/** The fact types a heading or an education line may cite; a skill cites `skill` facts. */
+export const HEADING_FACT_TYPES: readonly Fact['type'][] = ['experience', 'education', 'project'];
+export const SKILL_FACT_TYPES: readonly Fact['type'][] = ['skill'];
+
+// ---- Schemas ----
+
+/**
+ * One builder, two strictness levels. `strict` is the stored shape (every limit enforced). The
+ * loose one is what the model's output is parsed with: the structure is checked, the limits and
+ * the minimum of one citation are left to `validateCv`, so a too-long or uncited output becomes
+ * an issue code for the retry instead of an unusable parse.
+ */
+function contentSchema(strict: boolean) {
+  const text = (max: number) =>
+    strict ? z.string().trim().min(1).max(max) : z.string().max(max * 4);
+  const ref = z.string().max(strict ? CV_LIMITS.alias : 40);
+  const refs = strict
+    ? z.array(ref).min(1).max(CV_LIMITS.refs)
+    : z.array(ref).max(CV_LIMITS.refs * 4);
+  const list = <T extends z.ZodType>(item: T, min: number, max: number) =>
+    strict ? z.array(item).min(min).max(max) : z.array(item).max(max * 4);
+
+  const cited = (max: number) => z.strictObject({ text: text(max), factRefs: refs });
+  const entry = (maxEntries: number) =>
+    list(
+      z.strictObject({
+        heading: z.strictObject({
+          role: text(CV_LIMITS.role),
+          org: text(CV_LIMITS.org),
+          factRef: ref,
+        }),
+        bullets: list(cited(CV_LIMITS.bullet), 0, CV_LIMITS.bulletsPerEntry),
+      }),
+      0,
+      maxEntries,
+    );
+
+  return z.strictObject({
+    summary: cited(CV_LIMITS.summary),
+    experience: entry(CV_LIMITS.experienceEntries),
+    projects: entry(CV_LIMITS.projectEntries),
+    education: list(
+      z.strictObject({ line: text(CV_LIMITS.educationLine), factRef: ref }),
+      0,
+      CV_LIMITS.educationEntries,
+    ),
+    skills: list(
+      z.strictObject({ label: text(CV_LIMITS.skillLabel), factRefs: refs }),
+      0,
+      CV_LIMITS.skills,
+    ),
+    coverNote: z.strictObject({
+      paragraphs: list(
+        cited(CV_LIMITS.noteParagraph),
+        CV_LIMITS.noteParagraphsMin,
+        CV_LIMITS.noteParagraphsMax,
+      ),
+    }),
+  });
+}
+
+/** The model's output, limits enforced: also the shape of what is stored once validated. */
+export const CvContentSchema = contentSchema(true);
+export type CvContent = z.infer<typeof CvContentSchema>;
+
+/** What the worker parses the model's output with; `validateCv` then applies the limits. */
+export const CvContentShapeSchema = contentSchema(false);
+
+/** Content after the one-page trim: the summary is the last thing `trimOrder` removes. */
+export const TrimmedCvContentSchema = z.strictObject({
+  ...CvContentSchema.shape,
+  summary: CvContentSchema.shape.summary.nullable(),
+});
+export type TrimmedCvContent = z.infer<typeof TrimmedCvContentSchema>;
+
+const HTTPS_URL = z
+  .url({ protocol: /^https$/ })
+  .max(200)
+  .regex(/^https:\/\/\S+$/);
+
+/**
+ * `profile/cvHeader`: the contact block code puts at the top of every CV. The model never sees
+ * it and never writes contact details (`contact_in_text`).
+ */
+export const CvHeaderSchema = z.strictObject({
+  name: z.string().trim().min(1).max(80),
+  email: z.email().max(120),
+  phone: z.string().trim().min(1).max(40).exactOptional(),
+  location: z.string().trim().min(1).max(80).exactOptional(),
+  links: z.array(HTTPS_URL).max(3).exactOptional(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  schemaVersion: z.literal(1),
+});
+export type CvHeader = z.infer<typeof CvHeaderSchema>;
+
+export const CV_FILE_KINDS = ['cv', 'cover-note'] as const;
+export type CvFileKind = (typeof CV_FILE_KINDS)[number];
+export const CV_FILE_FORMATS = ['pdf', 'docx'] as const;
+export type CvFileFormat = (typeof CV_FILE_FORMATS)[number];
+
+/** `<jobId>-v<n>`. */
+export function cvId(jobId: string, version: number): string {
+  return `${jobId}-v${String(version)}`;
+}
+
+/** `cvs/{cvId}`: one generated CV and cover note, kept as a version. */
+export const CvDocSchema = z.strictObject({
+  jobId: z.string().min(1),
+  /** The `n` in the `cvId`; counts up per job, and a regenerate adds one. */
+  applicationVersion: z.int().min(1),
+  /** The content as rendered, after any trim. */
+  content: TrimmedCvContentSchema,
+  /** Alias → fact ID, as the model saw it, so the citations can be traced later. */
+  aliases: z.record(z.string(), z.string().min(1)),
+  /** Every fact ID the content cites. */
+  factIds: z.array(z.string().min(1)).max(200),
+  storagePaths: z.strictObject({
+    cvPdf: z.string().min(1),
+    cvDocx: z.string().min(1),
+    notePdf: z.string().min(1),
+    noteDocx: z.string().min(1),
+  }),
+  /** `trimOrder` steps the one-page fit applied. */
+  trimmed: z.int().min(0),
+  notes: z.string().trim().min(1).max(500).exactOptional(),
+  model: z.string().min(1),
+  costPence: z.number().min(0),
+  createdAt: z.date(),
+  schemaVersion: z.literal(1),
+});
+export type CvDoc = z.infer<typeof CvDocSchema>;
+
+// ---- Dates ----
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatPartialDate(value: string): string {
+  const [year = '', month] = value.split('-');
+  return month === undefined ? year : `${MONTHS[Number(month) - 1] ?? month} ${year}`;
+}
+
+/** "Oct 2023 – May 2024", from the cited heading fact's dates, never from model text. */
+export function formatFactDates(dates: FactContent['dates']): string {
+  const { start, end } = dates;
+  if (start !== undefined && end !== undefined) {
+    return `${formatPartialDate(start)} – ${end === 'present' ? 'Present' : formatPartialDate(end)}`;
+  }
+  if (start !== undefined) return `${formatPartialDate(start)} – Present`;
+  if (end !== undefined) return end === 'present' ? 'Present' : formatPartialDate(end);
+  return '';
+}
+
+// ---- Validation ----
+
+/** The part of a fact `validateCv` reads. `status` is there so an archived fact can't be cited. */
+export type CvFact = Pick<Fact, 'type' | 'text' | 'evidence' | 'status'> & { id: string };
+
+export interface CvIssue {
+  /** Where, e.g. `experience[0].bullets[2]`. Never the offending text. */
+  path: string;
+  code: CvIssueCode;
+}
+
+export type CvValidation = { ok: true } | { ok: false; issues: CvIssue[] };
+
+/** A figure the way a reader would compare it: `12k` and `12,000` are the same, `30%` is not `30`. */
+const FIGURE =
+  /(?<![A-Za-z0-9.])([£$€]?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(%|\s?per ?cent\b|[kKmM]|bn)?(?![A-Za-z0-9])/g;
+
+const UNIT_FACTOR: Readonly<Record<string, number>> = { k: 1e3, m: 1e6, bn: 1e9 };
+
+/** Every figure in `text` as `plain:12000`, `percent:30` or `money:50000`. */
+export function figuresIn(text: string): Set<string> {
+  const figures = new Set<string>();
+  for (const match of text.matchAll(FIGURE)) {
+    const [, currency = '', whole = '', fraction = '', unit = ''] = match;
+    const base = Number(`${whole.replaceAll(',', '')}${fraction}`);
+    const lower = unit.trim().toLowerCase();
+    const isPercent = lower === '%' || lower.startsWith('per');
+    const value = Number((base * (UNIT_FACTOR[lower] ?? 1)).toFixed(6));
+    const kind = isPercent ? 'percent' : currency === '' ? 'plain' : 'money';
+    figures.add(`${kind}:${String(value)}`);
+  }
+  return figures;
+}
+
+const URL_LIKE =
+  /\b(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|co\.uk|org|net|io|dev|app|ai|uk|me|ly|xyz|info|eu|gov|edu)\b/i;
+
+/** An email, a phone number or a web address: contact details come only from the header. */
+export function hasContactDetails(text: string): boolean {
+  if (text.match(EMAIL) !== null) return true;
+  if ((text.match(PHONE) ?? []).some(isPhoneLike)) return true;
+  return URL_LIKE.test(text);
+}
+
+interface Cite {
+  /** For issues about the citation itself. */
+  path: string;
+  /** Model texts under this citation, each with its path (length limits are reported per text). */
+  texts: { path: string; value: string; max: number }[];
+  refs: readonly string[];
+  /** Fact types the cited facts must have; `undefined` for any. */
+  types?: readonly Fact['type'][];
+  /** The most citations allowed. */
+  maxRefs: number;
+}
+
+function cites(content: CvContent): Cite[] {
+  const out: Cite[] = [
+    {
+      path: 'summary',
+      texts: [{ path: 'summary', value: content.summary.text, max: CV_LIMITS.summary }],
+      refs: content.summary.factRefs,
+      maxRefs: CV_LIMITS.refs,
+    },
+  ];
+  const entries = (section: 'experience' | 'projects') => {
+    content[section].forEach((entry, i) => {
+      const base = `${section}[${String(i)}]`;
+      out.push({
+        path: `${base}.heading`,
+        texts: [
+          { path: `${base}.heading.role`, value: entry.heading.role, max: CV_LIMITS.role },
+          { path: `${base}.heading.org`, value: entry.heading.org, max: CV_LIMITS.org },
+        ],
+        refs: entry.heading.factRef === '' ? [] : [entry.heading.factRef],
+        types: HEADING_FACT_TYPES,
+        maxRefs: 1,
+      });
+      entry.bullets.forEach((bullet, j) => {
+        const path = `${base}.bullets[${String(j)}]`;
+        out.push({
+          path,
+          texts: [{ path, value: bullet.text, max: CV_LIMITS.bullet }],
+          refs: bullet.factRefs,
+          maxRefs: CV_LIMITS.refs,
+        });
+      });
+    });
+  };
+  entries('experience');
+  entries('projects');
+  content.education.forEach((entry, i) => {
+    const path = `education[${String(i)}]`;
+    out.push({
+      path,
+      texts: [{ path, value: entry.line, max: CV_LIMITS.educationLine }],
+      refs: entry.factRef === '' ? [] : [entry.factRef],
+      types: HEADING_FACT_TYPES,
+      maxRefs: 1,
+    });
+  });
+  content.skills.forEach((skill, i) => {
+    const path = `skills[${String(i)}]`;
+    out.push({
+      path,
+      texts: [{ path, value: skill.label, max: CV_LIMITS.skillLabel }],
+      refs: skill.factRefs,
+      types: SKILL_FACT_TYPES,
+      maxRefs: CV_LIMITS.refs,
+    });
+  });
+  content.coverNote.paragraphs.forEach((paragraph, i) => {
+    const path = `coverNote.paragraphs[${String(i)}]`;
+    out.push({
+      path,
+      texts: [{ path, value: paragraph.text, max: CV_LIMITS.noteParagraph }],
+      refs: paragraph.factRefs,
+      maxRefs: CV_LIMITS.refs,
+    });
+  });
+  return out;
+}
+
+function countIssues(content: CvContent): CvIssue[] {
+  const issues: CvIssue[] = [];
+  const over = (path: string, count: number, max: number, min = 0) => {
+    if (count > max || count < min) issues.push({ path, code: 'too_long' });
+  };
+  over('experience', content.experience.length, CV_LIMITS.experienceEntries);
+  over('projects', content.projects.length, CV_LIMITS.projectEntries);
+  over('education', content.education.length, CV_LIMITS.educationEntries);
+  over('skills', content.skills.length, CV_LIMITS.skills);
+  over(
+    'coverNote.paragraphs',
+    content.coverNote.paragraphs.length,
+    CV_LIMITS.noteParagraphsMax,
+    CV_LIMITS.noteParagraphsMin,
+  );
+  for (const section of ['experience', 'projects'] as const) {
+    content[section].forEach((entry, i) => {
+      over(`${section}[${String(i)}].bullets`, entry.bullets.length, CV_LIMITS.bulletsPerEntry);
+    });
+  }
+  return issues;
+}
+
+/**
+ * Whether `content` may be rendered, given the aliases the model saw (alias → fact ID) and the
+ * facts (archived ones included, so a fact archived since the call is caught). Pure; never throws.
+ * Issues name a path and a code only, never the offending text, so they are safe to log and to
+ * hand back to the model as codes.
+ */
+export function validateCv(
+  content: CvContent,
+  aliases: ReadonlyMap<string, string>,
+  facts: readonly CvFact[],
+): CvValidation {
+  const byId = new Map(facts.map((fact) => [fact.id, fact]));
+  const issues: CvIssue[] = countIssues(content);
+  const add = (path: string, code: CvIssueCode) => {
+    if (!issues.some((issue) => issue.path === path && issue.code === code)) {
+      issues.push({ path, code });
+    }
+  };
+
+  for (const cite of cites(content)) {
+    if (cite.refs.length === 0) add(cite.path, 'uncited');
+    if (cite.refs.length > cite.maxRefs) add(cite.path, 'too_long');
+    for (const text of cite.texts) {
+      if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
+      if (hasContactDetails(text.value)) add(text.path, 'contact_in_text');
+    }
+
+    const cited: CvFact[] = [];
+    for (const ref of cite.refs) {
+      const id = aliases.get(ref);
+      const fact = id === undefined ? undefined : byId.get(id);
+      if (fact?.status !== 'active') {
+        add(cite.path, 'unknown_fact');
+        continue;
+      }
+      if (cite.types !== undefined && !cite.types.includes(fact.type)) {
+        add(cite.path, 'wrong_fact_type');
+      }
+      cited.push(fact);
+    }
+
+    const supported = figuresIn(cited.map((fact) => `${fact.text}\n${fact.evidence}`).join('\n'));
+    for (const text of cite.texts) {
+      for (const figure of figuresIn(text.value)) {
+        if (!supported.has(figure)) add(text.path, 'unsupported_number');
+      }
+    }
+  }
+  return issues.length === 0 ? { ok: true } : { ok: false, issues };
+}
+
+/** The distinct codes of `issues`, in the order the codes are declared: what the retry appends. */
+export function issueCodes(issues: readonly CvIssue[]): CvIssueCode[] {
+  const present = new Set(issues.map((issue) => issue.code));
+  return CV_ISSUE_CODES.filter((code) => present.has(code));
+}
+
+/** Every fact ID `content` cites, resolved through `aliases`, sorted and distinct. */
+export function citedFactIds(content: CvContent, aliases: ReadonlyMap<string, string>): string[] {
+  const ids = new Set<string>();
+  for (const cite of cites(content)) {
+    for (const ref of cite.refs) {
+      const id = aliases.get(ref);
+      if (id !== undefined) ids.add(id);
+    }
+  }
+  return [...ids].sort();
+}
+
+// ---- One-page trim ----
+
+export type TrimStep =
+  | { kind: 'bullet'; section: 'experience'; entry: number; index: number }
+  | { kind: 'project'; index: number }
+  | { kind: 'skill'; index: number }
+  | { kind: 'summary' };
+
+const KEPT_SKILLS = 10;
+
+/**
+ * The removals that make a long CV shorter, in the order they are tried. Deterministic, so the
+ * same content always trims the same way:
+ *   1. the last bullet of the experience entry with the most bullets (the later entry on a tie),
+ *      repeated until each entry has one bullet left;
+ *   2. then projects, last first;
+ *   3. then skills beyond the first 10, last first;
+ *   4. then the summary.
+ * Headings and education are never removed. Each step refers to the content as the steps before
+ * it left it, so apply them in order (`applyTrim`).
+ */
+export function trimOrder(content: CvContent): TrimStep[] {
+  const steps: TrimStep[] = [];
+  const counts = content.experience.map((entry) => entry.bullets.length);
+  for (;;) {
+    let longest = -1;
+    counts.forEach((count, entry) => {
+      if (count > 1 && (longest === -1 || count >= (counts[longest] ?? 0))) longest = entry;
+    });
+    if (longest === -1) break;
+    const index = (counts[longest] ?? 1) - 1;
+    steps.push({ kind: 'bullet', section: 'experience', entry: longest, index });
+    counts[longest] = index;
+  }
+  for (let index = content.projects.length - 1; index >= 0; index -= 1) {
+    steps.push({ kind: 'project', index });
+  }
+  for (let index = content.skills.length - 1; index >= KEPT_SKILLS; index -= 1) {
+    steps.push({ kind: 'skill', index });
+  }
+  steps.push({ kind: 'summary' });
+  return steps;
+}
+
+/** `content` with the first `count` steps of `trimOrder(content)` applied. Does not mutate. */
+export function applyTrim(content: CvContent, count: number): TrimmedCvContent {
+  const steps = trimOrder(content).slice(0, Math.max(0, count));
+  const experience = content.experience.map((entry) => ({
+    ...entry,
+    bullets: [...entry.bullets],
+  }));
+  let projects = [...content.projects];
+  let skills = [...content.skills];
+  let summary: CvContent['summary'] | null = content.summary;
+  for (const step of steps) {
+    if (step.kind === 'bullet') experience[step.entry]?.bullets.splice(step.index, 1);
+    else if (step.kind === 'project') projects = projects.filter((_, i) => i !== step.index);
+    else if (step.kind === 'skill') skills = skills.filter((_, i) => i !== step.index);
+    else summary = null;
+  }
+  return { ...content, experience, projects, skills, summary };
+}

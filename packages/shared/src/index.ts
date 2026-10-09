@@ -1,8 +1,10 @@
+export * from './applications.js';
 export * from './atomicity.js';
 export * from './candidate.js';
 export * from './callables.js';
 export { AppConfigSchema, type AppConfig } from './config.js';
 export * from './criteria.js';
+export * from './cv.js';
 export * from './dedupe.js';
 export * from './digest.js';
 export * from './alerts/linkedin.js';

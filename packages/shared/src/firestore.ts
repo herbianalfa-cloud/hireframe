@@ -18,6 +18,8 @@ export const COLLECTIONS = {
   nonces: 'nonces',
   /** Server-only: one doc per ingested alert email, counts only (ADR-047). TTL on `expireAt`. */
   alertMessages: 'alertMessages',
+  /** One per job the owner chose to apply to; the stage moves on the server (M7). */
+  applications: 'applications',
 } as const;
 
 /** Region of the callable functions (ADR-017). Lives here, a pure module, so the app shell can import it without pulling in the schemas. */
@@ -28,6 +30,8 @@ export const DOCS = {
   appConfig: `${COLLECTIONS.config}/app`,
   criteriaCurrent: `${COLLECTIONS.criteria}/current`,
   profileMain: `${COLLECTIONS.profile}/main`,
+  /** The contact block code puts on every generated CV (M7). */
+  cvHeader: `${COLLECTIONS.profile}/cvHeader`,
   scanLock: `${COLLECTIONS.locks}/scan`,
 } as const;
 
@@ -59,6 +63,8 @@ export const PATHS = {
   company: (companyId: string) => `${COLLECTIONS.companies}/${companyId}`,
   nonce: (nonce: string) => `${COLLECTIONS.nonces}/${nonce}`,
   alertMessage: (hash: string) => `${COLLECTIONS.alertMessages}/${hash}`,
+  application: (jobId: string) => `${COLLECTIONS.applications}/${jobId}`,
+  cv: (cvId: string) => `${COLLECTIONS.cvs}/${cvId}`,
 } as const;
 
 /** Cloud Storage object paths (storage.rules). */
@@ -67,4 +73,7 @@ export const STORAGE_PATHS = {
   profileDocumentsPrefix: 'profile/documents/',
   /** Uploaded CV: `profile/documents/{docId}/cv.pdf` or `cv.docx`. */
   profileDocument: (docId: string, kind: 'pdf' | 'docx') => `profile/documents/${docId}/cv.${kind}`,
+  /** Generated files: `cvs/{cvId}/cv.pdf`, `cover-note.docx`, … (server-written, owner-read). */
+  cvFile: (cvId: string, kind: 'cv' | 'cover-note', format: 'pdf' | 'docx') =>
+    `cvs/${cvId}/${kind}.${format}`,
 } as const;
