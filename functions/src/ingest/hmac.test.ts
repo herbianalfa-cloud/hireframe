@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import { INGEST_WIRE, signingString } from '@hireframe/shared';
+import { DIGEST_WIRE, INGEST_WIRE, signingString } from '@hireframe/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { HMAC } from '../config.js';
@@ -160,5 +160,121 @@ describe('verifyRequest (ADR-046)', () => {
     it('still fails for an otherwise different secret', () => {
       expect(verify(signed(), NOW, `${SECRET}x\n`)).toMatchObject({ ok: false, status: 401 });
     });
+  });
+});
+
+describe('the digest purpose (digest.v1., domain separation)', () => {
+  const DIGEST_BODY = JSON.stringify({ kind: 'morning', day: '2026-10-07' });
+  const headersFor = (signature: string, nonce = NONCE, timestamp?: string) => {
+    const ts = timestamp ?? String(Math.floor(NOW.getTime() / 1000));
+    const map: Record<string, string> = {
+      'x-hireframe-timestamp': ts,
+      'x-hireframe-nonce': nonce,
+      'x-hireframe-signature': signature,
+    };
+    return (name: string) => map[name];
+  };
+  const digestRequest = (
+    options: { body?: string; timestamp?: string; sentBody?: Buffer } = {},
+  ): SignedRequest => {
+    const timestamp = options.timestamp ?? String(Math.floor(NOW.getTime() / 1000));
+    const body = options.body ?? DIGEST_BODY;
+    return {
+      method: 'POST',
+      contentType: 'application/json',
+      rawBody: options.sentBody ?? Buffer.from(body, 'utf8'),
+      header: headersFor(signRequest(SECRET, timestamp, NONCE, body, 'digest'), NONCE, timestamp),
+    };
+  };
+  const verifyDigest = (request: SignedRequest, now = NOW) =>
+    verifyRequest(request, SECRET, now, timingSafeEqual, 'digest');
+
+  it('signs digest.v1.<timestamp>.<nonce>.<raw body>', () => {
+    const timestamp = String(Math.floor(NOW.getTime() / 1000));
+    expect(signRequest(SECRET, timestamp, NONCE, DIGEST_BODY, 'digest')).toBe(
+      createHmac('sha256', SECRET)
+        .update(signingString(timestamp, NONCE, DIGEST_BODY, 'digest'))
+        .digest('hex'),
+    );
+    expect(signingString(timestamp, NONCE, DIGEST_BODY, 'digest')).toMatch(/^digest\.v1\.\d+\./);
+  });
+
+  it('accepts a digest-signed request and returns its nonce', () => {
+    expect(verifyDigest(digestRequest())).toEqual({ ok: true, nonce: NONCE });
+  });
+
+  it('refuses an ingest-signed request, and ingest refuses a digest-signed one', () => {
+    const ingestSigned = signed({ body: DIGEST_BODY });
+    expect(verifyDigest(ingestSigned)).toMatchObject({
+      ok: false,
+      status: 401,
+      failure: 'signature',
+    });
+    expect(verify(digestRequest())).toMatchObject({
+      ok: false,
+      status: 401,
+      failure: 'signature',
+    });
+  });
+
+  it('gives different signatures for the same secret, time, nonce and body', () => {
+    const ts = '1760000000';
+    expect(signRequest(SECRET, ts, NONCE, DIGEST_BODY, 'digest')).not.toBe(
+      signRequest(SECRET, ts, NONCE, DIGEST_BODY),
+    );
+  });
+
+  it('refuses a changed body byte, a different secret, and a changed timestamp', () => {
+    expect(
+      verifyDigest(
+        digestRequest({ sentBody: Buffer.from(DIGEST_BODY.replace('morning', 'fallback')) }),
+      ),
+    ).toMatchObject({ ok: false, status: 401 });
+    expect(
+      verifyRequest(digestRequest(), 'b'.repeat(64), NOW, timingSafeEqual, 'digest'),
+    ).toMatchObject({ ok: false, status: 401 });
+    const request = digestRequest();
+    expect(
+      verifyDigest({
+        ...request,
+        header: (n) =>
+          n === 'x-hireframe-timestamp'
+            ? String(Math.floor(NOW.getTime() / 1000) + 1)
+            : request.header(n),
+      }),
+    ).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it('applies the same 300 s skew', () => {
+    const at = (offset: number) =>
+      digestRequest({ timestamp: String(Math.floor(NOW.getTime() / 1000) + offset) });
+    expect(verifyDigest(at(-300)).ok).toBe(true);
+    expect(verifyDigest(at(300)).ok).toBe(true);
+    expect(verifyDigest(at(-301))).toMatchObject({ ok: false, status: 401, failure: 'skew' });
+    expect(verifyDigest(at(301))).toMatchObject({ ok: false, status: 401, failure: 'skew' });
+  });
+
+  it('refuses other methods, other content types and bodies over the digest limit', () => {
+    expect(verifyDigest({ ...digestRequest(), method: 'GET' })).toMatchObject({ status: 400 });
+    expect(verifyDigest({ ...digestRequest(), contentType: 'text/plain' })).toMatchObject({
+      status: 400,
+    });
+    const big = JSON.stringify({
+      kind: 'morning',
+      day: '2026-10-07',
+      pad: 'x'.repeat(DIGEST_WIRE.serverMaxBytes),
+    });
+    expect(verifyDigest(digestRequest({ body: big }))).toMatchObject({ ok: false, status: 413 });
+  });
+
+  it('agrees on the fixed vector 7B.2 pins in bridge-compat.test.ts', () => {
+    const secret = 'c0ffee11'.repeat(8);
+    const body = '{"kind":"morning","day":"2026-10-07"}';
+    expect(signRequest(secret, '1760000000', NONCE, body, 'digest')).toBe(
+      '4ff6dc7afc9c6fb781024ed08e74ad5d722a1c545dd183f87b19610c8e5a94d2',
+    );
+    expect(signRequest(secret, '1760000000', NONCE, body)).toBe(
+      'a5408cc32b2074752944e5128744c06835e22da069dba160ba178c3fef6a31c8',
+    );
   });
 });

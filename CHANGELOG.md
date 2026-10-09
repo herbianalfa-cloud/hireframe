@@ -6,6 +6,22 @@ All notable changes. Format: Keep a Changelog, SemVer.
 ### Changed
 - Docs: billing-guards plan for M8 (`docs/plans/m8-billing-guards.md`) and a new hard rule against self-triggering code in `CLAUDE.md`.
 
+## [0.7.1] - 2026-10-09
+### Added
+- **M7 PR 7B: the morning digest** (ADR-052; plan `docs/plans/m7-plan.md`). It ships without the Pipeline line, which arrives with 7D.
+  - **`getDigest`** (HTTPS, HMAC-authenticated, no model call, max instances 1). POST `{ kind: 'morning' | 'fallback', day }` signed with the new `digest.v1.` prefix over the shared secret and nonce store; an ingest-signed request is refused here and the reverse. The `day` must be the server's London day. It returns `{ state: ready | failed | in_progress | missing, subject, html, text }`: the newest scheduled run that started before 12:00 London, the open jobs judged since the previous morning run finished (Apply, Near misses, Wildcards, "+n more" exact), run health, spend with the 80% warning and the deep-reads-paused line, and the run's error codes. Every job-derived string is escaped and has URLs removed; links go only to the app.
+  - **Apps Script mailer** (`apps-script/src/digest.ts`, pure core with injected clock, network, properties, lock, signer and mail). `digestMorning` near 07:50 and `digestFallback` near 08:20, weekdays in London only (the day is computed with `Europe/London` named, not the script time zone). Morning mails `ready`, `failed` and `missing` and leaves `in_progress` to the fallback; the fallback mails whatever comes back and, if the request fails, its own "Hireframe digest unavailable (code)" email, so the digest is never silently absent. Both hold the script lock and skip when the Script Property `lastDigestDay` is today; the morning waits 20 s and skips, the fallback and `digestNow` wait 120 s and throw. A fallback whose full digest can't be sent mails a text-only `send_failed` notice. `html` over 100,000 characters is mailed as text only (the server caps it at 100,000 too, and clamps displayed fields so the worst case fits). At most one request per run and no retry. `digestNow` is a manual test and logs the London ISO weekday. An invalid `usage/{month}` renders "Spend unknown".
+  - **Mail goes only to `Session.getEffectiveUser()`**; no address is in the code or the properties. Scopes gain exactly `script.send_mail` and `userinfo.email`. New Script Property `HIREFRAME_DIGEST_URL`.
+  - **`setup`** creates exactly three triggers by handler name (`run`, `digestMorning`, `digestFallback`), skips any that exist and deletes none; running it twice leaves three. No other handler touches `ScriptApp`.
+  - **Shared and signing:** `signingPrefix` / `signingString` / `signRequest` / `verifyRequest` take a `SignaturePurpose`; `createSigner` takes the purpose (default `ingest`). The digest request body limit is 2,000 bytes.
+  - Tests: state on a fake clock, render escaping and every section, build, handler, endpoint, queries and the index test; the mailer (weekend, each state, fallback, unavailable email, lock, no retry); triggers twice; a digest signing vector in `bridge-compat.test.ts` in both directions and the glue in `main.ts`; the scopes, trigger-API and recipient guards in `apps-script-tooling.test.ts`; an emulator test of `getDigest`.
+- `node scripts/sign-test-alert.ts digest [--kind fallback]`, and `npm run dev` seeds one succeeded scheduled morning run for today (London), so a signed digest request against it returns `ready`.
+
+### Changed
+- A morning run document that fails `RunSchema` is a `failed` digest with the error code `run_invalid` (it was read as no run, so `missing`). A document whose `trigger` or `startedAt` can't be read is skipped and counted.
+- 6A's `setup` no longer deletes and recreates the `run` trigger; it creates only the triggers that are missing.
+- Docs: ADR-052, PRD R9, ARCHITECTURE (`getDigest`, the Gmail bridge's digest half), SECURITY (Gmail over-access, HMAC rows, checklist), RUNBOOK Part I steps I3 to I5 (91 to 93) and a Recovery entry, CLAUDE.md commands.
+
 ## [0.7.0] - 2026-10-08
 ### Changed
 - **M7 PR 7A: Today summary bar, loaded after `hf:usable`** (ADR-051; plan `docs/plans/m7-plan.md`).

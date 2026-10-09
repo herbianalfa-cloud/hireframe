@@ -6,6 +6,19 @@
 
 export const SIGNATURE_VERSION = 'v1';
 
+/**
+ * What a signature is for. The purpose is the first thing in the signed bytes, so a request
+ * signed for one endpoint can never verify at another with the same secret (domain separation,
+ * both ways): `v1.` for ingest and `digest.v1.` for the digest never start the same way.
+ */
+export const SIGNATURE_PURPOSES = ['ingest', 'digest'] as const;
+export type SignaturePurpose = (typeof SIGNATURE_PURPOSES)[number];
+
+export const SIGNATURE_PREFIXES: Readonly<Record<SignaturePurpose, string>> = {
+  ingest: SIGNATURE_VERSION,
+  digest: `digest.${SIGNATURE_VERSION}`,
+};
+
 export const INGEST_HEADERS = {
   timestamp: 'X-Hireframe-Timestamp',
   nonce: 'X-Hireframe-Nonce',
@@ -32,14 +45,23 @@ export function trimSecret(secret: string): string {
   return secret.trim();
 }
 
-/** `v1.<timestamp>.<nonce>.`: what precedes the raw body in the signed bytes. */
-export function signingPrefix(timestamp: string, nonce: string): string {
-  return `${SIGNATURE_VERSION}.${timestamp}.${nonce}.`;
+/** `v1.<timestamp>.<nonce>.` (ingest) or `digest.v1.…`: what precedes the raw body when signing. */
+export function signingPrefix(
+  timestamp: string,
+  nonce: string,
+  purpose: SignaturePurpose = 'ingest',
+): string {
+  return `${SIGNATURE_PREFIXES[purpose]}.${timestamp}.${nonce}.`;
 }
 
-/** `v1.<timestamp>.<nonce>.<raw body>`: covers the body, the time and the nonce. */
-export function signingString(timestamp: string, nonce: string, body: string): string {
-  return `${signingPrefix(timestamp, nonce)}${body}`;
+/** `<prefix>.<timestamp>.<nonce>.<raw body>`: covers the purpose, the body, the time and the nonce. */
+export function signingString(
+  timestamp: string,
+  nonce: string,
+  body: string,
+  purpose: SignaturePurpose = 'ingest',
+): string {
+  return `${signingPrefix(timestamp, nonce, purpose)}${body}`;
 }
 
 /** UTF-8 bytes (0..255) of a string, without TextEncoder (Apps Script's V8 has none). */

@@ -3,6 +3,7 @@ import {
   JobDescriptionSchema,
   JobSchema,
   normaliseRawJob,
+  RunSchema,
   UsageSchema,
   verdictAgreement,
 } from '@hireframe/shared';
@@ -26,6 +27,7 @@ import {
   restDocument,
   toRestValue,
   usageSeedDocument,
+  morningRunSeedDocument,
 } from './dev-seed.ts';
 
 describe('isCiDeploy', () => {
@@ -202,6 +204,17 @@ describe('dev dashboard seed (M5)', () => {
     const jobs = seeded.map((item) => JobSchema.parse(item.job));
     expect(jobs.filter((job) => job.feedback)).toHaveLength(1);
     expect(verdictAgreement(jobs, now)).toMatchObject({ ratedDisagree: 1, appliedAgree: 1 });
+  });
+
+  it.each([
+    ['summer (BST)', '2026-10-07T12:00:00Z', '2026-10-07T06:30:00.000Z'],
+    ['winter (GMT)', '2026-12-02T12:00:00Z', '2026-12-02T07:30:00.000Z'],
+    ['just after midnight London in summer', '2026-10-06T23:30:00Z', '2026-10-07T06:30:00.000Z'],
+  ])('seeds a succeeded morning run at 07:30 London today: %s', (_name, nowIso, startedIso) => {
+    const { data } = morningRunSeedDocument(new Date(nowIso));
+    const run = RunSchema.parse(data);
+    expect(run).toMatchObject({ trigger: 'schedule', status: 'succeeded' });
+    expect(run.startedAt.toISOString()).toBe(startedIso);
   });
 
   it('seeds this month’s usage in the shape llm.call() expects', () => {

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { CALLABLE_TIMEOUT_SECONDS } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
@@ -68,6 +70,7 @@ describe('deployed functions (ADR-017)', () => {
     ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['lookup', ['ANTHROPIC_API_KEY']],
     ['ingestEmailJobs', ['ANTHROPIC_API_KEY', 'INGEST_HMAC_SECRET']],
+    ['getDigest', ['INGEST_HMAC_SECRET']],
   ])('%s mounts %j', (name, secrets) => {
     const endpoint = endpoints.find(([exported]) => exported === name)?.[1];
     expect(endpoint).toBeDefined();
@@ -90,5 +93,38 @@ describe('ingestEmailJobs (ADR-046)', () => {
     expect(endpoint?.maxInstances).toBe(1);
     // 2nd gen defaults to 80 concurrent requests per instance: one instance alone isn't enough.
     expect(endpoint?.concurrency).toBe(1);
+  });
+});
+
+describe('getDigest (ADR-052)', () => {
+  const endpoint = endpoints.find(([name]) => name === 'getDigest')?.[1];
+
+  it('is an HTTPS function with the shared 60 s timeout and no callable trigger', () => {
+    expect(endpoint?.httpsTrigger).toBeDefined();
+    expect(endpoint?.callableTrigger).toBeUndefined();
+    expect(endpoint?.timeoutSeconds).toBe(CALLABLE_TIMEOUT_SECONDS.getDigest);
+    expect(endpoint?.timeoutSeconds).toBe(60);
+  });
+
+  it('states 512 MiB, one instance and one request at a time', () => {
+    expect(endpoint?.availableMemoryMb).toBe(512);
+    expect(endpoint?.maxInstances).toBe(1);
+    expect(endpoint?.concurrency).toBe(1);
+  });
+
+  it('sets cors: false in its options (the manifest does not carry it, so the source is read)', () => {
+    const source = readFileSync(new URL('./digest/endpoint.ts', import.meta.url), 'utf8');
+    const options = /onRequest\(\s*\{([\s\S]*?)\},\s*async/.exec(source)?.[1] ?? '';
+    expect(options).toMatch(/^\s*cors: false,$/m);
+  });
+
+  it('mounts the HMAC secret and nothing else, in particular no model key', () => {
+    const mounted = (endpoint?.secretEnvironmentVariables ?? []).map((secret) => secret.key);
+    expect(mounted).toEqual(['INGEST_HMAC_SECRET']);
+  });
+
+  it('is not scheduled and has no event trigger (no self-triggering code)', () => {
+    expect(endpoint).not.toHaveProperty('scheduleTrigger');
+    expect(endpoint).not.toHaveProperty('eventTrigger');
   });
 });

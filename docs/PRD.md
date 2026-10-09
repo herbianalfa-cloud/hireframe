@@ -68,8 +68,8 @@ Out (later waves): see `ROADMAP.md`.
 - AC: LinkedIn `/jobs/view/{id}` URLs match jobs ingested from LinkedIn alert emails by job ID.
 
 ### R9 Digest
-- Email after each morning run: Apply (with luck score + reason), Near misses (+ what fell short), Wildcards, run health, spend.
-- AC: sent only if the run succeeded or with an explicit failure notice; never silently absent.
+- Email after each morning run, weekdays: Apply (with luck score + reason), Near misses (+ what fell short), Wildcards, run health, spend, errors. Apps Script sends it at about 07:50, and a fallback at about 08:20 sends whatever the server says if the first didn't (ADR-052). Links point into the app only.
+- AC: sent only if the run succeeded or with an explicit failure or in-progress notice; never silently absent. If the digest itself can't be fetched, the script sends a plain "Hireframe digest unavailable (code)" email.
 
 ### R10 CV tailoring (on demand)
 - For a chosen job: one-page tailored CV + short cover note, built only from profile facts, ATS-safe .docx + PDF, stored with version and linked to the job.

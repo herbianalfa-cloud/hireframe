@@ -7,3 +7,4 @@ export { rescore } from './funnel/callables.js';
 export { lookup } from './lookup/callable.js';
 export { scanNow, scheduledScan } from './scan/callables.js';
 export { ingestEmailJobs } from './ingest/endpoint.js';
+export { getDigest } from './digest/endpoint.js';

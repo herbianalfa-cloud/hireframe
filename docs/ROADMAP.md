@@ -43,6 +43,7 @@ Run `node scripts/detect-ats.ts --recheck tmp/watchlist-review.csv` on the Worka
 - The 1 request per second per host limit is per client, not per host: the scan's source clients, the ATS hydrator's client and a parallel Lookup each space their own requests, so two of them can hit one board host within a second.
 - The ATS hydrator re-fetches boards the scan already read (one request per board per client, up to 12 a run); share the board cache between the source fetch and the hydrator.
 - From the `hf:usable` plan (v0.6.3): a `limit()` on the four Today counts (for example 1,000, shown as "999+"), since each count's server work grows with matching jobs; drop the duplicate `config/app` read in SpendMeter (it reads the owner doc a second time before its usage listener); a Firestore persistent cache (ADR-038 lever 2; needs a privacy review because job data would sit in IndexedDB); count Today's lazy graph in `check:bundle` (today only the initial JS is budgeted).
+- Digest text (M7B): a mail client can still auto-link a bare domain (`acme.co`) or an email address in the plain-text part and in the HTML text, since `cleanText` strips only `http(s)://` and `www.` URLs. Decide whether to defang them (ADR-052).
 - Dedupe: the same job with a town in one source and a postcode in another is not merged.
 - Video walkthrough of the system after Wave 1 is done.
 - S3 does not see a hydrated postedAt in the same pass.

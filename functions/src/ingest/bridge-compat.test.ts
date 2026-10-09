@@ -238,3 +238,148 @@ describe('the Apps Script glue, with non-ASCII text (· and £)', () => {
     );
   });
 });
+
+describe('the digest signer ↔ the digest verifier (ADR-052)', () => {
+  const BODY = '{"kind":"morning","day":"2026-10-07"}';
+  const TIMESTAMP = '1760000000';
+
+  it('agrees on the fixed digest vector in the handoff', () => {
+    expect(signingString(TIMESTAMP, NONCE, BODY, 'digest')).toBe(
+      `digest.v1.1760000000.${NONCE}.${BODY}`,
+    );
+    const headers = createSigner(SECRET, appsScriptHmac(SECRET), 'digest').headers(
+      utf8Bytes(BODY),
+      1_760_000_000,
+      NONCE,
+    );
+    expect(headers['X-Hireframe-Signature']).toBe(
+      '4ff6dc7afc9c6fb781024ed08e74ad5d722a1c545dd183f87b19610c8e5a94d2',
+    );
+    expect(headers['X-Hireframe-Signature']).toBe(
+      signRequest(SECRET, TIMESTAMP, NONCE, BODY, 'digest'),
+    );
+  });
+
+  it('verifies at the digest endpoint and is refused by ingest, and the reverse', () => {
+    const now = new Date(1_760_000_000_000);
+    const digest = createSigner(SECRET, appsScriptHmac(SECRET), 'digest').headers(
+      utf8Bytes(BODY),
+      1_760_000_000,
+      NONCE,
+    );
+    expect(verifyRequest(asRequest(BODY, digest), SECRET, now, undefined, 'digest').ok).toBe(true);
+    expect(verifyRequest(asRequest(BODY, digest), SECRET, now).ok).toBe(false);
+
+    const ingest = createSigner(SECRET, appsScriptHmac(SECRET)).headers(
+      utf8Bytes(BODY),
+      1_760_000_000,
+      NONCE,
+    );
+    expect(ingest['X-Hireframe-Signature']).toBe(
+      'a5408cc32b2074752944e5128744c06835e22da069dba160ba178c3fef6a31c8',
+    );
+    expect(verifyRequest(asRequest(BODY, ingest), SECRET, now, undefined, 'digest').ok).toBe(false);
+  });
+
+  it('a multi-byte body signed by the script verifies at the digest endpoint', () => {
+    const body = '{"kind":"fallback","day":"2026-10-07"}';
+    const headers = createSigner(SECRET, appsScriptHmac(SECRET), 'digest').headers(
+      utf8Bytes(body),
+      Math.floor(NOW.getTime() / 1000),
+      NONCE,
+    );
+    expect(verifyRequest(asRequest(body, headers), SECRET, NOW, undefined, 'digest').ok).toBe(true);
+  });
+});
+
+describe('the digest glue in main.ts', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('posts a digest-signed request for the London day and mails only the effective user', async () => {
+    const { digestMorningHandler } = await import('../../../apps-script/src/main.js');
+    const set: Record<string, string> = {};
+    const properties: Record<string, string> = {
+      HIREFRAME_DIGEST_URL: 'https://example.invalid/getDigest',
+      HIREFRAME_HMAC_SECRET: ` ${SECRET}\n`,
+    };
+    const fetched: { url: string; options: Record<string, unknown> }[] = [];
+    const mails: Record<string, unknown>[] = [];
+    const formats: { zone: string; pattern: string; ms: number }[] = [];
+    // 2026-10-07 is a Wednesday; 06:50Z is 07:50 BST, still the 7th in London.
+    vi.stubGlobal(
+      'Date',
+      class extends Date {
+        static override now() {
+          return Date.parse('2026-10-07T06:50:00Z');
+        }
+      },
+    );
+    vi.stubGlobal('PropertiesService', {
+      getScriptProperties: () => ({
+        getProperty: (name: string) => properties[name] ?? set[name] ?? null,
+        setProperty: (name: string, value: string) => (set[name] = value),
+      }),
+    });
+    vi.stubGlobal('Logger', { log: () => undefined });
+    vi.stubGlobal('LockService', {
+      getScriptLock: () => ({ tryLock: () => true, releaseLock: () => undefined }),
+    });
+    vi.stubGlobal('Session', {
+      getEffectiveUser: () => ({ getEmail: () => 'owner@example.com' }),
+    });
+    vi.stubGlobal('MailApp', {
+      sendEmail: (message: Record<string, unknown>) => mails.push(message),
+    });
+    vi.stubGlobal('Utilities', {
+      getUuid: () => NONCE,
+      computeHmacSha256Signature: computeHmacSigned,
+      formatDate: (date: Date, zone: string, pattern: string) => {
+        formats.push({ zone, pattern, ms: date.getTime() });
+        return pattern === 'u' ? '3' : '2026-10-07';
+      },
+    });
+    vi.stubGlobal('UrlFetchApp', {
+      fetch: (url: string, options: Record<string, unknown>) => {
+        fetched.push({ url, options });
+        return {
+          getResponseCode: () => 200,
+          getContentText: () =>
+            JSON.stringify({ state: 'ready', subject: 'Digest', html: '<p>Hi</p>', text: 'Hi' }),
+        };
+      },
+    });
+
+    digestMorningHandler();
+
+    expect(formats.length).toBeGreaterThan(0);
+    for (const format of formats) expect(format.zone).toBe('Europe/London');
+    expect(fetched).toHaveLength(1);
+    const options = fetched[0]?.options as {
+      payload: number[];
+      headers: Record<string, string>;
+    };
+    expect(Buffer.from(options.payload).toString('utf8')).toBe(
+      '{"kind":"morning","day":"2026-10-07"}',
+    );
+    const request = asRequest(options.payload, options.headers);
+    expect(
+      verifyRequest(
+        request,
+        SECRET,
+        new Date(
+          options.headers['X-Hireframe-Timestamp']
+            ? Number(options.headers['X-Hireframe-Timestamp']) * 1000
+            : 0,
+        ),
+        undefined,
+        'digest',
+      ).ok,
+    ).toBe(true);
+    expect(mails).toEqual([
+      { to: 'owner@example.com', subject: 'Digest', body: 'Hi', htmlBody: '<p>Hi</p>' },
+    ]);
+    expect(Object.entries(set)).toContainEqual(['lastDigestDay', '2026-10-07']);
+  });
+});

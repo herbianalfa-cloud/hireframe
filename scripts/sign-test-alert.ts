@@ -6,6 +6,8 @@
  *   node scripts/sign-test-alert.ts waas       # the fake Work at a Startup digest (model fallback)
  *   node scripts/sign-test-alert.ts --twice    # the same signed request twice: the second is a replay
  *   node scripts/sign-test-alert.ts --id abc   # another Gmail message ID (a new message, new jobs)
+ *   node scripts/sign-test-alert.ts digest     # a signed digest request (digest.v1.): the ready HTML
+ *   node scripts/sign-test-alert.ts digest --kind fallback
  *
  * It only talks to localhost, and the secret is the emulator's placeholder, never a real one.
  */
@@ -28,25 +30,31 @@ if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) {
 }
 const project = process.env.GCLOUD_PROJECT ?? 'demo-hireframe';
 if (!project.startsWith('demo-')) throw new Error('Refusing: not a demo-* project.');
-const url = `http://${host}/${project}/europe-west2/ingestEmailJobs`;
+const digest = args.includes('digest');
+const url = `http://${host}/${project}/europe-west2/${digest ? 'getDigest' : 'ingestEmailJobs'}`;
 
 // The emulator's secrets are placeholders (scripts/prepare-dev-functions.ts).
 const SECRET = 'emulator-placeholder';
 
 const fixture = args.includes('waas') ? WAAS_ALERT : LINKEDIN_ALERT;
-const body = JSON.stringify({
-  messages: [
-    {
-      id: option('--id') ?? 'dev-alert-1',
-      receivedAt: new Date().toISOString(),
-      ...fixture,
-    },
-  ],
-});
+const londonDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(
+  new Date(),
+);
+const body = digest
+  ? JSON.stringify({ kind: option('--kind') ?? 'morning', day: londonDay })
+  : JSON.stringify({
+      messages: [
+        {
+          id: option('--id') ?? 'dev-alert-1',
+          receivedAt: new Date().toISOString(),
+          ...fixture,
+        },
+      ],
+    });
 const timestamp = String(Math.floor(Date.now() / 1000));
 const nonce = randomUUID();
 const signature = createHmac('sha256', SECRET)
-  .update(signingString(timestamp, nonce, body), 'utf8')
+  .update(signingString(timestamp, nonce, body, digest ? 'digest' : 'ingest'), 'utf8')
   .digest('hex');
 
 async function post(label: string): Promise<void> {

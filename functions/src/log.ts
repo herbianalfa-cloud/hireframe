@@ -67,7 +67,10 @@ export type LogEvent =
   | 'lookup.busy'
   | 'lookup.dropped'
   | 'lookup.ats_failed'
-  | 'lookup.pauses_not_saved';
+  | 'lookup.pauses_not_saved'
+  | 'digest.refused'
+  | 'digest.done'
+  | 'digest.failed';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

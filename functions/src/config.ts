@@ -460,3 +460,23 @@ export const LOOKUP = {
 export const LookupOverridesSchema = z
   .object({ dailyCapPence: z.number().min(0).max(200) })
   .partial();
+
+// ---- Digest (M7B, ADR-052) ----
+
+/** Where digest links point: the app, never a posting. Today opens a job with `?job=<id>`. */
+export const APP_ORIGIN = 'https://hireframe-f6b03.web.app';
+
+export const DIGEST = {
+  /** The morning run is a scheduled run that started before this London hour. */
+  morningRunBeforeHour: 12,
+  /** With no morning run by this London time (minutes after midnight, 08:15) the digest says so. */
+  missingAfterMinutes: 8 * 60 + 15,
+  /** Runs read to find today's morning run and the previous one. */
+  runsRead: 30,
+  /** Sources read for the health section. */
+  sourcesRead: 30,
+  /** Jobs listed per verdict; one more is read, so the digest can say there are more. */
+  jobsPerVerdict: 10,
+  /** Fallback look-back when there is no earlier morning run to measure from. */
+  defaultLookbackMs: 24 * 3_600_000,
+} as const;
