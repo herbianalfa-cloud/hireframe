@@ -3,6 +3,7 @@ import {
   signingPrefix,
   trimSecret,
   utf8Bytes,
+  type SignaturePurpose,
 } from '../../packages/shared/src/signing.js';
 
 /**
@@ -23,12 +24,20 @@ export interface RequestSigner {
   ) => Record<string, string>;
 }
 
-export function createSigner(secret: string, computeHmac: ComputeHmac): RequestSigner {
+/**
+ * `purpose` picks the signed prefix: `v1.` for ingest (the default), `digest.v1.` for the digest,
+ * so a signature for one endpoint is never valid at the other (ADR-052).
+ */
+export function createSigner(
+  secret: string,
+  computeHmac: ComputeHmac,
+  purpose: SignaturePurpose = 'ingest',
+): RequestSigner {
   const key = utf8Bytes(trimSecret(secret));
   return {
     headers(body, timestampSeconds, nonce) {
       const timestamp = String(timestampSeconds);
-      const signed = utf8Bytes(signingPrefix(timestamp, nonce)).concat(body);
+      const signed = utf8Bytes(signingPrefix(timestamp, nonce, purpose)).concat(body);
       return {
         'X-Hireframe-Timestamp': timestamp,
         'X-Hireframe-Nonce': nonce,
