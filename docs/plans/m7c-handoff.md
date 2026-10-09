@@ -1,4 +1,6 @@
-# M7 PR 7C: handoff from session 7C.1 to 7C.2
+# M7 PR 7C: handoff from sessions 7C.1 and 7C.2 to 7D
+
+Sections 1 and 2 below are the 7C.1 handoff to 7C.2 (what existed then). **Start at "What 7D needs" at the end** for the finished 7C.
 
 Branch `feat/m7c-cv-engine`, from `main` at `cf17ac8`. 7C.1 is schemas, pure logic, config and tests only: no new function, no model call, no prompt. Not started, on purpose: the renderer (7C.2), ADR-053, ADR-054, the CHANGELOG entry and the end-of-7C docs.
 
@@ -42,7 +44,7 @@ Branch `feat/m7c-cv-engine`, from `main` at `cf17ac8`. 7C.1 is schemas, pure log
 - `citedFactIds(content, aliases)` for `CvDoc.factIds`; `Object.fromEntries(toId)` for `CvDoc.aliases`.
 - `cvId(jobId, n)` and `STORAGE_PATHS.cvFile(...)` for the four `storagePaths`.
 - `CV_LIMITS` for the maximum-content render test; `fullCv()` in the shared fixtures is a maximum-size CV (note: its bullet texts are short, so it only tests counts, not line wrapping).
-- **`unsupported_char` is not an issue code yet.** 7C.2 must add it to `CV_ISSUE_CODES` in `applications.ts` (which also widens `ApplicationSchema.lastIssues`) and give it a fixture.
+- **`unsupported_char` was not an issue code in 7C.1.** 7C.2 added it (see below).
 - **Reservation IDs.** `dailyCapped(usage, 'application', cap)` throws unless the reservation ID starts `application-`. `llmCall` takes `deps.newId`, so the worker and the `answerFact` path must pass `newId: () => 'application-' + randomUUID()`. This is for 7D, but it is easy to miss.
 
 ## Differences from the plan
@@ -68,3 +70,40 @@ Branch `feat/m7c-cv-engine`, from `main` at `cf17ac8`. 7C.1 is schemas, pure log
 
 ## Gate (after the last code change)
 `npm run check` passed (138 files, 1,874 tests; PII scan and eval replay clean). `npm run test:rules` passed (13 files, 344 tests). `npm run build`, `npm run check:bundle` (initial JS 293.3 kB gzip) and `node scripts/smoke-functions-bundle.ts` passed. The initial JS was not compared with `main`.
+
+## Session 7C.2: the renderer (done)
+
+`functions/src/cv/render/`: `layout.ts` (blocks, styles, `makeDateOf`, `CvRenderError`, our own word-wrap and pagination), `pdf.ts`, `docx.ts`, `fit.ts`, `index.ts`, and `fixtures.ts` (test support: `FAKE_HEADER`, `FAKE_DATES`, `fakeDateOf`, `maxCv()`; not imported by any `src` file, so the bundle's fixture check stays clean).
+
+### Differences from the plan (7C.2)
+15. **Render functions take a `DateOf`, not the facts.** The plan wrote `renderCvPdf(header, content, facts)`. They take `(header, content: TrimmedCvContent, dateOf)`, where `dateOf = makeDateOf(aliases, facts)` and `facts` are `{ id, dates }` (a `Fact` with its `id` fits). The notes take `(header, coverNote)`. All four are async and reject with `CvRenderError` (`code: 'unsupported_char'`) rather than throw, so a caller handles them in one `catch`.
+16. **`fitOnePage` is `(header, content, dateOf)` and tries every step, not 12.** `trimOrder` on a maximum CV has about 26 steps (16 bullets, 3 projects, 6 skills, the summary), so "up to 12 times" could not reach a fit for content the limits allow. It stops at the first step that gives one page. It returns `{ ok: true, content, trimmed, bytes } | { ok: false, code: 'too_long' }` (the PDF bytes are the fitted ones, so the worker doesn't render the PDF twice).
+17. **Two validator changes in `shared`, to make the plan's tests true.** `unsupported_char` joins `CV_ISSUE_CODES` (which widens `ApplicationSchema.lastIssues`) and is reported at the text's path for any character outside WinAnsi, a newline and a tab included. The cover note's "at most 250 words" needed an enforcement point, so `validateCv` reports `too_long` at `coverNote.paragraphs` when the paragraphs hold more than `CV_LIMITS.noteWords` (250) words. The greeting and sign-off are not counted.
+18. **Education lines carry dates too.** The plan's "dates from the cited heading fact" named headings; an education line cites a fact too, so its dates (from `formatFactDates`) sit right-aligned like an entry's. A fact with no dates shows none.
+19. **Section order and names:** Summary, Experience, Projects, Education, Skills; a section with nothing in it is left out, and so is the summary once trimmed. Skills are one comma-separated line. The cover note has a fixed "Dear hiring team," and "Yours sincerely," around the model's paragraphs, then the owner's name.
+20. **Sizes** (plan: "10/10.5 pt"): body 10 pt on a 12.5 pt line, entry titles 10.5 bold, headings 11 bold with a rule, name 18, contact line 9.5, the note 10.5 on 14. All in `STYLES` in `layout.ts`; the DOCX uses the same numbers (exact line spacing).
+21. **PDF bytes are deterministic:** no creation or modification date is written (`updateMetadata: false`), and the file is saved without object streams so its fonts and content are checkable in a test. The DOCX is not byte-deterministic (the library stamps the time).
+22. **A word wider than a line is broken by character** instead of overflowing (a long link in the header, say).
+23. **The functions bundle did not grow in the build, but it will:** the renderer is not imported by any function in 7C, so the deploy bundle went 5,194,538 → 5,195,926 bytes. Bundling the renderer from the entry (same esbuild options, a scratch entry that re-exports `index.ts` and the renderer) gives 5,194,513 → 6,911,824 bytes: **+1,717,311 bytes (+1.64 MiB), over the 1.5 MB line.** Per the session rule nothing was restructured. See the task for 7D.2 below.
+24. **`workerStartDeadlineMs` stays at the value in `functions/src/config.ts` (210,000).** The plan text is corrected (7C.1 config bullet, 7D.2 worker step and test, the throughput risk) and ADR-053 carries the value and the new estimate: about 3–7 CVs a run (7 at 30 s a call, 5 at 50 s, 3 at 90 s).
+25. **ARCHITECTURE's `cvs/{cvId}` line is now the real shape** (difference 13 is closed), with the stack row.
+
+## What 7D needs
+
+### Exported names
+- From `@hireframe/shared`: everything listed under "What exists" and "Exported names 7C.2 needs", plus `isWinAnsi`, `isPrintable`, `wordCount` and `CV_LIMITS.noteWords`.
+- From `functions/src/cv/render/index.ts`: `fitOnePage`, `renderCvPdf`, `renderNotePdf`, `renderCvDocx`, `renderNoteDocx`, `makeDateOf`, `CvRenderError`, and the types `FitResult`, `RenderedPdf`, `DateOf`, `DatedFact`.
+- **The worker's render sequence:** parse with `CvContentShapeSchema` → `validateCv` (issue codes → retry) → re-parse with `CvContentSchema` → `dateOf = makeDateOf(new Map(toId), facts)` → `fitOnePage(header, content, dateOf)` (`too_long` → blocked) → with `fit.content`: `renderCvDocx`, `renderNotePdf(header, fit.content.coverNote)`, `renderNoteDocx`, and `fit.bytes` is the CV PDF → upload the four files → write `cvs/{cvId}` (`content: fit.content`, `trimmed: fit.trimmed`, `aliases: Object.fromEntries(toId)`, `factIds: citedFactIds(content, toId)`). A `CvRenderError` (a header with an unsupported character) is a block for the application with a message that names the header, not an invalid output: the retry cannot fix it. The validator already refuses unsupported characters in model text, so the retry can.
+- The header is `profile/cvHeader`, read and parsed with `CvHeaderSchema`; a missing one is `cv_header_missing`.
+
+### Reservation IDs for the daily cap
+`dailyCapped(usage, 'application', cap)` counts only reservations whose ID starts `application-`, and throws if the ID doesn't. Every `llmCall` for `cvWrite` and `answerFact` must pass `deps.newId: () => 'application-' + randomUUID()`. Without it the `application` daily cap would count nothing and the 60p cap would never bite.
+
+### Bundle note: a task for 7D.2
+Bundling the renderer from the entry adds about 1.72 MB (1.64 MiB) to `functions/deploy/index.js` (5.19 → 6.91 MB), over the 1.5 MB line, and it would load on every cold start of every function (the file is one bundle). **7D.2: load the renderer with a dynamic `import('./cv/render/index.js')` inside the worker.** One caveat to check first: `scripts/build-functions.ts` writes a single `index.js` (`bundle: true`, no `splitting`), and esbuild inlines a dynamic import into that file. The file size would then stay the same, and what the dynamic import saves is only the module evaluation of pdf-lib and docx on cold starts of the other functions (esbuild wraps the inlined module so it runs on first use). If the parse cost matters too, the build needs `splitting: true` with an `outdir`, or a second entry file the worker imports. Measure both the size and a cold start of a small function, then put the numbers in the PR. Until the worker imports the renderer, the deploy bundle is unchanged.
+
+### Still not done (7D)
+Rules for `applications` and `profile/cvHeader` (7D.1), the `cvWrite` branch in `fakeTransport` and the dev seed (7D.2), the prompt (`prompt.ts`, 7D.2), the callable and the worker, the web screens.
+
+## Gate (7C.2, after the last code change)
+See the PR body for each command's result.

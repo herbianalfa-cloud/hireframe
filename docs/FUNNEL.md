@@ -8,7 +8,7 @@ Principle: **spend in proportion to promise.** Each stage is cheaper than the ne
 | S1 Hard rules | Title, metadata, snippet | Code (criteria rules) | Free | `skip` with rule ID, or pass |
 | S2 Triage | Title, company, location, salary, ≤ 600 chars of description | Cheap model | ~£0.001 | Lane (`primary / secondary / opportunistic / wildcard / none`), seniority read, quick blockers; pass or `skip` |
 | S3 Deep read | Full description + company metadata + profile facts | Deep model (batched, cached profile) | ~£0.01–0.02 | Requirements extracted and matched → verdict, fit, luck, reason, gaps |
-| S4 CV | Chosen job | Deep model, on demand only | ~£0.03 | Tailored CV + cover note |
+| S4 CV | Chosen job, its stored S3 requirements, the owner's answers, profile facts | Sonnet 5.5, realtime `llm.call()` from a scheduled worker, on demand only (ADR-053) | ~4.3p typical (about 10k tokens in, 3k out); the reserved worst case is about 8.8p, 17.7p with the one retry | Tailored CV + cover note, every claim citing a fact, validated by code (ADR-054) |
 
 Target pass-through: S1 keeps ~40%, S2 keeps ~30% of those.
 
