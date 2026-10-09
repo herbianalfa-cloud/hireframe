@@ -187,6 +187,16 @@ describe('getDigest against the emulator', () => {
     expect(stored.size).toBe(1);
   });
 
+  it('reports a morning run document that fails RunSchema as failed with run_invalid', async () => {
+    await seed();
+    await db.doc('runs/today').set({ ...run('2026-10-07T06:30:00Z'), costPence: 'a lot' });
+    const result = await digestHandler(request(), deps());
+    expect(result.status).toBe(200);
+    const body = result.body as { state: string; text: string };
+    expect(body.state).toBe('failed');
+    expect(body.text).toContain('run_invalid');
+  });
+
   it('says the scan is missing when no morning run exists and it is past 08:15', async () => {
     const late = { ...deps(), now: () => new Date('2026-10-07T07:30:00Z') };
     const timestamp = String(Math.floor(new Date('2026-10-07T07:30:00Z').getTime() / 1000));

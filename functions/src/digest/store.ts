@@ -59,18 +59,60 @@ function toQuery(db: Firestore, spec: QuerySpec): Query {
   return query;
 }
 
+/** Enough of a run to know which day's morning run it is. */
+const RunIdentitySchema = RunSchema.pick({ trigger: true, startedAt: true });
+
+/** The error code a corrupt run document is reported under. */
+export const RUN_INVALID_CODE = 'run_invalid';
+
+/**
+ * One run document as the digest sees it. A document that fails `RunSchema` but still says when
+ * and how it started is a `failed` run with the error `run_invalid`, so a corrupt morning run is
+ * reported as one rather than read as no run at all (`missing`). Without a readable `trigger` and
+ * `startedAt` it can't be placed on a day, so it is skipped (`undefined`) and counted by the caller.
+ */
+export function readRunDoc(
+  id: string,
+  data: unknown,
+): { run: StoredDigestRun; valid: boolean } | undefined {
+  const parsed = RunSchema.safeParse(data);
+  if (parsed.success) return { run: { ...parsed.data, id }, valid: true };
+  const identity = RunIdentitySchema.safeParse(data);
+  if (!identity.success) return undefined;
+  return {
+    valid: false,
+    run: {
+      ...identity.data,
+      id,
+      status: 'failed',
+      perSource: {},
+      perStage: {},
+      costPence: 0,
+      errors: [{ code: RUN_INVALID_CODE }],
+      schemaVersion: 1,
+    },
+  };
+}
+
 export function firestoreDigestStore(db: Firestore): DigestStore {
   return {
     async recentRuns() {
       const snapshot = await toQuery(db, digestRunsSpec).limit(DIGEST.runsRead).get();
       const runs: StoredDigestRun[] = [];
       let invalid = 0;
+      let unplaced = 0;
       for (const doc of snapshot.docs) {
-        const parsed = RunSchema.safeParse(timestampsToDates(doc.data()));
-        if (parsed.success) runs.push({ ...parsed.data, id: doc.id });
-        else invalid += 1;
+        const read = readRunDoc(doc.id, timestampsToDates(doc.data()));
+        if (!read) unplaced += 1;
+        else {
+          runs.push(read.run);
+          if (!read.valid) invalid += 1;
+        }
       }
-      if (invalid > 0) log.warn('store.invalid_doc', { collection: 'runs', count: invalid });
+      // Both counts only: no document content reaches a log.
+      if (invalid + unplaced > 0) {
+        log.warn('store.invalid_doc', { collection: 'runs', count: invalid + unplaced, unplaced });
+      }
       return runs;
     },
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { buildDigest } from './build.js';
 import type { DigestJobList } from './render.js';
-import type { DigestStore, StoredDigestRun } from './store.js';
+import { readRunDoc, type DigestStore, type StoredDigestRun } from './store.js';
 
 const DAY = '2026-10-07';
 const NOW = new Date('2026-10-07T06:50:00Z'); // 07:50 BST
@@ -118,6 +118,17 @@ describe('buildDigest', () => {
     const { store } = fakeStore([run('yesterday', '2026-10-06T06:30:00Z')]);
     const out = await buildDigest(store, request, new Date('2026-10-07T07:20:00Z'));
     expect(out.state).toBe('missing');
+  });
+
+  it('reports a corrupt morning run as failed with its code, not missing', async () => {
+    const { store, jobsSince } = fakeStore([
+      readRunDoc('today', { trigger: 'schedule', startedAt: new Date('2026-10-07T06:30:00Z') })!
+        .run,
+    ]);
+    const out = await buildDigest(store, request, new Date('2026-10-07T07:20:00Z'));
+    expect(out.state).toBe('failed');
+    expect(out.text).toContain('run_invalid');
+    expect(jobsSince).not.toHaveBeenCalled();
   });
 
   it('reads no secret-bearing config and makes no model call (the store has no such method)', () => {

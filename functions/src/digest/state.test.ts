@@ -78,6 +78,12 @@ describe('chooseDigest', () => {
     );
   });
 
+  it('keeps a failed run failed at any hour, as the store reports a corrupt run document', () => {
+    const failed = [run('r', '2026-10-07T06:30:00Z', 'failed')];
+    expect(chooseDigest(failed, DAY, at('2026-10-07T06:31:00Z')).state).toBe('failed');
+    expect(chooseDigest(failed, DAY, at('2026-10-07T07:20:00Z')).state).toBe('failed');
+  });
+
   it('is in_progress while the run is running, and failed once it is stalled', () => {
     const started = '2026-10-07T06:30:00Z';
     const base = at(started).getTime();
