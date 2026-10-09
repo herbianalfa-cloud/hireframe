@@ -11,15 +11,20 @@ import type { RequestSigner } from './sign.js';
  *   `morning`. `ready`, `failed` and `missing` are mailed; `in_progress` is not, so the fallback
  *   handles it. A failed request mails nothing: the fallback runs 30 minutes later.
  * - `digestFallback` (08:20): the same checks, POST `fallback`, mail whatever comes back. If the
- *   request itself fails it mails a plain "Hireframe digest unavailable (code)" itself, so the
- *   digest is never silently absent.
+ *   request itself fails, or the full digest can't be sent, it mails a plain text "Hireframe
+ *   digest unavailable (code)" itself, so the digest is never silently absent. It waits up to
+ *   120 s for the lock and throws (visible in Executions) if it still can't get it.
  * - `digestNow`: a manual test; mails the fallback digest and leaves `lastDigestDay` alone.
  * Both triggered handlers hold the script lock, so their ±15 minute windows can't double-send.
  */
 
 export const LAST_DIGEST_DAY = 'lastDigestDay';
-/** How long a handler waits for the script lock before it gives up. */
+/** How long the morning handler waits for the script lock before it skips. */
 export const LOCK_WAIT_MS = 20_000;
+/** How long the fallback and `digestNow` wait for the lock before they throw. */
+export const LOCK_WAIT_LONG_MS = 120_000;
+/** A digest whose html is longer than this is mailed as text only (the server caps it too). */
+export const HTML_MAX = 100_000;
 
 // The state names the server sends (packages/shared/src/digest.ts `DIGEST_STATES`; a test checks).
 export const DIGEST_STATE_NAMES = ['ready', 'failed', 'in_progress', 'missing'] as const;
@@ -106,7 +111,12 @@ function fetchDigest(deps: DigestDeps, kind: DigestKindName, day: string): Fetch
           ok: true,
           state: state as DigestStateName,
           // A subject is one line.
-          mail: { subject: subject.replace(/[\r\n]+/g, ' ').trim(), html, text },
+          mail: {
+            subject: subject.replace(/[\r\n]+/g, ' ').trim(),
+            // Too large to trust: text only.
+            ...(html.length > HTML_MAX ? {} : { html }),
+            text,
+          },
         };
       }
     }
@@ -125,10 +135,19 @@ function unavailableMail(code: string, day: string): DigestMail {
   };
 }
 
-/** Runs `work` while holding the script lock; reports `locked` if it can't be had. */
-function locked(deps: DigestDeps, work: () => DigestOutcome): DigestOutcome {
-  if (!deps.lock.tryLock(LOCK_WAIT_MS)) {
+/**
+ * Runs `work` while holding the script lock. If it can't be had, the morning skips (`locked`);
+ * the others throw, so the failure shows in Executions.
+ */
+function locked(
+  deps: DigestDeps,
+  patience: 'skip' | 'throw',
+  work: () => DigestOutcome,
+): DigestOutcome {
+  const waitMs = patience === 'skip' ? LOCK_WAIT_MS : LOCK_WAIT_LONG_MS;
+  if (!deps.lock.tryLock(waitMs)) {
     deps.log?.('digest.skipped', { reason: 'locked' });
+    if (patience === 'throw') throw new Error('digest_lock_unavailable');
     return { sent: false, skipped: 'locked' };
   }
   try {
@@ -163,7 +182,7 @@ function due(deps: DigestDeps): { day: string } | DigestOutcome {
 }
 
 export function digestMorning(deps: DigestDeps): DigestOutcome {
-  return locked(deps, () => {
+  return locked(deps, 'skip', () => {
     const check = due(deps);
     if (!('day' in check)) return check;
     const fetched = fetchDigest(deps, 'morning', check.day);
@@ -184,16 +203,21 @@ export function digestMorning(deps: DigestDeps): DigestOutcome {
 }
 
 export function digestFallback(deps: DigestDeps): DigestOutcome {
-  return locked(deps, () => {
+  return locked(deps, 'throw', () => {
     const check = due(deps);
     if (!('day' in check)) return check;
     const fetched = fetchDigest(deps, 'fallback', check.day);
     if (!fetched.ok) deps.log?.('digest.request_failed', { kind: 'fallback', code: fetched.code });
-    const mail = fetched.ok ? fetched.mail : unavailableMail(fetched.code, check.day);
+    let state: DigestStateName | 'unavailable' = fetched.ok ? fetched.state : 'unavailable';
+    let sent = send(deps, fetched.ok ? fetched.mail : unavailableMail(fetched.code, check.day));
+    if (!sent && fetched.ok) {
+      // The full digest couldn't be mailed (say, it was too big): a plain notice is still better.
+      sent = send(deps, unavailableMail('send_failed', check.day));
+      state = 'unavailable';
+    }
     // Nothing follows the fallback, so a mail that can't be sent fails the execution visibly.
-    if (!send(deps, mail)) throw new Error('digest_send_failed');
+    if (!sent) throw new Error('digest_send_failed');
     deps.props.set(LAST_DIGEST_DAY, check.day);
-    const state = fetched.ok ? fetched.state : 'unavailable';
     deps.log?.('digest.sent', { kind: 'fallback', state });
     return { sent: true, state };
   });
@@ -201,8 +225,10 @@ export function digestFallback(deps: DigestDeps): DigestOutcome {
 
 /** A manual test: any day of the week, and `lastDigestDay` is neither read nor written. */
 export function digestNow(deps: DigestDeps): DigestOutcome {
-  return locked(deps, () => {
-    const day = deps.london.day(deps.now());
+  return locked(deps, 'throw', () => {
+    const now = deps.now();
+    const day = deps.london.day(now);
+    deps.log?.('digest.now', { day, isoWeekday: deps.london.isoWeekday(now) });
     const fetched = fetchDigest(deps, 'fallback', day);
     if (!fetched.ok) deps.log?.('digest.request_failed', { kind: 'now', code: fetched.code });
     const mail = fetched.ok ? fetched.mail : unavailableMail(fetched.code, day);

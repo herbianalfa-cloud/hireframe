@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   DIGEST_STATE_NAMES,
+  HTML_MAX,
   LAST_DIGEST_DAY,
+  LOCK_WAIT_LONG_MS,
+  LOCK_WAIT_MS,
   digestFallback,
   digestMorning,
   digestNow,
@@ -34,19 +37,23 @@ interface Harness {
   posts: { kind: string; day: string }[];
   props: Record<string, string>;
   lock: { tryLock: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> };
+  logs: { event: string; fields: Record<string, number | string> }[];
 }
 
 function harness(
   options: {
     now?: number;
     response?: { status: number; body: string } | Error;
+    /** One response per request, in order; the last repeats. Wins over `response`. */
+    responses?: ({ status: number; body: string } | Error)[];
     props?: Record<string, string>;
     lockFree?: boolean;
-    sendFails?: boolean;
+    sendFails?: boolean | ((mail: DigestMail) => boolean);
   } = {},
 ): Harness {
   const mails: DigestMail[] = [];
   const posts: { kind: string; day: string }[] = [];
+  const logs: Harness['logs'] = [];
   const props: Record<string, string> = { ...options.props };
   const lock = {
     tryLock: vi.fn(() => options.lockFree ?? true),
@@ -61,19 +68,25 @@ function harness(
     },
     post(body) {
       posts.push(JSON.parse(Buffer.from(body).toString('utf8')) as { kind: string; day: string });
-      const response = options.response ?? { status: 200, body: ready() };
+      const queue = options.responses;
+      const response = queue
+        ? (queue[Math.min(posts.length - 1, queue.length - 1)] as
+            Error | { status: number; body: string })
+        : (options.response ?? { status: 200, body: ready() });
       if (response instanceof Error) throw response;
       return response;
     },
     signer: { headers: () => ({ 'X-Hireframe-Signature': 'sig' }) },
     uuid: () => 'nonce',
     sendMail(mail) {
-      if (options.sendFails) throw new Error('quota');
+      const fails = options.sendFails;
+      if (typeof fails === 'function' ? fails(mail) : fails) throw new Error('quota');
       mails.push(mail);
     },
     lock,
+    log: (event, fields) => void logs.push({ event, fields }),
   };
-  return { deps, mails, posts, props, lock };
+  return { deps, mails, posts, props, lock, logs };
 }
 
 describe('the state names', () => {
@@ -206,6 +219,22 @@ describe('digestFallback', () => {
     expect(h.posts).toHaveLength(1);
   });
 
+  it('mails a text-only send_failed notice when the full digest can’t be sent', () => {
+    const h = harness({ sendFails: (mail) => mail.html !== undefined });
+    expect(digestFallback(h.deps)).toEqual({ sent: true, state: 'unavailable' });
+    expect(h.mails).toHaveLength(1);
+    expect(h.mails[0]?.subject).toBe('Hireframe digest unavailable (send_failed)');
+    expect(h.mails[0]?.html).toBeUndefined();
+    expect(h.props[LAST_DIGEST_DAY]).toBe('2026-10-07');
+    expect(h.posts).toHaveLength(1);
+  });
+
+  it('throws only when the send_failed notice can’t be sent either', () => {
+    const h = harness({ sendFails: true });
+    expect(() => digestFallback(h.deps)).toThrow('digest_send_failed');
+    expect(h.props[LAST_DIGEST_DAY]).toBeUndefined();
+  });
+
   it('fails the execution when even the mail can’t be sent, and still releases the lock', () => {
     const h = harness({ sendFails: true });
     expect(() => digestFallback(h.deps)).toThrow('digest_send_failed');
@@ -215,14 +244,28 @@ describe('digestFallback', () => {
 });
 
 describe('the lock', () => {
-  it('sends nothing and posts nothing when the lock can’t be had', () => {
-    for (const handler of [digestMorning, digestFallback]) {
-      const h = harness({ lockFree: false });
-      expect(handler(h.deps)).toEqual({ sent: false, skipped: 'locked' });
-      expect(h.posts).toEqual([]);
-      expect(h.mails).toEqual([]);
-      expect(h.lock.release).not.toHaveBeenCalled();
-    }
+  it('makes the morning wait 20 s, then skip with no request and no mail', () => {
+    const h = harness({ lockFree: false });
+    expect(digestMorning(h.deps)).toEqual({ sent: false, skipped: 'locked' });
+    expect(h.lock.tryLock).toHaveBeenCalledWith(LOCK_WAIT_MS);
+    expect(LOCK_WAIT_MS).toBe(20_000);
+    expect(h.posts).toEqual([]);
+    expect(h.mails).toEqual([]);
+    expect(h.lock.release).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['digestFallback', digestFallback],
+    ['digestNow', digestNow],
+  ])('makes %s wait 120 s, then throw with no request and no mail', (_name, handler) => {
+    const h = harness({ lockFree: false });
+    expect(() => handler(h.deps)).toThrow('digest_lock_unavailable');
+    expect(h.lock.tryLock).toHaveBeenCalledWith(LOCK_WAIT_LONG_MS);
+    expect(LOCK_WAIT_LONG_MS).toBe(120_000);
+    expect(h.posts).toEqual([]);
+    expect(h.mails).toEqual([]);
+    expect(h.props[LAST_DIGEST_DAY]).toBeUndefined();
+    expect(h.lock.release).not.toHaveBeenCalled();
   });
 
   it('is released after every run, including a failed request', () => {
@@ -246,16 +289,54 @@ describe('the lock', () => {
     const post = h.deps.post;
     let inner: unknown;
     h.deps.post = (body, headers) => {
-      inner = digestFallback(h.deps);
+      // The fallback can't get the lock (its wait is mocked as over) and throws.
+      try {
+        digestFallback(h.deps);
+      } catch (error) {
+        inner = error;
+      }
       return post(body, headers);
     };
     expect(digestMorning(h.deps).sent).toBe(true);
-    expect(inner).toEqual({ sent: false, skipped: 'locked' });
+    expect(inner).toEqual(new Error('digest_lock_unavailable'));
     expect(h.mails).toHaveLength(1);
   });
 });
 
+describe('a very large digest', () => {
+  const withHtml = (length: number) => ({
+    status: 200,
+    body: JSON.stringify({
+      state: 'ready',
+      subject: 'S',
+      html: 'x'.repeat(length),
+      text: 'plain',
+    }),
+  });
+
+  it('is mailed as text only when the html is over the limit', () => {
+    const h = harness({ response: withHtml(HTML_MAX + 1) });
+    expect(digestMorning(h.deps)).toEqual({ sent: true, state: 'ready' });
+    expect(h.mails).toEqual([{ subject: 'S', text: 'plain' }]);
+  });
+
+  it('keeps the html at exactly the limit', () => {
+    const h = harness({ response: withHtml(HTML_MAX) });
+    digestMorning(h.deps);
+    expect(h.mails[0]?.html).toHaveLength(HTML_MAX);
+  });
+});
+
 describe('digestNow', () => {
+  it('logs the London ISO weekday', () => {
+    const h = harness({ now: SATURDAY });
+    digestNow(h.deps);
+    expect(h.logs).toContainEqual({
+      event: 'digest.now',
+      fields: { day: '2026-10-10', isoWeekday: 6 },
+    });
+  });
+
   it('mails a fallback digest on a Saturday and leaves lastDigestDay alone', () => {
     const h = harness({ now: SATURDAY, props: { [LAST_DIGEST_DAY]: '2026-10-10' } });
     expect(digestNow(h.deps)).toEqual({ sent: true, state: 'ready' });
@@ -281,5 +362,73 @@ describe('the request', () => {
       Math.floor(WEDNESDAY / 1000),
       'nonce',
     );
+  });
+});
+
+describe('the morning and the fallback in sequence, on one harness', () => {
+  const fail = { status: 503, body: '' };
+
+  it('morning in_progress, then fallback sends', () => {
+    const h = harness({
+      responses: [
+        { status: 200, body: ready('in_progress') },
+        { status: 200, body: ready() },
+      ],
+    });
+    expect(digestMorning(h.deps)).toEqual({ sent: false, skipped: 'in_progress' });
+    expect(digestFallback(h.deps)).toEqual({ sent: true, state: 'ready' });
+    expect(h.posts.map((p) => p.kind)).toEqual(['morning', 'fallback']);
+    expect(h.mails).toHaveLength(1);
+    expect(h.props[LAST_DIGEST_DAY]).toBe('2026-10-07');
+  });
+
+  it('morning request fails, then fallback is ready', () => {
+    const h = harness({ responses: [fail, { status: 200, body: ready() }] });
+    expect(digestMorning(h.deps).skipped).toBe('request_failed');
+    expect(digestFallback(h.deps)).toEqual({ sent: true, state: 'ready' });
+    expect(h.mails).toHaveLength(1);
+    expect(h.mails[0]?.html).toBe('<p>Hi</p>');
+  });
+
+  it('both requests fail, then the unavailable mail', () => {
+    const h = harness({ responses: [fail, fail] });
+    digestMorning(h.deps);
+    expect(digestFallback(h.deps)).toEqual({ sent: true, state: 'unavailable' });
+    expect(h.posts).toHaveLength(2);
+    expect(h.mails).toHaveLength(1);
+    expect(h.mails[0]?.subject).toBe('Hireframe digest unavailable (http_503)');
+  });
+
+  it('morning send throws, then fallback sends', () => {
+    let first = true;
+    const h = harness({
+      sendFails: () => {
+        const failing = first;
+        first = false;
+        return failing;
+      },
+    });
+    expect(digestMorning(h.deps)).toEqual({ sent: false, skipped: 'send_failed' });
+    expect(h.props[LAST_DIGEST_DAY]).toBeUndefined();
+    expect(digestFallback(h.deps)).toEqual({ sent: true, state: 'ready' });
+    expect(h.mails).toHaveLength(1);
+    expect(h.props[LAST_DIGEST_DAY]).toBe('2026-10-07');
+  });
+
+  it('morning holds the lock with in_progress, then fallback waits and sends', () => {
+    const h = harness({
+      responses: [
+        { status: 200, body: ready('in_progress') },
+        { status: 200, body: ready() },
+      ],
+    });
+    expect(digestMorning(h.deps).skipped).toBe('in_progress');
+    // The morning is slow to let go: the lock stays busy for 60 s, longer than its own 20 s wait
+    // but within the fallback's 120 s.
+    h.lock.tryLock.mockImplementation((waitMs: number) => waitMs >= 60_000);
+    expect(digestFallback(h.deps)).toEqual({ sent: true, state: 'ready' });
+    expect(h.lock.tryLock).toHaveBeenLastCalledWith(LOCK_WAIT_LONG_MS);
+    expect(h.lock.release).toHaveBeenCalledTimes(2);
+    expect(h.mails).toHaveLength(1);
   });
 });
