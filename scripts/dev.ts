@@ -21,6 +21,7 @@ import {
   profileSeedDocuments,
   restDocument,
   usageSeedDocument,
+  morningRunSeedDocument,
 } from './dev-seed.ts';
 
 const projectId = assertDemoProject(process.env.GCLOUD_PROJECT);
@@ -96,6 +97,8 @@ for (const { id, job, description } of devJobs) {
 }
 const usage = usageSeedDocument(now);
 await emulatorRequest('PATCH', `${documents}/usage/${usage.month}`, usage.document);
+const morningRun = morningRunSeedDocument(now);
+await emulatorRequest('PATCH', `${documents}/runs/${morningRun.id}`, morningRun.document);
 
 console.log(
   `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}), criteria v1, the fake ` +

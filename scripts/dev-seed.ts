@@ -627,6 +627,79 @@ export function usageSeedDocument(now: Date) {
   return { month: monthKey(now), data, document: { fields: toRestFields(data) } };
 }
 
+/** London calendar day and minutes past midnight for an instant. */
+function londonClock(date: Date): { day: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return {
+    day: `${parts.year ?? ''}-${parts.month ?? ''}-${parts.day ?? ''}`,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+export const DEV_MORNING_RUN_ID = 'dev-morning-run';
+
+/**
+ * One succeeded scheduled run that started at 07:30 London today, so a signed digest request
+ * against `npm run dev` returns `ready` (the dev app's own clock is the emulator's). It is a
+ * morning run by `isMorningRun` whatever the time now, and the scan's run records are unaffected.
+ */
+export function morningRunSeedDocument(now: Date) {
+  const today = londonClock(now).day;
+  const [year, month, day] = today.split('-').map(Number) as [number, number, number];
+  // 07:30 London is 06:30Z in summer and 07:30Z in winter: take the one that reads 07:30 there.
+  const startedAt = [6, 7]
+    .map((hour) => new Date(Date.UTC(year, month - 1, day, hour, 30)))
+    .find((candidate) => londonClock(candidate).minutes === 7 * 60 + 30) as Date;
+  const finishedAt = new Date(startedAt.getTime() + 9 * 60_000);
+  const data = {
+    trigger: 'schedule',
+    status: 'succeeded',
+    startedAt,
+    finishedAt,
+    perSource: {},
+    perStage: {
+      s2: {
+        in: 40,
+        passed: 12,
+        skipped: 28,
+        expired: 0,
+        review: 0,
+        queued: 0,
+        costPence: 3,
+        durationMs: 90_000,
+      },
+      s3: {
+        in: 12,
+        apply: 3,
+        near_miss: 2,
+        wildcard: 1,
+        skip: 6,
+        expired: 0,
+        review: 0,
+        queued: 0,
+        drift: 0,
+        recomputed: 0,
+        costPence: 20,
+        durationMs: 240_000,
+      },
+    },
+    costPence: 23,
+    errors: [],
+    schemaVersion: 1,
+  };
+  return { id: DEV_MORNING_RUN_ID, data, document: { fields: toRestFields(data) } };
+}
+
 /** The REST body for a plain document. */
 export function restDocument(data: Record<string, unknown>) {
   return { fields: toRestFields(data) };
