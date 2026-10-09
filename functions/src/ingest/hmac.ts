@@ -50,9 +50,7 @@ export function signRequest(
 ): string {
   const body = typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody;
   return createHmac('sha256', trimSecret(secret))
-    .update(
-      Buffer.concat([Buffer.from(signingPrefix(timestamp, nonce, purpose), 'utf8'), body]),
-    )
+    .update(Buffer.concat([Buffer.from(signingPrefix(timestamp, nonce, purpose), 'utf8'), body]))
     .digest('hex');
 }
 
@@ -69,7 +67,8 @@ export function verifyRequest(
 ): VerifyResult {
   if (request.method !== 'POST') return fail(400, 'method');
   if (!/^application\/json\b/i.test(request.contentType ?? '')) return fail(400, 'content_type');
-  if (request.rawBody.length > (purpose === 'digest' ? DIGEST_WIRE : INGEST_WIRE).serverMaxBytes) return fail(413, 'too_large');
+  if (request.rawBody.length > (purpose === 'digest' ? DIGEST_WIRE : INGEST_WIRE).serverMaxBytes)
+    return fail(413, 'too_large');
 
   const timestamp = request.header('x-hireframe-timestamp');
   const nonce = request.header('x-hireframe-nonce');
@@ -86,7 +85,10 @@ export function verifyRequest(
   }
 
   const given = Buffer.from(signature, 'hex');
-  const expected = Buffer.from(signRequest(secret, timestamp, nonce, request.rawBody, purpose), 'hex');
+  const expected = Buffer.from(
+    signRequest(secret, timestamp, nonce, request.rawBody, purpose),
+    'hex',
+  );
   // Both are 32 bytes when the header was well-formed; a length mismatch takes the same 401.
   if (given.length !== expected.length || !compare(given, expected)) return fail(401, 'signature');
 

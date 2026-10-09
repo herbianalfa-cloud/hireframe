@@ -44,6 +44,11 @@ function input(overrides: Partial<DigestInput> = {}): DigestInput {
   };
 }
 
+function withoutRun(state: DigestInput['state']): DigestInput {
+  const { run: _run, ...rest } = input();
+  return { ...rest, state };
+}
+
 /** Every href in the HTML. */
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1] ?? '');
 
@@ -250,7 +255,7 @@ describe('renderDigest: run health and errors (R12)', () => {
 
 describe('renderDigest: the other states', () => {
   it('in_progress has an explicit notice and no job sections', () => {
-    const out = renderDigest(input({ state: 'in_progress', run: undefined }));
+    const out = renderDigest(withoutRun('in_progress'));
     expect(out.subject).toBe('Hireframe Wed 7 Oct: scan still running');
     expect(out.text).toContain("Today's scan has not finished yet");
     expect(out.text).not.toContain('APPLY');
@@ -272,7 +277,7 @@ describe('renderDigest: the other states', () => {
   });
 
   it('missing says no scan started', () => {
-    const out = renderDigest(input({ state: 'missing', run: undefined }));
+    const out = renderDigest(withoutRun('missing'));
     expect(out.subject).toContain('no scan this morning');
     expect(out.text).toContain('No scan started this morning');
   });

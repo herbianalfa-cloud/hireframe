@@ -190,7 +190,7 @@ function runHealthSection(input: DigestInput): Section {
   });
   return {
     title: 'Run health',
-    notice: input.partial ? 'Some sources failed in this run.' : undefined,
+    ...(input.partial ? { notice: 'Some sources failed in this run.' } : {}),
     lines,
   };
 }
