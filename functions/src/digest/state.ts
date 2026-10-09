@@ -51,7 +51,10 @@ export function isMorningRun(run: Pick<Run, 'trigger' | 'startedAt'>): boolean {
 }
 
 /** The newest morning run that started on `day` (runs are newest first). */
-export function pickMorningRun<T extends DigestRun>(runs: readonly T[], day: string): T | undefined {
+export function pickMorningRun<T extends DigestRun>(
+  runs: readonly T[],
+  day: string,
+): T | undefined {
   return runs.find((run) => isMorningRun(run) && londonParts(run.startedAt).day === day);
 }
 
