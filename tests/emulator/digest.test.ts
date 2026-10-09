@@ -2,7 +2,7 @@
  * getDigest against the Firestore emulator with the real stores (ADR-052). Run with
  * `npm run test:rules`. Proves: a digest-signed request against seeded runs returns `ready` with
  * the jobs judged since the previous morning run and none of the applied or older ones; a replay
- * is refused; an ingest-signed request is refused; the "+n more" count is exact.
+ * is refused; an ingest-signed request is refused; the "+n more" count is exact; a request writes nothing but its nonce.
  */
 import { randomUUID } from 'node:crypto';
 
@@ -175,6 +175,26 @@ describe('getDigest against the emulator', () => {
     const text = (result.body as { text: string }).text;
     // 12 bulk + new-today + new-yesterday-pm = 14 apply; 10 listed.
     expect(text).toContain('+4 more in the app');
+  });
+
+  it('writes only the nonce: runs, jobs, usage and sources are untouched', async () => {
+    await seed();
+    await db.doc('sources/reed').set({ status: 'failing', lastErrorCode: 'http_429' });
+    const snapshot = async () => {
+      const state: Record<string, unknown> = {};
+      for (const name of ['runs', 'jobs', 'usage', 'sources']) {
+        const docs = await db.collection(name).get();
+        for (const doc of docs.docs) {
+          state[doc.ref.path] = { data: doc.data(), updated: doc.updateTime.toMillis() };
+        }
+      }
+      return state;
+    };
+    const before = await snapshot();
+    expect(Object.keys(before).length).toBeGreaterThan(8);
+    expect((await digestHandler(request(), deps())).status).toBe(200);
+    expect(await snapshot()).toEqual(before);
+    expect((await db.collection('nonces').get()).size).toBe(1);
   });
 
   it('refuses a replay and an ingest-signed request', async () => {
