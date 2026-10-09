@@ -31,11 +31,12 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run check` — lint + typecheck + unit tests + PII scan + eval replay (`npm run eval`)
 - `npm run format` / `npm run format:check` — Prettier (code and config; Markdown excluded)
 - `npm run scan:pii` — fail on emails/phone numbers in tracked files
-- `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria, the fake CV's facts with work rights, one LinkedIn-alert job, one alert job waiting for a description, twelve fake judged jobs, two Lookup-added jobs (one judged, one waiting for a description) and this month's usage; fake LLM and fake job APIs unless `LIVE=1`)
+- `npm run dev` — web app + Firebase emulators incl. Functions (`demo-hireframe`, seeded fake owner, criteria, the fake CV's facts with work rights, one LinkedIn-alert job, one alert job waiting for a description, twelve fake judged jobs, one succeeded morning run for today (London), two Lookup-added jobs (one judged, one waiting for a description) and this month's usage; fake LLM and fake job APIs unless `LIVE=1`)
 - `npm run test:rules` — Firestore + Storage security rules tests and emulator integration tests (`tests/emulator/`) (needs Java 21)
 - `npm run build` — build all workspaces (functions: esbuild bundle in `functions/deploy/`; Gmail bridge: `apps-script/build/`)
-- `npm run build:apps-script` — bundle the Gmail bridge (`apps-script/build/Code.js` + `appsscript.json`) for `npm exec -w apps-script clasp -- push` (RUNBOOK Part G)
+- `npm run build:apps-script` — bundle the Gmail bridge and digest mailer (`apps-script/build/Code.js` + `appsscript.json`) for `npm exec -w apps-script clasp -- push` (RUNBOOK Parts G and I)
 - `node scripts/sign-test-alert.ts [waas] [--twice] [--id <id>]` — post a fake alert email, signed with the local placeholder secret, to the emulator's `ingestEmailJobs` (local only; `--twice` shows a replay refused)
+- `node scripts/sign-test-alert.ts digest [--kind fallback]` — post a signed digest request (`digest.v1.`) to the emulator's `getDigest` and print the state and text; against `npm run dev` it returns `ready` (local only)
 - `npm run check:bundle` — web bundle budget after `build`: no chunk over 500 kB, initial JS under the gzip budget (prints each initial file's size)
 - `node scripts/smoke-functions-bundle.ts` — after `build`: the functions bundle imports and every function is in europe-west2
 - `node scripts/make-cv-fixtures.ts` — write fake CVs (PDF/DOCX) to `tmp/fixtures/` for local uploads
