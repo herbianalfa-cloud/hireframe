@@ -820,6 +820,8 @@ export function applicationSeeds(now: Date) {
         stage: 'applied',
         stageBefore: 'ready',
         stageAt: hoursAgo(now, 20),
+        // The mirror writes updatedAt when the job is marked applied; the Applied list orders by it.
+        updatedAt: hoursAgo(now, 20),
         questions: [],
       },
     },
