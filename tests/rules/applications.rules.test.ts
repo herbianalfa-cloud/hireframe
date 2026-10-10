@@ -158,15 +158,12 @@ describe('the Applied mirror on applications/{jobId}', () => {
     expect(await readApplication()).toMatchObject({ stage: 'applied', stageBefore: 'ready' });
   });
 
-  it.each(['chosen', 'needs_input', 'ready'] as const)(
-    'allows applied from %s',
-    async (stage) => {
-      await seed(seededJob(), seededApplication({ stage }));
-      await assertSucceeds(
-        markApplied(dbFor('owner'), { stage: 'applied', stageBefore: stage, updatedAt: NOW }),
-      );
-    },
-  );
+  it.each(['chosen', 'needs_input', 'ready'] as const)('allows applied from %s', async (stage) => {
+    await seed(seededJob(), seededApplication({ stage }));
+    await assertSucceeds(
+      markApplied(dbFor('owner'), { stage: 'applied', stageBefore: stage, updatedAt: NOW }),
+    );
+  });
 
   it('lets the owner undo, back to exactly the stage it came from', async () => {
     await seed(APPLIED_JOB, seededApplication({ stage: 'applied', stageBefore: 'needs_input' }));

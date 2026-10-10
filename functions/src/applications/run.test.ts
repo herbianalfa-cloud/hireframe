@@ -439,7 +439,12 @@ describe('answer', () => {
     };
     expect(
       await refusal(
-        run(h, { action: 'answer', jobId: TEST_JOB_ID, questionId: first ?? '', text: 'I built weekly SQL reports for a sales team.' }),
+        run(h, {
+          action: 'answer',
+          jobId: TEST_JOB_ID,
+          questionId: first ?? '',
+          text: 'I built weekly SQL reports for a sales team.',
+        }),
       ),
     ).toBe('lost');
     expect(h.store.facts).toHaveLength(0);
@@ -453,7 +458,12 @@ describe('answer', () => {
     };
     expect(
       await refusal(
-        run(h, { action: 'answer', jobId: TEST_JOB_ID, questionId: first ?? '', text: 'I built weekly SQL reports for a sales team.' }),
+        run(h, {
+          action: 'answer',
+          jobId: TEST_JOB_ID,
+          questionId: first ?? '',
+          text: 'I built weekly SQL reports for a sales team.',
+        }),
       ),
     ).toBe('lost');
     expect(h.store.facts).toHaveLength(0);
@@ -464,7 +474,12 @@ describe('answer', () => {
     await run(h, { action: 'skip', jobId: TEST_JOB_ID, questionId: first ?? '' });
     expect(
       await refusal(
-        run(h, { action: 'answer', jobId: TEST_JOB_ID, questionId: first ?? '', text: 'I built weekly SQL reports for a sales team.' }),
+        run(h, {
+          action: 'answer',
+          jobId: TEST_JOB_ID,
+          questionId: first ?? '',
+          text: 'I built weekly SQL reports for a sales team.',
+        }),
       ),
     ).toBe('wrong_stage');
     expect(
@@ -687,7 +702,12 @@ describe('the model call', () => {
     await run(h, { action: 'start', jobId: TEST_JOB_ID });
     const [first] = (h.store.applications.get(TEST_JOB_ID)?.questions ?? []).map((q) => q.id);
     await expect(
-      run(h, { action: 'answer', jobId: TEST_JOB_ID, questionId: first ?? '', text: 'I built weekly SQL reports for a sales team.' }),
+      run(h, {
+        action: 'answer',
+        jobId: TEST_JOB_ID,
+        questionId: first ?? '',
+        text: 'I built weekly SQL reports for a sales team.',
+      }),
     ).rejects.toBeInstanceOf(DailyCapExceededError);
     expect(sends).toBe(0);
     expect(h.store.facts).toHaveLength(0);
@@ -705,7 +725,12 @@ describe('the model call', () => {
     h.deps.llm = () => Promise.reject(new LlmOutputError('schema', 0.1));
     const [first] = (h.store.applications.get(TEST_JOB_ID)?.questions ?? []).map((q) => q.id);
     await expect(
-      run(h, { action: 'answer', jobId: TEST_JOB_ID, questionId: first ?? '', text: 'I built weekly SQL reports for a sales team.' }),
+      run(h, {
+        action: 'answer',
+        jobId: TEST_JOB_ID,
+        questionId: first ?? '',
+        text: 'I built weekly SQL reports for a sales team.',
+      }),
     ).rejects.toMatchObject({ code: 'unavailable' });
     expect(h.store.facts).toHaveLength(0);
   });

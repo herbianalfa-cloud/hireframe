@@ -762,7 +762,9 @@ export function readyApplicationSeed(now: Date) {
  * key) nor make a paid call before the owner has done anything.
  */
 export function seedWorkerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const { LIVE: _live, ANTHROPIC_API_KEY: _key, ...rest } = env;
+  const rest = { ...env };
+  delete rest.LIVE;
+  delete rest.ANTHROPIC_API_KEY;
   return rest;
 }
 

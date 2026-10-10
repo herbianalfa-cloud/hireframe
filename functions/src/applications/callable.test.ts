@@ -1,4 +1,5 @@
 import { CALLABLE_TIMEOUT_SECONDS } from '@hireframe/shared';
+import type * as Https from 'firebase-functions/https';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -13,7 +14,7 @@ const captured = vi.hoisted(() => ({
 const touched = vi.hoisted(() => ({ paths: [] as string[] }));
 
 vi.mock('firebase-functions/https', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('firebase-functions/https')>();
+  const actual = await importOriginal<typeof Https>();
   return {
     ...actual,
     onCall: (options: Record<string, unknown>, handler: (request: unknown) => Promise<unknown>) => {
