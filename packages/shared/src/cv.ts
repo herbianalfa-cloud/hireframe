@@ -547,11 +547,19 @@ const SKIPPED_WORDS: ReadonlySet<string> = new Set([
   'inc',
   'project',
   'personal',
+  'at',
+  'in',
+  'on',
+  'to',
+  'by',
+  'an',
+  'as',
+  'or',
 ]);
 
-/** The words of 3+ letters in `text`, folded, without the skipped ones. */
+/** The words of 2+ letters in `text`, folded, without the skipped ones. Single letters stay unchecked. */
 function wordsOf(text: string): string[] {
-  return [...foldText(text).matchAll(/\p{L}{3,}/gu)]
+  return [...foldText(text).matchAll(/\p{L}{2,}/gu)]
     .map((match) => match[0])
     .filter((word) => !SKIPPED_WORDS.has(word));
 }
@@ -565,8 +573,8 @@ const LABEL_PARTS = /[,;/&+|()\u2022]|\s(?:and|or)\s/i;
 
 /**
  * Whether a skill label's parts are each backed by one cited fact: all the part's words are in
- * that fact's text or evidence. A part without a word of 3+ letters ("R", "Go") has to be a
- * whole word or phrase of a cited fact instead.
+ * that fact's text or evidence. A part without a word of 2+ letters ("R") has to be a whole
+ * word or phrase of a cited fact instead.
  */
 function labelSupported(label: string, cited: readonly CvFact[]): boolean {
   const sets = cited.map(factWords);
