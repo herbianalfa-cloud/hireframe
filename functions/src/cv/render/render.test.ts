@@ -32,9 +32,10 @@ function expectInOrder(text: string, parts: readonly string[]): void {
   const flat = squash(text);
   let from = 0;
   for (const part of parts) {
-    const at = flat.indexOf(squash(part), from);
+    const needle = squash(part);
+    const at = flat.indexOf(needle, from);
     expect(at, `"${part.slice(0, 40)}" in order`).toBeGreaterThanOrEqual(from);
-    from = at + part.length;
+    from = at + needle.length;
   }
 }
 
@@ -181,6 +182,44 @@ describe('renderCvDocx', () => {
     expect(html).not.toContain('<table');
   });
 
+  it("puts an entry's dates after a real tab element, not a tab character", async () => {
+    const bytes = await renderCvDocx(FAKE_HEADER, content, fakeDateOf);
+    const zip = await JSZip.loadAsync(bytes);
+    const body = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    const paragraphs = body.match(/<w:p>.*?<\/w:p>/gs) ?? [];
+    const entry = paragraphs.find((p) =>
+      p.includes('Customer Onboarding Intern, Example Cloud Ltd'),
+    );
+    expect(entry).toBeDefined();
+    // Title, then a tab element, then the dates; and a right tab stop for it to jump to.
+    const title = entry?.indexOf('Example Cloud Ltd</w:t>') ?? -1;
+    const tab = entry?.indexOf('<w:tab/>') ?? -1;
+    const dates = entry?.indexOf('Oct 2023 – May 2024</w:t>') ?? -1;
+    expect(title).toBeGreaterThan(0);
+    expect(tab).toBeGreaterThan(title);
+    expect(dates).toBeGreaterThan(tab);
+    expect(entry).toContain('<w:tab w:val="right"');
+    // No literal tab character hides in any run's text.
+    expect(body).not.toMatch(/<w:t[^>]*>[^<]*\t[^<]*<\/w:t>/);
+    // Read back: the dates come after the title in the extracted text.
+    const text = squash(await extractText(bytes, 'docx'));
+    expect(text).toContain('Oct 2023 – May 2024');
+    expect(text).toContain('Scrum Fundamentals Certificate 2024');
+  });
+
+  it('round-trips characters XML cares about through mammoth', async () => {
+    const tricky = 'R&D <team> "x"';
+    const cv = structuredClone(content);
+    cv.summary = { text: tricky, factRefs: ['F1'] };
+    const bytes = await renderCvDocx(FAKE_HEADER, cv, fakeDateOf);
+    const { value } = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
+    expect(value).toContain(tricky);
+    const body =
+      (await (await JSZip.loadAsync(bytes)).file('word/document.xml')?.async('string')) ?? '';
+    expect(body).toContain('R&amp;D &lt;team&gt; &quot;x&quot;');
+    expect(body).not.toContain('<team>');
+  });
+
   it('holds no table, text box, image, header or footer', async () => {
     const zip = await JSZip.loadAsync(await renderCvDocx(FAKE_HEADER, content, fakeDateOf));
     const names = Object.keys(zip.files);
@@ -239,14 +278,14 @@ describe('fitOnePage', () => {
       content.experience.map((entry) => entry.heading),
     );
     expect(fit.content.education).toEqual(content.education);
-    expectInOrder(await extractText(fit.bytes, 'pdf'), readingOrder(fit.content).slice(0, -1));
+    expectInOrder(await extractText(fit.bytes, 'pdf'), readingOrder(fit.content));
   });
 
   it('also fits the maximum content in the DOCX at the same trim', async () => {
     const fit = await fitOnePage(FAKE_HEADER, maxCv(), fakeDateOf);
     if (!fit.ok) throw new Error('did not fit');
     const docx = await renderCvDocx(FAKE_HEADER, fit.content, fakeDateOf);
-    expectInOrder(await extractText(docx, 'docx'), readingOrder(fit.content).slice(0, -1));
+    expectInOrder(await extractText(docx, 'docx'), readingOrder(fit.content));
   });
 
   it('reports too_long when even the fully trimmed CV is over a page', async () => {
