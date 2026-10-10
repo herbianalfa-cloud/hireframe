@@ -1,6 +1,5 @@
 import { FAKE_CV_EXTRACTION } from '../functions/src/fixtures/fake-cv-response.ts';
 import { CRITERIA_SEED_V1 } from '../packages/shared/src/criteria-seed.ts';
-import { questionId } from '../packages/shared/src/applications.ts';
 import { monthKey } from '../packages/shared/src/usage.ts';
 
 /**
@@ -762,8 +761,10 @@ export function readyApplicationSeed(now: Date) {
  * (waits for `node scripts/dev-worker.ts`) and Applied (its job is already `applied`).
  */
 export function applicationSeeds(now: Date) {
-  const question = (text: string, level: string, type: string, match: string) => ({
-    id: questionId(text),
+  // IDs are `questionId(text)`: this file can't import shared's applications.ts under Node's
+  // type stripping, so dev-tools.test.ts pins them to the real function.
+  const question = (id: string, text: string, level: string, type: string, match: string) => ({
+    id,
     requirement: text,
     level,
     type,
@@ -777,8 +778,14 @@ export function applicationSeeds(now: Date) {
         stage: 'needs_input',
         stageAt: hoursAgo(now, 4),
         questions: [
-          question('Experience with dbt', 'nice', 'tool', 'missing'),
-          question('Presenting analysis to non-technical stakeholders', 'must', 'skill', 'partial'),
+          question('q-02a7bdc3c99a', 'Experience with dbt', 'nice', 'tool', 'missing'),
+          question(
+            'q-18d1be1df09b',
+            'Presenting analysis to non-technical stakeholders',
+            'must',
+            'skill',
+            'partial',
+          ),
         ],
       },
     },

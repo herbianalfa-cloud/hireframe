@@ -5,6 +5,7 @@ import {
   JobDescriptionSchema,
   JobSchema,
   normaliseRawJob,
+  questionId,
   RunSchema,
   UsageSchema,
   verdictAgreement,
@@ -351,6 +352,8 @@ describe('application pipeline seed (M7 7D.2)', () => {
     const needs = ApplicationSchema.parse(seeds.get(DEV_NEEDS_INPUT_JOB_ID));
     expect(needs.questions).toHaveLength(2);
     expect(needs.questions.every((q) => q.answer === undefined)).toBe(true);
+    // The seed carries literal IDs (it can't import shared's applications.ts under Node).
+    for (const q of needs.questions) expect(q.id).toBe(questionId(q.requirement));
     expect(ApplicationSchema.parse(seeds.get(DEV_GENERATING_JOB_ID)).stage).toBe('generating');
     expect(ApplicationSchema.parse(seeds.get(DEV_APPLIED_JOB_ID)).stage).toBe('applied');
     expect(jobs.get(DEV_APPLIED_JOB_ID)?.status).toBe('applied');
