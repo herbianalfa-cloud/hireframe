@@ -19,6 +19,7 @@ import {
   trimOrder,
   validateCv,
   type CvContent,
+  type CvFact,
   type CvIssue,
 } from './cv.js';
 import { aliasOf, at, CV_ALIASES, CV_FACTS, fullCv, validCv } from './fixtures/cv.js';
@@ -96,6 +97,13 @@ describe('validateCv', () => {
           at(at(cv.experience, 0).bullets, 0).text = 'Led onboarding. '.repeat(20);
         }),
       path: 'experience[0].bullets[0]',
+    },
+    unsupported_text: {
+      cv: () =>
+        edited((cv) => {
+          at(cv.experience, 0).heading.role = 'Senior Product Manager';
+        }),
+      path: 'experience[0].heading.role',
     },
     unsupported_char: {
       cv: () =>
@@ -252,6 +260,205 @@ describe('validateCv', () => {
       'unknown_fact',
       'unsupported_number',
       'contact_in_text',
+    ]);
+  });
+});
+
+/** The facts with one retyped, for the citation-type tests. */
+function retyped(id: string, type: CvFact['type']): CvFact[] {
+  return CV_FACTS.map((fact) => (fact.id === id ? { ...fact, type } : fact));
+}
+
+describe('unsupported_text: heading, education and skill words come from the cited fact', () => {
+  const role = (text: string) =>
+    edited((cv) => {
+      at(cv.experience, 0).heading.role = text;
+    });
+  const org = (text: string) =>
+    edited((cv) => {
+      at(cv.experience, 0).heading.org = text;
+    });
+
+  it('rejects a role the cited fact does not say', () => {
+    expect(issuesOf(role('Senior Product Manager'))).toEqual([
+      { path: 'experience[0].heading.role', code: 'unsupported_text' },
+    ]);
+  });
+
+  it('rejects another company under a real fact', () => {
+    expect(issuesOf(org('Acme Rockets Ltd'))).toEqual([
+      { path: 'experience[0].heading.org', code: 'unsupported_text' },
+    ]);
+  });
+
+  it('accepts a shortened role or org, other case and accents, and the skipped words', () => {
+    expect(check(role('Onboarding Intern'))).toEqual({ ok: true });
+    expect(check(org('Example Cloud'))).toEqual({ ok: true });
+    expect(check(org('EXAMPLE cloud'))).toEqual({ ok: true });
+    expect(check(org('The Example Cloud Limited'))).toEqual({ ok: true });
+    expect(check(org('Example Cloud Inc'))).toEqual({ ok: true });
+    expect(check(role('Intern for Customer Onboarding'))).toEqual({ ok: true });
+  });
+
+  it('reads the fact evidence as well as its text', () => {
+    // "London" is only in the evidence of fact-intern.
+    expect(check(org('Example Cloud London'))).toEqual({ ok: true });
+  });
+
+  it('holds a project heading and an education line to their facts too', () => {
+    const project = edited((cv) => {
+      at(cv.projects, 0).heading.org = 'Kaggle retail forecasting';
+    });
+    expect(issuesOf(project)).toEqual([
+      { path: 'projects[0].heading.org', code: 'unsupported_text' },
+    ]);
+    const education = edited((cv) => {
+      at(cv.education, 0).line = 'BSc Computer Science, University of Example';
+    });
+    expect(issuesOf(education)).toEqual([{ path: 'education[0]', code: 'unsupported_text' }]);
+    const shorter = edited((cv) => {
+      at(cv.education, 0).line = 'Scrum Certificate';
+    });
+    expect(check(shorter)).toEqual({ ok: true });
+  });
+
+  it('does not report words of an uncited or unknown heading twice', () => {
+    const cv = edited((c) => {
+      at(c.experience, 0).heading.factRef = 'F99';
+      at(c.experience, 0).heading.role = 'Senior Product Manager';
+    });
+    expect(issuesOf(cv)).toEqual([{ path: 'experience[0].heading', code: 'unknown_fact' }]);
+  });
+});
+
+describe('fact types per section', () => {
+  it('has an experience heading cite an experience fact only', () => {
+    for (const id of ['fact-olist', 'fact-scrum']) {
+      const cv = edited((c) => {
+        at(c.experience, 0).heading.factRef = aliasOf(id);
+        at(c.experience, 0).heading.role = 'Olist';
+        at(c.experience, 0).heading.org = 'Scrum';
+      });
+      expect(issuesOf(cv)).toContainEqual({
+        path: 'experience[0].heading',
+        code: 'wrong_fact_type',
+      });
+    }
+  });
+
+  it('lets a project heading cite a project or an experience fact, and nothing else', () => {
+    const experience = edited((c) => {
+      at(c.projects, 0).heading = {
+        role: 'Onboarding',
+        org: 'Example Cloud',
+        factRef: aliasOf('fact-intern'),
+      };
+    });
+    expect(check(experience)).toEqual({ ok: true });
+    const education = edited((c) => {
+      at(c.projects, 0).heading = {
+        role: 'Scrum',
+        org: 'Certificate',
+        factRef: aliasOf('fact-scrum'),
+      };
+    });
+    expect(issuesOf(education)).toEqual([{ path: 'projects[0].heading', code: 'wrong_fact_type' }]);
+  });
+
+  it('has an education line cite an education fact only', () => {
+    const cv = edited((c) => {
+      at(c.education, 0).factRef = aliasOf('fact-olist');
+      at(c.education, 0).line = 'Olist analysis';
+    });
+    expect(issuesOf(cv)).toEqual([{ path: 'education[0]', code: 'wrong_fact_type' }]);
+  });
+});
+
+describe('skill labels', () => {
+  const label = (text: string, ...ids: string[]) =>
+    edited((cv) => {
+      cv.skills = [{ label: text, factRefs: ids.map(aliasOf) }];
+    });
+
+  it('needs the label words in the cited skill fact', () => {
+    expect(issuesOf(label('Python', 'fact-sql'))).toEqual([
+      { path: 'skills[0]', code: 'unsupported_text' },
+    ]);
+    expect(issuesOf(label('Advanced SQL', 'fact-sql'))).toEqual([
+      { path: 'skills[0]', code: 'unsupported_text' },
+    ]);
+    expect(check(label('SQL', 'fact-sql'))).toEqual({ ok: true });
+  });
+
+  it('needs a cited fact for each part of a combined label', () => {
+    expect(issuesOf(label('SQL and Python', 'fact-sql'))).toEqual([
+      { path: 'skills[0]', code: 'unsupported_text' },
+    ]);
+    expect(issuesOf(label('SQL, Python', 'fact-python'))).toEqual([
+      { path: 'skills[0]', code: 'unsupported_text' },
+    ]);
+    expect(check(label('SQL and Python', 'fact-sql', 'fact-python'))).toEqual({ ok: true });
+    expect(check(label('SQL / Python', 'fact-python', 'fact-sql'))).toEqual({ ok: true });
+  });
+
+  it('does not let one fact stand for two parts', () => {
+    // Both words are in the cited facts together, but "Python" is not in the fact for "SQL".
+    const facts = CV_FACTS.map((fact) =>
+      fact.id === 'fact-sql' ? { ...fact, text: 'SQL', evidence: 'SQL, Python' } : fact,
+    );
+    expect(check(label('SQL and Python', 'fact-sql'), facts)).toEqual({ ok: true });
+    expect(issuesOf(label('SQL and Python', 'fact-sql'))).toHaveLength(1);
+  });
+
+  it('holds a one- or two-letter part to a whole match', () => {
+    const facts = CV_FACTS.map((fact) =>
+      fact.id === 'fact-python' ? { ...fact, text: 'R', evidence: 'R' } : fact,
+    );
+    expect(check(label('R', 'fact-python'), facts)).toEqual({ ok: true });
+    expect(issuesOf(label('Go', 'fact-python'), facts)).toEqual([
+      { path: 'skills[0]', code: 'unsupported_text' },
+    ]);
+  });
+});
+
+describe('citation types', () => {
+  const bullet = (id: string) =>
+    edited((cv) => {
+      at(cv.experience, 0).bullets[1] = {
+        text: 'Cut client time-to-live by 30%.',
+        factRefs: [aliasOf(id)],
+      };
+    });
+
+  it('refuses a constraint or a preference fact under a bullet, a heading, an education line and a skill', () => {
+    for (const type of ['constraint', 'preference'] as const) {
+      const facts = retyped('fact-ttl', type);
+      expect(issuesOf(bullet('fact-ttl'), facts)).toContainEqual({
+        path: 'experience[0].bullets[1]',
+        code: 'wrong_fact_type',
+      });
+      const skill = edited((cv) => {
+        at(cv.skills, 0).factRefs = [aliasOf('fact-ttl')];
+        at(cv.skills, 0).label = 'time-to-live';
+      });
+      expect(issuesOf(skill, facts)).toContainEqual({ path: 'skills[0]', code: 'wrong_fact_type' });
+    }
+    const heading = edited((cv) => {
+      at(cv.experience, 0).heading.factRef = aliasOf('fact-ttl');
+    });
+    expect(issuesOf(heading, retyped('fact-ttl', 'constraint'))).toContainEqual({
+      path: 'experience[0].heading',
+      code: 'wrong_fact_type',
+    });
+  });
+
+  it('lets the summary and the cover note cite a constraint fact, never a preference fact', () => {
+    // fact-ttl is cited by the summary (with fact-articles) and by the second paragraph.
+    expect(check(validCv(), retyped('fact-ttl', 'constraint'))).toEqual({ ok: true });
+    expect(issuesOf(validCv(), retyped('fact-ttl', 'preference'))).toEqual([
+      { path: 'summary', code: 'wrong_fact_type' },
+      { path: 'experience[0].bullets[1]', code: 'wrong_fact_type' },
+      { path: 'coverNote.paragraphs[1]', code: 'wrong_fact_type' },
     ]);
   });
 });
