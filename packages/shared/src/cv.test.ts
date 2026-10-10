@@ -206,6 +206,8 @@ describe('validateCv', () => {
     });
     expect(issuesOf(cv)).toEqual([
       { path: 'education[0]', code: 'wrong_fact_type' },
+      // The line's words are not in the metric fact either.
+      { path: 'education[0]', code: 'unsupported_text' },
       { path: 'skills[1]', code: 'wrong_fact_type' },
     ]);
   });
@@ -401,7 +403,7 @@ describe('skill labels', () => {
     expect(check(label('SQL / Python', 'fact-python', 'fact-sql'))).toEqual({ ok: true });
   });
 
-  it('does not let one fact stand for two parts', () => {
+  it("reads a part from the cited fact's evidence, and not from a fact that is not cited", () => {
     // Both words are in the cited facts together, but "Python" is not in the fact for "SQL".
     const facts = CV_FACTS.map((fact) =>
       fact.id === 'fact-sql' ? { ...fact, text: 'SQL', evidence: 'SQL, Python' } : fact,
@@ -453,11 +455,16 @@ describe('citation types', () => {
   });
 
   it('lets the summary and the cover note cite a constraint fact, never a preference fact', () => {
-    // fact-ttl is cited by the summary (with fact-articles) and by the second paragraph.
-    expect(check(validCv(), retyped('fact-ttl', 'constraint'))).toEqual({ ok: true });
-    expect(issuesOf(validCv(), retyped('fact-ttl', 'preference'))).toEqual([
+    // After this edit only the summary and the second paragraph cite fact-ttl.
+    const cv = edited((c) => {
+      at(c.experience, 0).bullets[1] = {
+        text: 'Led onboarding for 12 clients.',
+        factRefs: [aliasOf('fact-clients')],
+      };
+    });
+    expect(check(cv, retyped('fact-ttl', 'constraint'))).toEqual({ ok: true });
+    expect(issuesOf(cv, retyped('fact-ttl', 'preference'))).toEqual([
       { path: 'summary', code: 'wrong_fact_type' },
-      { path: 'experience[0].bullets[1]', code: 'wrong_fact_type' },
       { path: 'coverNote.paragraphs[1]', code: 'wrong_fact_type' },
     ]);
   });

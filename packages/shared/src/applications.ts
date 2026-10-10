@@ -48,6 +48,7 @@ export const CV_ISSUE_CODES = [
   'unknown_fact',
   'wrong_fact_type',
   'unsupported_number',
+  'unsupported_text',
   'contact_in_text',
   'too_long',
   'unsupported_char',

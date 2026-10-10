@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { CV_ISSUE_CODES, type CvIssueCode } from './applications.js';
+import { foldText } from './normalise.js';
 import { EMAIL, PHONE, isPhoneLike } from './pii.js';
 import type { Fact, FactContent } from './profile.js';
 
@@ -34,9 +35,18 @@ export const CV_LIMITS = {
   alias: 8,
 } as const;
 
-/** The fact types a heading or an education line may cite; a skill cites `skill` facts. */
-export const HEADING_FACT_TYPES: readonly Fact['type'][] = ['experience', 'education', 'project'];
+/** The fact types each section may cite (`wrong_fact_type` otherwise). */
+export const EXPERIENCE_HEADING_FACT_TYPES: readonly Fact['type'][] = ['experience'];
+export const PROJECT_HEADING_FACT_TYPES: readonly Fact['type'][] = ['project', 'experience'];
+export const EDUCATION_FACT_TYPES: readonly Fact['type'][] = ['education'];
 export const SKILL_FACT_TYPES: readonly Fact['type'][] = ['skill'];
+
+/**
+ * Types no claim may cite: a preference is never evidence of anything done. A constraint (work
+ * rights, location) may back a sentence in the summary or the cover note, and nothing else.
+ */
+const NEVER_CITED: readonly Fact['type'][] = ['preference'];
+const NOT_IN_ENTRIES: readonly Fact['type'][] = ['constraint', 'preference'];
 
 // ---- Schemas ----
 
@@ -260,6 +270,13 @@ export function hasContactDetails(text: string): boolean {
 interface Cite {
   /** For issues about the citation itself. */
   path: string;
+  /**
+   * How the words of `texts` are held to the cited facts (`unsupported_text`): `fact` for a
+   * heading or an education line, `parts` for a skill label; none for prose.
+   */
+  words?: 'fact' | 'parts';
+  /** Fact types that may never be cited here. */
+  denied: readonly Fact['type'][];
   /** Model texts under this citation, each with its path (length limits are reported per text). */
   texts: { path: string; value: string; max: number }[];
   refs: readonly string[];
@@ -275,6 +292,7 @@ function cites(content: CvContent): Cite[] {
       path: 'summary',
       texts: [{ path: 'summary', value: content.summary.text, max: CV_LIMITS.summary }],
       refs: content.summary.factRefs,
+      denied: NEVER_CITED,
       maxRefs: CV_LIMITS.refs,
     },
   ];
@@ -288,7 +306,10 @@ function cites(content: CvContent): Cite[] {
           { path: `${base}.heading.org`, value: entry.heading.org, max: CV_LIMITS.org },
         ],
         refs: entry.heading.factRef === '' ? [] : [entry.heading.factRef],
-        types: HEADING_FACT_TYPES,
+        types:
+          section === 'experience' ? EXPERIENCE_HEADING_FACT_TYPES : PROJECT_HEADING_FACT_TYPES,
+        words: 'fact',
+        denied: NOT_IN_ENTRIES,
         maxRefs: 1,
       });
       entry.bullets.forEach((bullet, j) => {
@@ -297,6 +318,7 @@ function cites(content: CvContent): Cite[] {
           path,
           texts: [{ path, value: bullet.text, max: CV_LIMITS.bullet }],
           refs: bullet.factRefs,
+          denied: NOT_IN_ENTRIES,
           maxRefs: CV_LIMITS.refs,
         });
       });
@@ -310,7 +332,9 @@ function cites(content: CvContent): Cite[] {
       path,
       texts: [{ path, value: entry.line, max: CV_LIMITS.educationLine }],
       refs: entry.factRef === '' ? [] : [entry.factRef],
-      types: HEADING_FACT_TYPES,
+      types: EDUCATION_FACT_TYPES,
+      words: 'fact',
+      denied: NOT_IN_ENTRIES,
       maxRefs: 1,
     });
   });
@@ -321,6 +345,8 @@ function cites(content: CvContent): Cite[] {
       texts: [{ path, value: skill.label, max: CV_LIMITS.skillLabel }],
       refs: skill.factRefs,
       types: SKILL_FACT_TYPES,
+      words: 'parts',
+      denied: NOT_IN_ENTRIES,
       maxRefs: CV_LIMITS.refs,
     });
   });
@@ -330,10 +356,56 @@ function cites(content: CvContent): Cite[] {
       path,
       texts: [{ path, value: paragraph.text, max: CV_LIMITS.noteParagraph }],
       refs: paragraph.factRefs,
+      denied: NEVER_CITED,
       maxRefs: CV_LIMITS.refs,
     });
   });
   return out;
+}
+
+// ---- Words ----
+
+/** Words the word rule leaves out: connectives, company suffixes and the generic label for a project. */
+const SKIPPED_WORDS: ReadonlySet<string> = new Set([
+  'and',
+  'of',
+  'the',
+  'for',
+  'ltd',
+  'limited',
+  'inc',
+  'project',
+  'personal',
+]);
+
+/** The words of 3+ letters in `text`, folded, without the skipped ones. */
+function wordsOf(text: string): string[] {
+  return [...foldText(text).matchAll(/\p{L}{3,}/gu)]
+    .map((match) => match[0])
+    .filter((word) => !SKIPPED_WORDS.has(word));
+}
+
+/** What a label or heading may borrow words from: one cited fact's text and evidence. */
+function factWords(fact: CvFact): Set<string> {
+  return new Set(wordsOf(`${fact.text}\n${fact.evidence}`));
+}
+
+const LABEL_PARTS = /[,;/&+|()\u2022]|\s(?:and|or)\s/i;
+
+/**
+ * Whether a skill label's parts are each backed by one cited fact: all the part's words are in
+ * that fact's text or evidence. A part without a word of 3+ letters ("R", "Go") has to be a
+ * whole word or phrase of a cited fact instead.
+ */
+function labelSupported(label: string, cited: readonly CvFact[]): boolean {
+  const sets = cited.map(factWords);
+  const phrases = cited.map((fact) => ` ${foldText(`${fact.text}\n${fact.evidence}`)} `);
+  return label.split(LABEL_PARTS).every((part) => {
+    const words = wordsOf(part);
+    if (words.length > 0) return sets.some((set) => words.every((word) => set.has(word)));
+    const folded = foldText(part);
+    return folded === '' || phrases.some((phrase) => phrase.includes(` ${folded} `));
+  });
 }
 
 function countIssues(content: CvContent): CvIssue[] {
@@ -403,10 +475,25 @@ export function validateCv(
         add(cite.path, 'unknown_fact');
         continue;
       }
-      if (cite.types !== undefined && !cite.types.includes(fact.type)) {
-        add(cite.path, 'wrong_fact_type');
-      }
+      const wrongType =
+        cite.denied.includes(fact.type) ||
+        (cite.types !== undefined && !cite.types.includes(fact.type));
+      if (wrongType) add(cite.path, 'wrong_fact_type');
       cited.push(fact);
+    }
+
+    if (cite.words === 'fact' && cited.length > 0) {
+      const allowed = new Set(cited.flatMap((fact) => [...factWords(fact)]));
+      for (const text of cite.texts) {
+        if (wordsOf(text.value).some((word) => !allowed.has(word))) {
+          add(text.path, 'unsupported_text');
+        }
+      }
+    }
+    if (cite.words === 'parts' && cited.length > 0) {
+      for (const text of cite.texts) {
+        if (!labelSupported(text.value, cited)) add(text.path, 'unsupported_text');
+      }
     }
 
     const supported = figuresIn(cited.map((fact) => `${fact.text}\n${fact.evidence}`).join('\n'));
