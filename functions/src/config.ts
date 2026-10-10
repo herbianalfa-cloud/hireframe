@@ -503,6 +503,8 @@ export const DIGEST = {
   jobsPerVerdict: 10,
   /** Fallback look-back when there is no earlier morning run to measure from. */
   defaultLookbackMs: 24 * 3_600_000,
+  /** The most documents each Pipeline count reads; a count at the limit reads as "n+". */
+  pipelineCountLimit: 100,
 } as const;
 
 // ---- Applications and CV writing (M7, ADR-053) ----
