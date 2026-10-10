@@ -392,14 +392,50 @@ export function figuresIn(text: string): Set<string> {
   return figures;
 }
 
-const URL_LIKE =
-  /\b(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|co\.uk|org|net|io|dev|app|ai|uk|me|ly|xyz|info|eu|gov|edu)\b/i;
+/** A link: contact details come from the header, so this is never allowed, even from a fact. */
+const LINK = /\b(?:https?:\/\/|www\.)\S+/i;
 
-/** An email, a phone number or a web address: contact details come only from the header. */
-export function hasContactDetails(text: string): boolean {
+const LABEL = String.raw`[a-z0-9](?:[a-z0-9-]*[a-z0-9])?`;
+const SEPARATOR = String.raw`(?:\.|\s*\[\.\]\s*|\s+dot\s+)`;
+/** `label.tld` with 2–24 letters in the last part, the "[.]" and " dot " spellings, and an optional path. */
+const ADDRESS = new RegExp(
+  String.raw`(?<![\w@.-])${LABEL}(?:${SEPARATOR}${LABEL})*${SEPARATOR}[a-z]{2,24}(?![\w@-])(?:\/\S*)?`,
+  'gi',
+);
+
+/** Top-level domains " dot " is read as (so "the dot product" is not an address). */
+const DOT_TLDS = new Set(
+  'com net org io co uk dev app ai me ly xyz info eu gov edu site online biz us ca de tech cloud link fr nl ie in au'.split(
+    ' ',
+  ),
+);
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * An email, a phone number or a web address: contact details come only from the header. A bare
+ * `label.tld` (ASP.NET, Booking.com) is allowed when the same token is in `allowed`, the text of
+ * the cited facts; an email, a phone number, a link and an obfuscated spelling never are.
+ */
+export function hasContactDetails(text: string, allowed = ''): boolean {
   if (text.match(EMAIL) !== null) return true;
   if ((text.match(PHONE) ?? []).some(isPhoneLike)) return true;
-  return URL_LIKE.test(text);
+  if (LINK.test(text)) return true;
+  for (const match of text.matchAll(ADDRESS)) {
+    const token = match[0].replace(/[.,;:!?)\]"']+$/, '');
+    const spelled = /\[\.\]|\s/.test(token.split('/')[0] ?? token);
+    if (spelled) {
+      const tld = (token.split('/')[0] ?? token).split(/\s*\[\.\]\s*|\s+dot\s+|\./i).pop() ?? '';
+      if (/\[\.\]/.test(token) || DOT_TLDS.has(tld.toLowerCase())) return true;
+      continue;
+    }
+    const literal = new RegExp(
+      String.raw`(?<![\w@.-])${escapeRegExp(token)}(?![\w@-]|\.[a-z0-9])`,
+      'i',
+    );
+    if (!literal.test(allowed)) return true;
+  }
+  return false;
 }
 
 interface Cite {
@@ -595,9 +631,14 @@ export function validateCv(
   for (const cite of cites(content)) {
     if (cite.refs.length === 0) add(cite.path, 'uncited');
     if (cite.refs.length > cite.maxRefs) add(cite.path, 'too_long');
+    const allowedText = cite.refs
+      .map((ref) => byId.get(aliases.get(ref) ?? ''))
+      .filter((fact) => fact?.status === 'active')
+      .map((fact) => `${fact?.text ?? ''}\n${fact?.evidence ?? ''}`)
+      .join('\n');
     for (const text of cite.texts) {
       if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
-      if (hasContactDetails(text.value)) add(text.path, 'contact_in_text');
+      if (hasContactDetails(text.value, allowedText)) add(text.path, 'contact_in_text');
       // Never dropped or swapped silently: the PDF fonts can't print it (ADR-054).
       if (!isPrintable(text.value)) add(text.path, 'unsupported_char');
     }
