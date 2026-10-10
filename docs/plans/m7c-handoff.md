@@ -112,7 +112,7 @@ See the PR body for each command's result.
 
 `validateCv` is stricter than 7C.2 shipped. The 7D prompt (`functions/src/cv/prompt.ts`) has to tell the model these, or most first attempts will fail:
 
-- **Copy words from the cited fact.** A heading's role and org, an education line and a skill label may use only words (3+ letters) that are in the cited fact's text or evidence; shortening is fine, adding a title or a company is `unsupported_text`. Skipped words: and, of, the, for, ltd, limited, inc, project, personal.
+- **Copy words from the cited fact.** A heading's role and org, an education line and a skill label may use only words (2+ letters, see "Second review round" below) that are in the cited fact's text or evidence; shortening is fine, adding a title or a company is `unsupported_text`. Skipped words: and, of, the, for, ltd, limited, inc, project, personal.
 - **Cite one fact per skill part.** `SQL and Python` cites the SQL fact and the Python fact; a label with parts (`,` `;` `/` `&` `+` `|` `(` `)` `and` `or`) needs a fact for each. Do not add qualifiers (`Advanced SQL`).
 - **Section fact types:** experience headings cite an `experience` fact; project headings a `project` or `experience` fact; education lines an `education` fact; skills `skill` facts. Bullets, headings and skills never cite `constraint` or `preference` facts; the summary and the note may cite a `constraint` fact; nothing cites a `preference` fact. (`wrong_fact_type`)
 - **Figures:** every number, multiplier (`10x`), ordinal, plural (`100s`), fraction, `10+`, currency amount and number word (`twelve`, `half`, `doubled`, `a dozen`) must be in a cited fact, in the same kind. Say what the fact says.
@@ -123,3 +123,15 @@ Worker changes this implies:
 - **Map `too_long` from `fitOnePage` and `unsupported_text` from `validateCv` to the retry with issue codes.** `too_long` from the fit is a real outcome (ADR-054): headings and education are never trimmed, so wide content at the limits can be two pages. The retry prompt should say "shorten the headings and education lines" for it.
 - **The new code widens `CV_ISSUE_CODES`** (`unsupported_text`, after `unsupported_number`), and with it `ApplicationSchema.lastIssues`. Any stored `lastIssues` array is unaffected (the new code only adds an allowed value); `issueCodes` returns codes in declared order.
 - `fullCv()` and `maxCv()` do not pass `validateCv`; use `validCv()` when a test needs a valid CV, and `wideCv()` (`functions/src/cv/render/fixtures.js`) for the worst case of the fit.
+
+## Second review round (PR #29): what the 7D CV prompt must also say
+
+The word rule and the contact rule changed again (ADR-054). The prompt has to tell the model these:
+
+- **Write the employer's name without a domain.** `Booking`, not `Booking.com`: a `name.tld` is `contact_in_text` unless a cited fact's own text (not its evidence) has the exact token.
+- **Copy role, org, education and skill words exactly.** Every word of 2+ letters is checked against the cited fact, so no plurals (`Analysts` for `Analyst`), no abbreviations (`Sr`, `PM`, `VP`, `MD`), no added levels (`II`), and no `Certification` for `Certificate`. Skipped: and, of, the, for, at, in, on, to, by, an, as, or, project, personal, and company suffixes (ltd, limited, plc, inc, llc, llp, gmbh; **not** uk).
+- **At least one real word per heading and per education line**, and a skill label with a real word in it.
+- **Write `Python`, not `Python 3`, unless the fact has the figure** (`3` is an `unsupported_number`). The same holds for `S3`-style names only when the fact has the token; a figure inside a word is ignored.
+- **Skill labels:** one part per fact; `C++`, `C#` and `F#` are different skills; a part separator is `,` `;` `/` `&` `|` `(` `)` `:` `•`, ` + `, ` - `, ` – `, ` — `, ` · `, `and` or `or`.
+
+Worker change: **run `normaliseCvText(content)` on the parsed output before `validateCv` and store its result.** The validator checks printability after NFC, and the renderer does not, so storing the raw output could pass the check and then be refused by `CvRenderError`.
