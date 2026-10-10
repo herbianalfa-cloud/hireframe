@@ -388,8 +388,17 @@ describe('renderDigest: the worst case fits the response limit', () => {
           errors: Array.from({ length: 50 }, () => ({ sourceId: worst(200), code: worst(200) })),
         },
         spend: { spendPence: 1499, capPence: 1500 },
+        // The widest the Pipeline line gets: every number past the print limit.
+        pipeline: {
+          needsInput: Number.MAX_SAFE_INTEGER,
+          generating: Number.MAX_SAFE_INTEGER,
+          ready: Number.MAX_SAFE_INTEGER,
+          appliedThisWeek: Number.MAX_SAFE_INTEGER,
+          weeklyTarget: Number.MAX_SAFE_INTEGER,
+        },
       }),
     );
+    expect(out.text).toContain('999+ need your input · 999+ generating · 999+ ready to send');
     expect(out.html.length).toBeLessThanOrEqual(100_000);
     expect(out.text.length).toBeLessThanOrEqual(100_000);
     expect(out.html.length).toBeGreaterThan(50_000); // the fixture really is large

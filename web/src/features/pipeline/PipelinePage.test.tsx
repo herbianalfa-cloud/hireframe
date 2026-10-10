@@ -502,4 +502,33 @@ describe('Ready to send', () => {
       screen.getByRole('button', { name: 'Regenerate with notes' }),
     );
   });
+
+  it('renders job titles, companies, questions and notes as text, never as markup', async () => {
+    const markup = '<img src=x onerror=alert(1)><script>alert(2)</script><b>bold</b>';
+    given({
+      needs_input: ready(
+        makeApplication('job1', {
+          stage: 'needs_input',
+          job: { title: `Title ${markup}`, company: `Company ${markup}`, verdict: 'apply' },
+          questions: [{ ...QUESTION_A, requirement: `Requirement ${markup}` }],
+        }),
+      ),
+      ready: ready(
+        makeApplication('job2', {
+          stage: 'ready',
+          cvIds: ['job2-v1'],
+          currentCvId: 'job2-v1',
+          notes: `Notes ${markup}`,
+        }),
+      ),
+    });
+    const { container } = open();
+    // The strings are on the page, as characters.
+    expect(container.textContent).toContain(`Title ${markup}`);
+    expect(container.textContent).toContain(`Company ${markup}`);
+    expect(container.textContent).toContain(`Requirement ${markup}`);
+    expect(container.textContent).toContain(`Last notes: Notes ${markup}`);
+    // And no element was made from them.
+    expect(container.querySelector('img, script, b')).toBeNull();
+  });
 });

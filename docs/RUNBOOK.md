@@ -422,7 +422,7 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
        The scheduler job must print `*/10 7-23 * * *`, `Europe/London` and `hireframe-fns@…`, and the policy **only** `serviceAccount:hireframe-fns@…`. If the first deploy said "Failed to set invoker function generateCvs" and the job doesn't exist, use the Recovery entry "generateCvs has no schedule". This is the second of the three free Cloud Scheduler jobs.
     5. **Check the functions.** **Build → Functions** lists `application` and `generateCvs` in `europe-west2`; `generateCvs` shows 540 s, 1 GiB and max instances 1.
 95. **Try one real application** (I7). In the app:
-    1. **Profile → CV header:** set your name and email (and phone, location, links if you want them on the CV) and save. Without it, Start application blocks with "Add or fix your CV header".
+    1. **Profile → CV header:** set your name and email (and phone, location, links if you want them on the CV) and save. Without it, the application stops at **Chosen** and says: "Your CV header is missing or can’t be used. Add your name and email on Profile, then retry."
     2. Open an Apply job that has a full read and press **Start application**. It goes to **Needs your input** if the posting asks for things your profile doesn't show: answer or skip each question (an answer becomes a fact on Profile, marked "From an application answer").
     3. **Pipeline** shows it under **Generating** ("usually within 15 minutes"; the worker runs every 10 minutes from 07:00 to 23:50). It moves to **Ready to send** by itself.
     4. Download all four files. Open the .docx in Word or Google Docs and check it is **one page**, and paste the PDF's text into a plain editor to check the reading order.
