@@ -426,7 +426,7 @@ export function hasContactDetails(text: string, allowed = ''): boolean {
     const spelled = /\[\.\]|\s/.test(token.split('/')[0] ?? token);
     if (spelled) {
       const tld = (token.split('/')[0] ?? token).split(/\s*\[\.\]\s*|\s+dot\s+|\./i).pop() ?? '';
-      if (/\[\.\]/.test(token) || DOT_TLDS.has(tld.toLowerCase())) return true;
+      if (token.includes('[.]') || DOT_TLDS.has(tld.toLowerCase())) return true;
       continue;
     }
     const literal = new RegExp(
