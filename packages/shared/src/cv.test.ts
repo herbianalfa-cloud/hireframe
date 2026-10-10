@@ -1028,3 +1028,80 @@ describe('schemas', () => {
     expect(CvDocSchema.safeParse({ ...doc, tokens: 5 }).success).toBe(false);
   });
 });
+
+/** The valid CV with its first experience heading, and an education line, replaced. */
+const heading = (role: string, org: string) =>
+  edited((cv) => {
+    at(cv.experience, 0).heading.role = role;
+    at(cv.experience, 0).heading.org = org;
+  });
+
+describe('word rule: words of 2+ letters', () => {
+  it.each(['VP of AI', 'MD', 'PM', 'Sr PM', 'AI Intern', 'Intern II'])(
+    'rejects the role "%s" under the intern fact',
+    (role) => {
+      expect(issuesOf(heading(role, 'Example Cloud Ltd'))).toEqual([
+        { path: 'experience[0].heading.role', code: 'unsupported_text' },
+      ]);
+    },
+  );
+
+  it.each(['EY', 'BP', 'Example Cloud UK'])('rejects the org "%s" under the intern fact', (org) => {
+    expect(issuesOf(heading('Customer Onboarding Intern', org))).toEqual([
+      { path: 'experience[0].heading.org', code: 'unsupported_text' },
+    ]);
+  });
+
+  it('skips at, in, on, to, by, an, as and or', () => {
+    expect(check(heading('Intern at Example Cloud', 'Example Cloud'))).toEqual({ ok: true });
+    expect(check(heading('Intern in Onboarding', 'Example Cloud'))).toEqual({ ok: true });
+    expect(check(heading('Intern on Onboarding', 'Example Cloud'))).toEqual({ ok: true });
+    expect(check(heading('Intern to Customer', 'Example Cloud'))).toEqual({ ok: true });
+    expect(check(heading('Intern by Customer', 'Example Cloud'))).toEqual({ ok: true });
+    expect(check(heading('An Intern as Onboarding', 'Example Cloud'))).toEqual({ ok: true });
+    expect(check(heading('Intern or Onboarding', 'Example Cloud'))).toEqual({ ok: true });
+  });
+
+  it('accepts "BSc in Computer Science" when the fact has those words', () => {
+    const facts = CV_FACTS.map((fact) =>
+      fact.id === 'fact-scrum'
+        ? { ...fact, text: 'BSc Computer Science', evidence: 'BSc Computer Science, 2023' }
+        : fact,
+    );
+    const cv = edited((c) => {
+      at(c.education, 0).line = 'BSc in Computer Science';
+    });
+    expect(check(cv, facts)).toEqual({ ok: true });
+  });
+});
+
+describe('word rule: a 2-letter word in a skill label is checked', () => {
+  const label = (text: string, factText: string) => {
+    const facts: CvFact[] = [
+      ...CV_FACTS,
+      { id: 'fact-x', type: 'skill', text: factText, evidence: factText, status: 'active' },
+    ];
+    const aliases = new Map([...CV_ALIASES, ['F90', 'fact-x']]);
+    const cv = edited((c) => {
+      c.skills = [{ label: text, factRefs: ['F90'] }];
+    });
+    return validateCv(cv, aliases, facts);
+  };
+
+  it('checks "Go" as a word, so it is not free next to a real word', () => {
+    expect(label('Go Python', 'Python')).toEqual({
+      ok: false,
+      issues: [{ path: 'skills[0]', code: 'unsupported_text' }],
+    });
+    expect(label('Go Python', 'Go and Python')).toEqual({ ok: true });
+    expect(label('Go', 'Go')).toEqual({ ok: true });
+  });
+
+  it('keeps the whole-phrase fallback for a one-letter part', () => {
+    expect(label('R', 'R')).toEqual({ ok: true });
+    expect(label('R', 'Python')).toEqual({
+      ok: false,
+      issues: [{ path: 'skills[0]', code: 'unsupported_text' }],
+    });
+  });
+});
