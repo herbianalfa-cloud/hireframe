@@ -229,3 +229,33 @@ export const generatingApplicationsSpec: QuerySpec = {
   filters: [{ field: 'stage', op: '==', value: 'generating' }],
   orderBy: [],
 };
+
+// ---- Pipeline queries added in 7D.4 ----
+
+/**
+ * Applied applications, newest first by `updatedAt`. The Applied mirror writes `updatedAt` and
+ * leaves `stageAt` alone (the rules allow only `stage`, `stageBefore` and `updatedAt`), so this is
+ * the order that means "marked applied most recently". It needs the `(stage, updatedAt desc)`
+ * composite.
+ */
+export const appliedApplicationsSpec: QuerySpec = {
+  collection: COLLECTIONS.applications,
+  filters: [{ field: 'stage', op: '==', value: 'applied' }],
+  orderBy: [{ field: 'updatedAt', direction: 'desc' }],
+};
+
+/** The stages that wait for the owner: a question to answer, or a CV to send. */
+export const TODO_STAGES = ['needs_input', 'ready'] as const satisfies readonly ApplicationStage[];
+
+/**
+ * The badge's and the summary bar's "Things to do" count: equality only, no `orderBy`, so the
+ * single-field index on `stage` serves it and no composite is needed. Read with a limit.
+ */
+export const todoApplicationsSpec: QuerySpec = {
+  collection: COLLECTIONS.applications,
+  filters: [{ field: 'stage', op: 'in', value: [...TODO_STAGES] }],
+  orderBy: [],
+};
+
+/** The most applications a to-do count reads; a count at the limit is shown as "n+". */
+export const TODO_COUNT_LIMIT = 50;

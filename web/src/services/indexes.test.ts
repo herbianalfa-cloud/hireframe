@@ -12,7 +12,10 @@ import {
   digestRunsSpec,
   digestSourcesSpec,
   digestWaitingSpec,
+  appliedApplicationsSpec,
   generatingApplicationsSpec,
+  TODO_STAGES,
+  todoApplicationsSpec,
 } from '@hireframe/shared';
 import { dashboardQuerySpecs, lastRunSpec, summarySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
@@ -106,12 +109,48 @@ describe('firestore.indexes.json', () => {
     expect(indexServes(generatingApplicationsSpec, [])).toBe(true);
   });
 
+  it('serves the Applied list, ordered by updatedAt, from its own (stage, updatedAt desc) composite', () => {
+    expect(appliedApplicationsSpec).toEqual({
+      collection: 'applications',
+      filters: [{ field: 'stage', op: '==', value: 'applied' }],
+      orderBy: [{ field: 'updatedAt', direction: 'desc' }],
+    });
+    expect(indexServes(appliedApplicationsSpec, indexes)).toBe(true);
+    expect(indexServes(appliedApplicationsSpec, [])).toBe(false);
+    // The stageAt composite alone must not be what serves it.
+    const stageAtOnly = indexes.filter((index) =>
+      index.fields.every((field) => field.fieldPath !== 'updatedAt'),
+    );
+    expect(indexServes(appliedApplicationsSpec, stageAtOnly)).toBe(false);
+    expect(indexes).toContainEqual({
+      collectionGroup: 'applications',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'stage', order: 'ASCENDING' },
+        { fieldPath: 'updatedAt', order: 'DESCENDING' },
+      ],
+    });
+  });
+
+  it('serves the to-do count (needs_input, ready) without a composite index', () => {
+    expect(todoApplicationsSpec).toEqual({
+      collection: 'applications',
+      filters: [{ field: 'stage', op: 'in', value: [...TODO_STAGES] }],
+      orderBy: [],
+    });
+    expect(indexServes(todoApplicationsSpec, indexes)).toBe(true);
+    expect(indexServes(todoApplicationsSpec, [])).toBe(true);
+  });
+
   it('serves each Pipeline stage list from the (stage, stageAt desc) composite', () => {
     for (const stage of PIPELINE_STAGES) {
+      // Every list is served by a composite; Applied by its own, ordered by updatedAt (below).
       expect(indexServes(stageSpec(stage), indexes), stage).toBe(true);
       // Equality plus a descending order needs the composite: it is not served by single fields.
       expect(indexServes(stageSpec(stage), []), stage).toBe(false);
     }
+    expect(stageSpec('applied')).toEqual(appliedApplicationsSpec);
+    expect(stageSpec('ready').orderBy).toEqual([{ field: 'stageAt', direction: 'desc' }]);
     expect(indexes).toContainEqual({
       collectionGroup: 'applications',
       queryScope: 'COLLECTION',
