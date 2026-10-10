@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate } from '@/lib/format';
+import { StartApplication } from '@/features/pipeline/StartApplication';
 import { useFacts } from '@/features/profile/hooks';
 import type { JobView } from '@/services/jobs';
 
@@ -298,10 +299,7 @@ function Actions({
         </div>
       ) : null}
       <div className="mt-3">
-        <Button variant="secondary" disabled title="Arrives with CV tailoring (M7)">
-          Generate CV
-        </Button>
-        <span className="ml-2 text-xs text-muted-foreground">Arrives with CV tailoring (M7)</span>
+        <StartApplication view={view} />
       </div>
       <div aria-live="polite">
         {error ? (
