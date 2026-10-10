@@ -473,7 +473,7 @@ describe('citation types', () => {
 describe('figures', () => {
   it('compares figures by value and kind', () => {
     expect([...figuresIn('12k users, £50,000, 30%, 1.5m, 12 clients')].sort()).toEqual([
-      'money:50000',
+      '£plain:50000',
       'percent:30',
       'plain:12',
       'plain:12000',
@@ -484,12 +484,127 @@ describe('figures', () => {
   });
 
   it('ignores digits inside names and version numbers', () => {
-    expect(figuresIn('S3, ES6, Web3, 3D, 2FA, v1.2.3, 1st')).toEqual(new Set());
+    expect(figuresIn('S3, ES6, Web3, 3D, 2FA, v1.2.3')).toEqual(new Set());
   });
 
-  it('keeps a percentage apart from a plain number and from money', () => {
+  it('keeps a percentage apart from a plain number and each currency apart', () => {
     expect(figuresIn('30%')).not.toEqual(figuresIn('30'));
     expect(figuresIn('£30')).not.toEqual(figuresIn('30'));
+    expect(figuresIn('£470')).not.toEqual(figuresIn('$470'));
+    expect(figuresIn('€470')).not.toEqual(figuresIn('£470'));
+    expect(figuresIn('£470')).toEqual(figuresIn('£470'));
+  });
+
+  it('reads multipliers, ordinals, plurals and fractions as figures of their own kind', () => {
+    expect(figuresIn('10x')).toEqual(new Set(['times:10']));
+    expect(figuresIn('a 10-fold rise')).toEqual(new Set(['times:10']));
+    expect(figuresIn('2nd, 21st')).toEqual(new Set(['ordinal:2', 'ordinal:21']));
+    expect(figuresIn('100s of')).toEqual(new Set(['plural:100']));
+    expect(figuresIn('the 1990s')).toEqual(new Set(['plural:1990']));
+    expect(figuresIn('¼ ½ ¾')).toEqual(new Set(['fraction:0.25', 'fraction:0.5', 'fraction:0.75']));
+    expect(figuresIn('10x')).not.toEqual(figuresIn('10'));
+    expect(figuresIn('2nd')).not.toEqual(figuresIn('2'));
+  });
+
+  it('reads b, bn, MM and mn as billions and millions', () => {
+    expect(figuresIn('$2b, 3bn')).toEqual(new Set(['$plain:2000000000', 'plain:3000000000']));
+    expect(figuresIn('5MM, 4mn, 6m')).toEqual(
+      new Set(['plain:5000000', 'plain:4000000', 'plain:6000000']),
+    );
+  });
+
+  it('reads "2 million" like "2m", and does not count the word twice', () => {
+    expect(figuresIn('£2 million')).toEqual(figuresIn('£2m'));
+    expect(figuresIn('1.5 billion')).toEqual(new Set(['plain:1500000000']));
+    expect(figuresIn('3 hundred')).toEqual(new Set(['plain:300']));
+  });
+
+  it('does not take "10+" for "10"', () => {
+    expect(figuresIn('10+ clients')).toEqual(new Set(['plain:10+']));
+    expect(figuresIn('10+ clients')).not.toEqual(figuresIn('10 clients'));
+    expect(figuresIn('£2m+')).toEqual(new Set(['£plain:2000000+']));
+  });
+
+  it('reads number words by value, so "twelve" and "12" are the same figure', () => {
+    expect(figuresIn('twelve')).toEqual(figuresIn('12'));
+    expect(figuresIn('Twenty-five')).toEqual(new Set(['plain:25']));
+    expect(figuresIn('two hundred')).toEqual(new Set(['plain:200']));
+    expect(figuresIn('three hundred and fifty')).toEqual(new Set(['plain:350']));
+    expect(figuresIn('a dozen')).toEqual(new Set(['plain:12']));
+    expect(figuresIn('two dozen')).toEqual(new Set(['plain:24']));
+    expect(figuresIn('two thousand')).toEqual(new Set(['plain:2000']));
+    expect(figuresIn('five million')).toEqual(new Set(['plain:5000000']));
+    expect(figuresIn('forty')).toEqual(new Set(['plain:40']));
+    expect(figuresIn('ten percent')).toEqual(new Set(['percent:10']));
+  });
+
+  it('reads the indefinite and the changed-by words as kinds of their own', () => {
+    expect(figuresIn('tens, dozens, hundreds')).toEqual(
+      new Set(['word:tens', 'word:dozens', 'word:hundreds']),
+    );
+    expect(figuresIn('half')).toEqual(new Set(['word:half']));
+    expect(figuresIn('halved')).toEqual(new Set(['word:halved']));
+    expect(figuresIn('double, doubled')).toEqual(new Set(['word:double']));
+    expect(figuresIn('triple, tripled')).toEqual(new Set(['word:triple']));
+    expect(figuresIn('quadruple, quadrupled')).toEqual(new Set(['word:quadruple']));
+  });
+
+  it('does not check "one"', () => {
+    expect(figuresIn('one of the first, no one')).toEqual(new Set());
+    expect(figuresIn('one hundred')).toEqual(new Set(['plain:100']));
+  });
+});
+
+describe('unsupported_number across the new kinds', () => {
+  const bullet = (text: string, id = 'fact-clients') =>
+    edited((cv) => {
+      at(cv.experience, 0).bullets[0] = { text, factRefs: [aliasOf(id)] };
+    });
+  const unsupported = { path: 'experience[0].bullets[0]', code: 'unsupported_number' };
+
+  it.each([
+    'Grew onboarding 10x.',
+    'Ranked 2nd of the cohort.',
+    'Led 100s of clients.',
+    'Handled £12 clients.',
+    'Led over 12+ clients.',
+    'Led twenty clients.',
+    'Led a dozen teams of fifteen.',
+    'Led hundreds of clients.',
+    'Halved the time to onboard 12 clients.',
+    'Doubled onboarding for 12 clients.',
+    'Tripled the 12 clients.',
+    'Reached a 12-fold increase.',
+    'Reached ¼ of 12 clients.',
+    'Raised $2b.',
+  ])('rejects "%s" against a fact that says "12 clients"', (text) => {
+    expect(issuesOf(bullet(text))).toContainEqual(unsupported);
+  });
+
+  it.each([
+    'Led twelve clients.',
+    'Led a dozen clients.',
+    'Led one client of the 12.',
+    'Led 12 clients, one by one.',
+  ])('accepts "%s" against a fact that says "12 clients"', (text) => {
+    expect(check(bullet(text))).toEqual({ ok: true });
+  });
+
+  it('accepts a figure the fact has in the same kind', () => {
+    const facts = CV_FACTS.map((fact) =>
+      fact.id === 'fact-clients'
+        ? {
+            ...fact,
+            text: 'Grew sign-ups 10x to 100s of users for £470 and 10+ clients, halved churn',
+          }
+        : fact,
+    );
+    const claim = bullet(
+      'Grew sign-ups 10x to 100s of users for £470 and 10+ clients, halved churn.',
+    );
+    expect(check(claim, facts)).toEqual({ ok: true });
+    expect(issuesOf(bullet('Spent $470.'), facts)).toContainEqual(unsupported);
+    expect(issuesOf(bullet('Won 10 clients.'), facts)).toContainEqual(unsupported);
   });
 });
 
