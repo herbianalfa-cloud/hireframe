@@ -773,7 +773,7 @@ export const DEV_EMULATOR_ENV = {
 export function withEmulatorDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out = { ...env };
   for (const [key, value] of Object.entries(DEV_EMULATOR_ENV)) {
-    if (!out[key]) out[key] = value;
+    if (out[key] === undefined || out[key] === '') out[key] = value;
   }
   return out;
 }
