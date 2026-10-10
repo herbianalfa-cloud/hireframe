@@ -757,6 +757,16 @@ export function readyApplicationSeed(now: Date) {
 }
 
 /**
+ * The environment for the seed-time worker pass. LIVE and the API key are removed, so the pass
+ * always uses the fake model: `LIVE=1 npm run dev` must neither stop while seeding (a missing
+ * key) nor make a paid call before the owner has done anything.
+ */
+export function seedWorkerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { LIVE: _live, ANTHROPIC_API_KEY: _key, ...rest } = env;
+  return rest;
+}
+
+/**
  * The other three: Needs your input (two questions, each answerable or skippable), Generating
  * (waits for `node scripts/dev-worker.ts`) and Applied (its job is already `applied`).
  */

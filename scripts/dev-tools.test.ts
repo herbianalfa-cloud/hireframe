@@ -38,6 +38,7 @@ import {
   toRestValue,
   usageSeedDocument,
   morningRunSeedDocument,
+  seedWorkerEnv,
 } from './dev-seed.ts';
 
 describe('isCiDeploy', () => {
@@ -321,6 +322,21 @@ describe('seed → Firestore REST conversion', () => {
     expect(() => criteriaSeedDocuments(now)).not.toThrow();
     expect(() => profileSeedDocuments(now)).not.toThrow();
     expect(() => linkedInJobDocuments(now)).not.toThrow();
+  });
+});
+
+describe('the seed-time worker environment', () => {
+  it('drops LIVE and the API key, so LIVE=1 seeds with the fake model and needs no key', () => {
+    const env = seedWorkerEnv({
+      LIVE: '1',
+      ANTHROPIC_API_KEY: 'sk-fake-key',
+      GCLOUD_PROJECT: 'demo-hireframe',
+      FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+    });
+    expect(env).toEqual({
+      GCLOUD_PROJECT: 'demo-hireframe',
+      FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+    });
   });
 });
 
