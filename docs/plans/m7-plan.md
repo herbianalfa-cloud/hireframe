@@ -243,8 +243,9 @@ There is nothing for the owner to see yet. 7C ships the parts 7D wires together,
 **`validateCv(content, aliases, facts)`** returns `{ ok } | { issues: [{ path, code }] }`. It is pure, and the codes are:
 - `uncited`: a citation is missing;
 - `unknown_fact`: an alias that isn't in `aliases`, or a fact that is now archived;
-- `wrong_fact_type`: a heading must cite an `experience`, `education` or `project` fact, and a skill a `skill` fact;
-- `unsupported_number`: every number, `%`, `£`/`$` amount or `k`/`m` figure in a text must appear, normalised, in the text or evidence of a fact it cites;
+- `wrong_fact_type`: an experience heading cites an `experience` fact, a project heading a `project` or `experience` fact, an education line an `education` fact, a skill `skill` facts; nothing cites a `preference` fact, and only the summary and the note may cite a `constraint` fact;
+- `unsupported_text`: the words of a heading, education line or skill label are in the cited fact (ADR-054);
+- `unsupported_number`: every figure (number, number word, `%`, currency amount, `k`/`m`/`b`, multiplier, ordinal, plural, fraction, `10+`) in a text must appear, by value and kind, in the text or evidence of a fact it cites;
 - `contact_in_text`: an email, phone number or URL in model text (contact details come only from the header);
 - `too_long`: past the length limits.
 
@@ -295,7 +296,7 @@ All fixtures use the fake candidate's facts.
   - `renderCvPdf(header, content, facts)` → `{ bytes, pages }`, and `renderNotePdf`.
   - Text outside WinAnsi (Helvetica's encoding) is a validation issue (`unsupported_char`), never dropped silently.
 - **DOCX uses `docx`** (npm): the same content and the same spacing, Arial (metric-compatible with Helvetica), real headings and bullets, and no tables, text boxes or images (ATS-safe). `renderCvDocx`, `renderNoteDocx`.
-- **`fitOnePage`:** render, and while the PDF has more than 1 page apply the next `trimOrder` step, up to 12 times. It returns the content used and `trimmed: n`. If it still doesn't fit, `too_long` (cannot happen with the schema limits; pinned by a test with the maximum content).
+- **`fitOnePage`:** render, and while the PDF has more than 1 page apply the next `trimOrder` step, up to 12 times. It returns the content used and `trimmed: n`. If it still doesn't fit, `too_long`: a real outcome (headings and education are never trimmed; ADR-054), so the worker retries with the code.
 - **Tests:**
   - the fake CV renders to exactly 1 page;
   - the maximum-size content fits after trimming;

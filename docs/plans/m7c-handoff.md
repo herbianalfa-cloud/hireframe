@@ -13,7 +13,7 @@ Branch `feat/m7c-cv-engine`, from `main` at `cf17ac8`. 7C.1 is schemas, pure log
 - `questionsFromRequirements(deep, max = 5)`: met and logistics out; must before nice, then missing before partial, then the job's own order; one question per distinct text.
 
 ### `packages/shared/src/cv.ts`
-- `CV_LIMITS`, `HEADING_FACT_TYPES`, `SKILL_FACT_TYPES`.
+- `CV_LIMITS`, `EXPERIENCE_HEADING_FACT_TYPES`, `PROJECT_HEADING_FACT_TYPES`, `EDUCATION_FACT_TYPES`, `SKILL_FACT_TYPES`.
 - `CvContentSchema` (strict, the plan's shape and limits) and `CvContentShapeSchema` (see differences). Types `CvContent`, `TrimmedCvContent`.
 - `CvHeaderSchema` (`profile/cvHeader`), `CvDocSchema` (`cvs/{cvId}`), `cvId(jobId, n)`, `CV_FILE_KINDS`, `CV_FILE_FORMATS`.
 - `validateCv(content, aliases, facts)`, `issueCodes(issues)`, `citedFactIds(content, aliases)`, `figuresIn(text)`, `hasContactDetails(text)`.
@@ -55,14 +55,14 @@ Branch `feat/m7c-cv-engine`, from `main` at `cf17ac8`. 7C.1 is schemas, pure log
 4. **`TrimmedCvContentSchema` (new)**: the same as `CvContentSchema` with `summary` nullable, because `trimOrder` ends by removing the summary. `CvDoc.content` uses it.
 5. **`validateCv` returns `{ ok: true } | { ok: false, issues }`** (the plan wrote `{ ok } | { issues }`).
 6. **`trimOrder` returns `TrimStep[]`** (`bullet | project | skill | summary`), and each step refers to the content as the steps before it left it. `applyTrim` is new. Tie rule for "the longest experience entry": the later entry. Every experience entry keeps at least one bullet. The plan didn't say either.
-7. **Heading and education type rule.** Experience and project headings and education lines may each cite an `experience`, `education` or `project` fact (the plan's wording, taken literally). A section-by-section rule (experience heading → `experience` only) would be stricter; I didn't add it.
+7. **Withdrawn.** 7C.1 let headings and education lines each cite an `experience`, `education` or `project` fact. The review round replaced it with per-section types (see "Review round" below and ADR-054).
 8. **`application_stage.from` is nullable** (null when an application starts).
 9. **Number check limits (`unsupported_number`).**
    - A figure must match a cited fact's text or evidence by value and kind: `12k` = `12,000`; `30%` ≠ `30`; `£30` ≠ `30`.
    - A figure inside a word (`S3`, `ES6`, `3D`, `1st`) is ignored.
-   - **Number words ("twelve") are not checked.** A word list gives false positives ("one of the…").
+   - **Revised in the review round:** number words are checked by value (`twelve` is `12`; `one` alone is not checked), and the figure kinds are wider (multipliers, ordinals, plurals, fractions, `10+`, each currency).
    - A cite with an unknown fact also reports `unsupported_number` for figures only that fact supported.
-10. **Contact check reuses `EMAIL` and `PHONE` from `pii.ts`**, plus a URL pattern (`http(s)://`, `www.`, or a bare domain with a common TLD). It misses an address written as "name at domain".
+10. **Contact check reuses `EMAIL` and `PHONE` from `pii.ts`**, plus links and any `label.tld` (revised in the review round: any final part of 2–24 letters, `[.]` and ` dot ` spellings, and a token allowed only when a cited fact has it literally). It misses an address written as "name at domain".
 11. **Entry and bullet minimums are not enforced** (`bullets` may be empty, `experience` may be empty); the plan gave maximums only. The cover note's 2–4 paragraphs is enforced.
 12. **Test phone numbers are built at run time** (`['07700', '900123'].join(' ')`) so the PII scan sees no literal. They are in Ofcom's fictional drama range.
 13. ARCHITECTURE.md line 75 still shows the old `cvs/{cvId}` shape. Not touched, per the end-of-PR docs rule.
@@ -107,3 +107,19 @@ Rules for `applications` and `profile/cvHeader` (7D.1), the `cvWrite` branch in 
 
 ## Gate (7C.2, after the last code change)
 See the PR body for each command's result.
+
+## Review round (PR #29): validator rules the 7D prompt must state
+
+`validateCv` is stricter than 7C.2 shipped. The 7D prompt (`functions/src/cv/prompt.ts`) has to tell the model these, or most first attempts will fail:
+
+- **Copy words from the cited fact.** A heading's role and org, an education line and a skill label may use only words (3+ letters) that are in the cited fact's text or evidence; shortening is fine, adding a title or a company is `unsupported_text`. Skipped words: and, of, the, for, ltd, limited, inc, project, personal.
+- **Cite one fact per skill part.** `SQL and Python` cites the SQL fact and the Python fact; a label with parts (`,` `;` `/` `&` `+` `|` `(` `)` `and` `or`) needs a fact for each. Do not add qualifiers (`Advanced SQL`).
+- **Section fact types:** experience headings cite an `experience` fact; project headings a `project` or `experience` fact; education lines an `education` fact; skills `skill` facts. Bullets, headings and skills never cite `constraint` or `preference` facts; the summary and the note may cite a `constraint` fact; nothing cites a `preference` fact. (`wrong_fact_type`)
+- **Figures:** every number, multiplier (`10x`), ordinal, plural (`100s`), fraction, `10+`, currency amount and number word (`twelve`, `half`, `doubled`, `a dozen`) must be in a cited fact, in the same kind. Say what the fact says.
+- **No links and no addresses:** no URL, no email, no phone number, and nothing shaped like `name.tld` unless a cited fact has that exact token (`ASP.NET`). The header supplies contact details.
+
+Worker changes this implies:
+- **Check `renderNotePdf(header, coverNote).pages === 1`** before storing: the 250-word limit makes it hold, but the check is one call and `pages` is exact. A note over a page is `too_long` for the retry.
+- **Map `too_long` from `fitOnePage` and `unsupported_text` from `validateCv` to the retry with issue codes.** `too_long` from the fit is a real outcome (ADR-054): headings and education are never trimmed, so wide content at the limits can be two pages. The retry prompt should say "shorten the headings and education lines" for it.
+- **The new code widens `CV_ISSUE_CODES`** (`unsupported_text`, after `unsupported_number`), and with it `ApplicationSchema.lastIssues`. Any stored `lastIssues` array is unaffected (the new code only adds an allowed value); `issueCodes` returns codes in declared order.
+- `fullCv()` and `maxCv()` do not pass `validateCv`; use `validCv()` when a test needs a valid CV, and `wideCv()` (`functions/src/cv/render/fixtures.js`) for the worst case of the fit.
