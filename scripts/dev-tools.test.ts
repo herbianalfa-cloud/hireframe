@@ -21,6 +21,7 @@ import {
   applicationSeeds,
   cvHeaderSeed,
   DEV_APPLIED_JOB_ID,
+  DEV_BLOCKED_JOB_ID,
   DEV_GENERATING_JOB_ID,
   DEV_NEEDS_INPUT_JOB_ID,
   DEV_READY_JOB_ID,
@@ -352,6 +353,7 @@ describe('application pipeline seed (M7 7D.2)', () => {
     const seeded = [readyApplicationSeed(now), ...applicationSeeds(now)];
     expect(seeded.map((item) => ApplicationSchema.parse(item.data).stage).sort()).toEqual([
       'applied',
+      'chosen',
       'generating',
       'generating',
       'needs_input',
@@ -361,6 +363,18 @@ describe('application pipeline seed (M7 7D.2)', () => {
       expect(job, jobId).toBeDefined();
       expect(data.job).toMatchObject({ title: job?.title, company: job?.company });
     }
+  });
+
+  it('seeds one Chosen application, blocked after two invalid drafts, on a job with a deep read', () => {
+    const seeds = new Map(applicationSeeds(now).map((item) => [item.jobId, item.data]));
+    const blocked = ApplicationSchema.parse(seeds.get(DEV_BLOCKED_JOB_ID));
+    expect(blocked.stage).toBe('chosen');
+    expect(blocked.blocked?.code).toBe('invalid_output');
+    expect(blocked.attempt).toBe(2);
+    expect(blocked.lastIssues).toEqual(['unsupported_number', 'too_long']);
+    // Retry needs a verdict and a deep read to put it back at generating.
+    expect(jobs.get(DEV_BLOCKED_JOB_ID)?.deep).toBeDefined();
+    expect(jobs.get(DEV_BLOCKED_JOB_ID)?.status).not.toBe('applied');
   });
 
   it('seeds Needs your input with two open questions and Applied on an applied job', () => {

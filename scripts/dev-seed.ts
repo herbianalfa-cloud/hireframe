@@ -726,6 +726,8 @@ export const DEV_READY_JOB_ID = 'dev-job-wildcard';
 export const DEV_NEEDS_INPUT_JOB_ID = 'dev-job-apply-2';
 export const DEV_GENERATING_JOB_ID = 'dev-job-apply-3';
 export const DEV_APPLIED_JOB_ID = 'dev-job-applied';
+/** Chosen and blocked (two invalid drafts): Retry puts it back at generating (M7 7D.4). */
+export const DEV_BLOCKED_JOB_ID = 'dev-job-near-miss-2';
 
 function applicationBase(now: Date, jobId: string, hours: number) {
   const spec = devJobSeeds(now).find((job) => job.id === jobId);
@@ -769,8 +771,9 @@ export function seedWorkerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /**
- * The other three: Needs your input (two questions, each answerable or skippable), Generating
- * (waits for `node scripts/dev-worker.ts`) and Applied (its job is already `applied`).
+ * The other four: Needs your input (two questions, each answerable or skippable), Generating
+ * (waits for `node scripts/dev-worker.ts`), Applied (its job is already `applied`) and Chosen,
+ * blocked after two invalid drafts (Retry makes it generating again). Fake candidate only.
  */
 export function applicationSeeds(now: Date) {
   // IDs are `questionId(text)`: this file can't import shared's applications.ts under Node's
@@ -817,6 +820,18 @@ export function applicationSeeds(now: Date) {
         stage: 'applied',
         stageBefore: 'ready',
         stageAt: hoursAgo(now, 20),
+        questions: [],
+      },
+    },
+    {
+      jobId: DEV_BLOCKED_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_BLOCKED_JOB_ID, 5),
+        stage: 'chosen',
+        stageAt: hoursAgo(now, 3),
+        blocked: { code: 'invalid_output', at: hoursAgo(now, 3) },
+        attempt: 2,
+        lastIssues: ['unsupported_number', 'too_long'],
         questions: [],
       },
     },
