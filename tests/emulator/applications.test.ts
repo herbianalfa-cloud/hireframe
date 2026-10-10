@@ -257,7 +257,11 @@ describe('application on the emulator', () => {
     for (const file of ['cv.pdf', 'cv.docx', 'cover-note.pdf', 'cover-note.docx']) {
       await bucket().file(`cvs/${cvId}/${file}`).save('fake');
     }
-    await bucket().file(`cvs/${JOB_ID}-v10/cv.pdf`).save('another version, kept');
+    // Never recorded on the document (a worker died after the upload): deleted too.
+    await bucket().file(`cvs/${JOB_ID}-v10/cv.pdf`).save('an unrecorded version');
+    // Another job's folders share the string prefix and must stay.
+    await bucket().file(`cvs/${JOB_ID}-v1-v1/cv.pdf`).save('another job');
+    await bucket().file(`cvs/${JOB_ID}0-v1/cv.pdf`).save('another job');
     await db.doc(PATHS.application(JOB_ID)).update({ cvIds: [cvId], currentCvId: cvId });
 
     expect(await call({ action: 'withdraw', jobId: JOB_ID, deleteFiles: true })).toMatchObject({
@@ -265,7 +269,9 @@ describe('application on the emulator', () => {
     });
     expect((await db.doc(PATHS.cv(cvId)).get()).exists).toBe(false);
     const [left] = await bucket().getFiles({ prefix: 'cvs/' });
-    expect(left.map((file) => file.name)).toEqual([`cvs/${JOB_ID}-v10/cv.pdf`]);
+    expect(left.map((file) => file.name).sort()).toEqual(
+      [`cvs/${JOB_ID}-v1-v1/cv.pdf`, `cvs/${JOB_ID}0-v1/cv.pdf`].sort(),
+    );
     expect((await application()).cvIds).toEqual([]);
 
     // A withdrawn job can start again.
