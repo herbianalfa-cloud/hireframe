@@ -1244,7 +1244,7 @@ describe('normaliseCvText', () => {
 });
 
 describe('validateCv cost', () => {
-  it('validates content at 4x the shape limits with 32 refs per text in under 300 ms', () => {
+  it('validates content at 4x the shape limits with 32 refs per text in under 1500 ms', () => {
     const refs = Array.from({ length: CV_LIMITS.refs * 4 }, (_, i) =>
       aliasOf(['fact-clients', 'fact-ttl', 'fact-articles', 'fact-sql'][i % 4] ?? 'fact-sql'),
     );
