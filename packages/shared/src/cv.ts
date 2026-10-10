@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { CV_ISSUE_CODES, type CvIssueCode } from './applications.js';
-import { foldText } from './normalise.js';
+import { foldText, LEGAL_SUFFIXES } from './normalise.js';
 import { EMAIL, PHONE, isPhoneLike } from './pii.js';
 import type { Fact, FactContent } from './profile.js';
 
@@ -536,15 +536,17 @@ function cites(content: CvContent): Cite[] {
 
 // ---- Words ----
 
-/** Words the word rule leaves out: connectives, company suffixes and the generic label for a project. */
+/**
+ * Words the word rule leaves out: connectives, the company suffixes `normaliseCompany` strips
+ * (`plc`, `llc`, `gmbh`...) and the generic label for a project. `uk` is not one of them here:
+ * "Example Cloud UK" claims a UK entity the fact may not name.
+ */
 const SKIPPED_WORDS: ReadonlySet<string> = new Set([
+  ...[...LEGAL_SUFFIXES].filter((word) => word !== 'uk'),
   'and',
   'of',
   'the',
   'for',
-  'ltd',
-  'limited',
-  'inc',
   'project',
   'personal',
   'at',
@@ -668,7 +670,8 @@ export function validateCv(
       if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
       if (hasContactDetails(text.value, allowedText)) add(text.path, 'contact_in_text');
       // Never dropped or swapped silently: the PDF fonts can't print it (ADR-054).
-      if (!isPrintable(text.value)) add(text.path, 'unsupported_char');
+      // NFC first: "e" + a combining accent is the é the font has, written the long way.
+      if (!isPrintable(text.value.normalize('NFC'))) add(text.path, 'unsupported_char');
     }
 
     const cited: CvFact[] = [];
