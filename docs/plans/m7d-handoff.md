@@ -271,3 +271,76 @@ Same branch, no new feature. Twelve review findings fixed; 7D.3 not started; no 
 | `npm run build` | passed |
 | `npm run check:bundle` | passed: 35 chunks, initial JS 293.3 kB gzip (unchanged) |
 | `node scripts/smoke-functions-bundle.ts` | passed: every file in `functions/deploy/` loads, no static path to `render-*`/`pdfjs-*`, no pdf-lib or docx code in `index.js`; `index.js` 964 KiB, 9 files 6,555 KiB |
+
+---
+
+# Session 7D.3: Pipeline screen, Profile CV header, Start application
+
+Same branch. Web code only: no change to `functions/`, `firestore.rules` or `packages/shared`. Not started, on purpose: the Applied mirror, the badge, the summary bar slot, the digest's Pipeline line (all 7D.4), the end-of-7D docs, ADR-055 and the CHANGELOG entry.
+
+## What exists
+
+### Services (`web/src/services/`)
+| File | What |
+|---|---|
+| `applications.ts` | `PIPELINE_STAGES`, `PipelineStage`, `STAGE_PAGE_SIZE` (20), `stageSpec(stage)` (`stage ==` ordered by `stageAt desc`), `watchStage(stage, cb)` and `watchApplication(jobId, cb)` (both `ApplicationSchema`-parsed, invalid documents counted and skipped), `loadAppliedThisWeek(now)`, the callable wrappers `startApplication`, `answerQuestion`, `skipQuestion`, `skipAllQuestions`, `retryApplication`, `regenerateApplication`, `withdrawApplication` (`ApplicationInputSchema` in, `ApplicationResultSchema` out, limited-use App Check token, `clientTimeoutMs('application')`, never retried), `applicationErrorMessage`, `loadCvDoc` (`CvDocSchema`), `downloadCvFile`, `cvFileName`, `downloadErrorMessage`. |
+| `fact-writes.ts` | `checkCvHeader(values)` (validates with `CvHeaderSchema`, returns per-field errors keyed `name`/`email`/`phone`/`location`/`link0..2`) and `buildCvHeaderWrite(values, storedCreatedAt, serverNow)`. |
+| `profile.ts` | `watchCvHeader` (view `{ header: CvHeader \| null, raw }`; an unreadable stored header comes back with `header: null`) and `saveCvHeader(values, stored)`. |
+| `lib/download.ts` | `saveBlob(blob, fileName)`. |
+
+### Screens and components
+- **`/pipeline`** (`features/pipeline/PipelinePage.tsx`, lazy; its own 13 kB chunk). A stage-count strip, then one section per stage: Chosen, Needs your input, Generating, Ready to send, Applied. Each section has a skeleton, an error line and an empty line; if every list is empty the page shows "No applications yet" with a link to Jobs.
+  - **Needs your input:** the requirement as text, its level and match, an answer box (≤2,000 characters) with **Answer** and **Skip**, **Skip all** (shown when two or more are open), and answered or skipped questions listed read-only.
+  - **Generating:** "Usually within 15 minutes", and, after an invalid first draft, the fact-check reasons in words.
+  - **Ready to send:** four downloads (CV and cover note, .pdf and .docx), the version number from the second version on, the last notes, **Regenerate with notes** (notes optional, ≤500), **Withdraw**.
+  - **Chosen:** the blocked reason in words (`BLOCKED_TEXT`, one line per `BlockedCode`), **Retry**, and **Add CV header** (to `/profile`) for `cv_header_missing`. Retry says "Still blocked: …" if the result is blocked again.
+  - **Applied:** read-only card. No Mark applied, no Undo.
+  - **Withdraw** is on every card except Applied, with a confirmation; when the application has CV versions it asks "keep files" or "delete files".
+- **Nav:** `Pipeline` after Jobs, `inTabBar: true`; the phone tab bar is 5 columns (Today, Jobs, Pipeline, Lookup, More).
+- **Stage tokens:** `--stage-chosen/input/generating/ready/applied` in `styles.css` for dark, light and system-light, with `text-stage-*` utilities. Each stage has a label and an icon (Inbox, MessageCircleQuestion, Hourglass, Send, CircleCheck).
+- **Profile:** `CvHeaderCard` after `WorkRightsCard`: name, email, phone, location and three links. It validates with `CvHeaderSchema` before it writes and shows each error on its field. A fact with `answerFor` shows "From an application answer" (`sourceLabel`).
+- **JobDetail:** **Generate CV** is gone. `StartApplication` shows **Start application** (disabled with a reason: not judged, no deep read, or already applied), then the stage and **Open in Pipeline** once an application exists, and a fresh Start after a withdraw. It is a separate control from Apply.
+- **Index:** `applications (stage, stageAt desc)` added to `firestore.indexes.json`.
+
+### Tests added
+`applications.test.ts` (callable inputs and results, no retry on `unavailable`/`deadline-exceeded`/`internal`, error wording, file names), `fact-writes.test.ts` (header check and builder), `indexes.test.ts` (each stage list needs the composite and is served by it), `PipelinePage.test.tsx` (30: states, text-only rendering of a hostile requirement, answer/skip/skip-all, every blocked code, downloads with the right `cvId`, kind and format, regenerate, withdraw, no Mark applied), `CvHeaderCard.test.tsx` (7), `JobDetail.test.tsx` (7 for Start application), `labels.test.ts`, the lazy-route test in `App.test.tsx`, and `tests/rules/profile.rules.test.ts` (the web builder against the real rules: create, update keeping `createdAt`, an empty field is gone, a second create is refused).
+
+## What 7D.4 needs
+- **Mirror:** `performJobAction` and `buildJobStatusWrite` are untouched. The Applied list reads `applications where stage == 'applied'` and will fill as soon as the mirror writes it.
+- **Badge and Things to do:** `useStage` and `watchStage` return up to 20 per stage and are not for a count. The badge wants a new count spec (`stage in [needs_input, ready]`, no `orderBy`; equality-only, so no composite) added to `indexes.test.ts`, started after `whenUsable()`.
+- **`loadAppliedThisWeek`** is a second read of the same number Today's bar counts (`summarySpecs(now).appliedThisWeek`). The summary bar's slot may want to share one loader.
+- **Applied card copy** says "Undo it from the job". Change it if 7D.4 adds an Undo there.
+- **Tab bar:** `TabLink` and `SidebarLink` in `Shell.tsx` take `path`, `label` and `Icon` only; the badge needs a slot and an `aria-label` ("Pipeline, n to do").
+
+## How to see each view with `npm run dev`
+The seed (7D.2) already holds a CV header and four applications, so nothing new was added.
+- **Pipeline:** `/pipeline`. Needs your input (`dev-job-apply-2`, two questions), Generating (`dev-job-apply-3`, "Usually within 15 minutes"), Ready to send (`dev-job-wildcard`, four real files from the seed-time worker), Applied (`dev-job-applied`). Answer one and skip the other, then run `node scripts/dev-worker.ts`: the card moves to Ready on its own.
+- **Downloads:** on the Ready card, each of the four buttons saves a file named `Alex Example - CV - <company>.pdf` (or `Cover note`, or `.docx`).
+- **Profile CV header:** `/profile`, below Work rights, filled from the seed. **Reset profile** deletes it, and the card then shows the "can't be written until you save" explanation.
+- **Start application:** open any job with a deep read (`/jobs?job=<id>`, for example `dev-job-apply-1`). The job sheet shows **Start application**, or the stage and **Open in Pipeline** for the four seeded ones. A job with no deep read shows it disabled with the reason.
+- **Chosen (blocked):** the seed has none. I did not run this path by hand; it is covered by `PipelinePage.test.tsx` for every `BlockedCode`. A seeded blocked row is worth adding with the 7D.4 seed work.
+
+## Differences from the plan
+1. **No `stageCountsSpec`.** The stage counts come from the live lists (at most 20 each, shown as "20+" when full), so they move as soon as a card does. A separate aggregation read would sit stale until reloaded.
+2. **Applied this week comes from the jobs**, not from `applications`: the mirror leaves `stageAt` alone, so an application's `stageAt` is not the time it was applied (the plan's wording assumed it was). It reuses `summarySpecs(now).appliedThisWeek`, so no new index.
+3. **The Applied list is ordered by `stageAt`**, which is the last stage move before applying, not the applied time. The rules allow only `stage`, `stageBefore` and `updatedAt` through the mirror, so an applied time can't be added without a rules change. Flag for 7D.4.
+4. **Start application is also disabled for a job not yet judged and for a job already marked applied**, with the reason shown. The plan named only the missing deep read. An application for an applied job would collide with the mirror's "job not applied before" rule.
+5. **Withdraw is on every non-Applied card**, not only on Ready, and asks keep or delete files when versions exist. The stage table allows withdraw from any stage but Applied.
+6. **Skip all appears only when two or more questions are open** (with one left, Skip does the same).
+7. **Download paths come from the `cvs/{cvId}` document** (`CvDocSchema.storagePaths`), not from `STORAGE_PATHS.cvFile`, so the file read follows what the worker recorded.
+8. **Answered and skipped questions stay on the card as read-only lines**; the plan listed only the open ones.
+9. **Initial JS is 293.6 kB gzip, up 0.3 kB from 293.3**: the Pipeline nav item, its icon and the lazy route entry live in the shell. The screen itself is a separate 13 kB chunk. Nothing runs before `hf:usable` on Today.
+10. **A stored CV header that fails `CvHeaderSchema` is shown for repair** (prefilled with its strings) and saved as an update with its own `createdAt`. A document without a `createdAt` can't be repaired from the client (the rules need it unchanged); the save then reports an error.
+11. **A rules test for the header builder was added** in `tests/rules/profile.rules.test.ts` (test code only), alongside the existing work-rights one.
+12. **Not done in a browser:** the views were checked with component tests, not by hand in `npm run dev`, and Lighthouse a11y on Pipeline was not run (the plan's R7 acceptance needs it at the end of 7D).
+
+## Gate (after the last code change)
+
+| Command | Result |
+|---|---|
+| `npm run format:check` | passed |
+| `npm run check` | passed: lint, typecheck, 149 files and 2,226 tests, PII scan (521 files clean), eval replay (85.0%, 34/40, unchanged) |
+| `npm run test:rules` | passed: 16 files, 381 tests |
+| `npm run build` | passed |
+| `npm run check:bundle` | passed: 39 chunks, initial JS 293.6 kB gzip |
+| `node scripts/smoke-functions-bundle.ts` | passed: every function in europe-west2, no fixtures; `index.js` 964 KiB, 9 files 6,555 KiB |
