@@ -213,6 +213,23 @@ export function isWinAnsi(char: string): boolean {
   return code === 0xa0 || WIN_ANSI_EXTRA.has(code);
 }
 
+/**
+ * `content` with every string in NFC. The validator checks printability after NFC, so the worker
+ * stores this, not the raw output: a decomposed "é" would pass the check and then be refused by
+ * the renderer. Does not mutate.
+ */
+export function normaliseCvText<T extends CvContent | TrimmedCvContent>(content: T): T {
+  const walk = (value: unknown): unknown => {
+    if (typeof value === 'string') return value.normalize('NFC');
+    if (Array.isArray(value)) return value.map(walk);
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, walk(item)]));
+    }
+    return value;
+  };
+  return walk(content) as T;
+}
+
 /** True when every character of `text` can be printed; a newline or tab is not printable. */
 export function isPrintable(text: string): boolean {
   for (const char of text) if (!isWinAnsi(char)) return false;

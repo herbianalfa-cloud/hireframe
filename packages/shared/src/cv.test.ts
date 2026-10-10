@@ -15,6 +15,7 @@ import {
   hasContactDetails,
   isPrintable,
   isWinAnsi,
+  normaliseCvText,
   issueCodes,
   trimOrder,
   validateCv,
@@ -1224,5 +1225,20 @@ describe('org suffixes and NFC', () => {
       c.summary.text = 'Onboarding lead who cut client time-to-live by 30% ́́ α.';
     });
     expect(issuesOf(cv)).toContainEqual({ path: 'summary', code: 'unsupported_char' });
+  });
+});
+
+describe('normaliseCvText', () => {
+  it('writes every text in NFC, so what is stored is what was checked and can be printed', () => {
+    const cv = edited((c) => {
+      c.summary.text = 'Café lead.';
+      at(c.experience, 0).heading.org = 'Café Cloud';
+    });
+    const out = normaliseCvText(cv);
+    expect(out.summary.text).toBe('Café lead.');
+    expect(at(out.experience, 0).heading.org).toBe('Café Cloud');
+    expect(isPrintable(out.summary.text)).toBe(true);
+    expect(cv.summary.text).toBe('Café lead.');
+    expect(normaliseCvText(validCv())).toEqual(validCv());
   });
 });
