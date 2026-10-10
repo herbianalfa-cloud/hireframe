@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router';
+
+import { isUsable, whenUsable } from '@/lib/perf';
 
 import {
   loadAppliedThisWeek,
@@ -25,13 +28,39 @@ export function useStage(stage: PipelineStage): LiveState<ApplicationView[]> {
   return useLive(subscribe);
 }
 
-/** One job's application; mount it per job. */
-export function useApplication(jobId: string): LiveState<Application | null> {
-  const subscribe = useCallback(
-    (callback: (state: LiveState<Application | null>) => void) => watchApplication(jobId, callback),
-    [jobId],
-  );
-  return useLive(subscribe);
+/**
+ * One job's application, live. Mount it once per job sheet and pass the state down: each call is
+ * a listener. `enabled: false` reads nothing and stays `loading` (the sheet waits for
+ * `useWhenUsable`).
+ */
+export function useApplication(jobId: string, enabled = true): LiveState<Application | null> {
+  const [state, setState] = useState<LiveState<Application | null>>({ status: 'loading' });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    return watchApplication(jobId, setState);
+  }, [jobId, enabled]);
+  return state;
+}
+
+/**
+ * True once reads that aren't on the critical path may start (`whenUsable`): after Today marks
+ * `hf:usable` when this mounted on Today, at the first idle moment anywhere else.
+ */
+export function useWhenUsable(): boolean {
+  const { pathname } = useLocation();
+  const [onToday] = useState(() => pathname === '/');
+  const [usable, setUsable] = useState(isUsable);
+  useEffect(() => {
+    if (usable) return undefined;
+    let cancelled = false;
+    void whenUsable(onToday).then(() => {
+      if (!cancelled) setUsable(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [onToday, usable]);
+  return usable;
 }
 
 /** Applied this week, read once when the screen opens. `null` when it couldn't be read. */

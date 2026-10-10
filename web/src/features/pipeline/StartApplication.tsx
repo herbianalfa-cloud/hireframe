@@ -1,4 +1,6 @@
+import type { Application } from '@hireframe/shared';
 import type { JobView } from '@/services/jobs';
+import type { LiveState } from '@/services/profile';
 import { ArrowRight, FilePlus2, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -7,16 +9,21 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { applicationErrorMessage, startApplication } from '@/services/applications';
 
-import { useApplication } from './hooks';
 import { BLOCKED_TEXT, STAGE_META } from './labels';
 
 /**
  * Start application (M7): replaces the disabled Generate CV button. A separate control from
  * Apply (Mark applied). Once an application exists it shows its stage and links to Pipeline.
  */
-export function StartApplication({ view }: { view: JobView }) {
+export function StartApplication({
+  view,
+  state,
+}: {
+  view: JobView;
+  /** The sheet's one application listener (`useApplication`), shared with Actions. */
+  state: LiveState<Application | null>;
+}) {
   const { job } = view;
-  const state = useApplication(view.id);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const [started, setStarted] = useState<string>();

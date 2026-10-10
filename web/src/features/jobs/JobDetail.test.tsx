@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Application } from '@hireframe/shared';
+import { resetMarksForTest, signalUsable } from '@/lib/perf';
 import { startApplication, watchApplication } from '@/services/applications';
 import { lookupDescribe } from '@/services/lookup';
 import {
@@ -131,6 +132,9 @@ const FULL: Partial<Job> = {
 };
 
 beforeEach(() => {
+  // Today has long been usable by the time a sheet is opened in these tests.
+  resetMarksForTest();
+  signalUsable();
   vi.mocked(watchApplication).mockImplementation((_id, callback) => {
     callback({ status: 'ready', data: null, invalid: 0 });
     return () => undefined;

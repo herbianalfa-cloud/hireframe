@@ -1,4 +1,4 @@
-import type { Job } from '@hireframe/shared';
+import type { Application, Job } from '@hireframe/shared';
 import {
   Bookmark,
   CircleCheck,
@@ -17,11 +17,12 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate } from '@/lib/format';
-import { useApplication } from '@/features/pipeline/hooks';
+import { useApplication, useWhenUsable } from '@/features/pipeline/hooks';
 import { StartApplication } from '@/features/pipeline/StartApplication';
 import { useFacts } from '@/features/profile/hooks';
 import { GENERATING_APPLIED_REASON } from '@/services/job-writes';
 import type { JobView } from '@/services/jobs';
+import type { LiveState } from '@/services/profile';
 
 import { performJobAction, type JobAction, type JobActionHandlers } from './actions';
 import { SourceAttribution } from './AdzunaAttribution';
@@ -199,10 +200,13 @@ function StatusToggle({
 function Actions({
   view,
   handlers,
+  application,
   onRateDown,
 }: {
   view: JobView;
   handlers: JobActionHandlers;
+  /** The sheet's one application listener, shared with StartApplication. */
+  application: LiveState<Application | null>;
   onRateDown: () => void;
 }) {
   const { job } = view;
@@ -210,7 +214,6 @@ function Actions({
   const [error, setError] = useState<string>();
   const serverOwned = !['new', 'saved', 'applied', 'skipped'].includes(job.status);
   // The rules refuse Mark applied while the CV is being written, so say why instead of failing.
-  const application = useApplication(view.id);
   const generating =
     job.status !== 'applied' &&
     application.status === 'ready' &&
@@ -317,7 +320,7 @@ function Actions({
         </div>
       ) : null}
       <div className="mt-3">
-        <StartApplication view={view} />
+        <StartApplication view={view} state={application} />
       </div>
       <div aria-live="polite">
         {error ? (
@@ -333,6 +336,9 @@ function Actions({
 function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandlers }) {
   const { job } = view;
   const facts = useFacts();
+  // The sheet's one application listener, for Actions and StartApplication. On Today it waits
+  // for `hf:usable`, so a /?job= link doesn't compete with the Apply list.
+  const application = useApplication(view.id, useWhenUsable());
   const [rating, setRating] = useState(false);
   const now = new Date();
   const factById = new Map(
@@ -494,6 +500,7 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
       <Actions
         view={view}
         handlers={handlers}
+        application={application}
         onRateDown={() => {
           setRating(true);
         }}

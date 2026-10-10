@@ -55,6 +55,11 @@ export function signalUsable(): void {
   for (const wake of [...usableWaiters]) wake();
 }
 
+/** True once Today has signalled `hf:usable`: a sheet opened later reads at once. */
+export function isUsable(): boolean {
+  return usableSignalled;
+}
+
 /**
  * Resolves when reads that aren't on the critical path may start (the pipeline badge). On Today
  * (`onToday`) that is when `signalUsable` is called; anywhere else, at the first idle moment
