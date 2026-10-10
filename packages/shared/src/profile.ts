@@ -104,6 +104,8 @@ export const FactSchema = FactContentSchema.extend({
   /** False when `evidence` is not a verbatim quote of the source text (shown in the UI). */
   evidenceVerified: z.boolean(),
   evidenceUrl: EvidenceUrlSchema.exactOptional(),
+  /** Set when the fact came from the owner's answer to an application question (M7). */
+  answerFor: z.strictObject({ jobId: z.string().min(1) }).exactOptional(),
   createdAt: z.date(),
   updatedAt: z.date(),
   schemaVersion: z.literal(1),

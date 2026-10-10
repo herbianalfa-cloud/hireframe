@@ -178,3 +178,40 @@ export function questionsFromRequirements(
     .slice(0, max)
     .map(({ question }) => question);
 }
+
+// ---- The `application` callable (M7 7D.1) ----
+
+const JobId = z.string().min(1).max(200);
+const QuestionId = z.string().regex(/^q-[0-9a-f]{12}$/);
+
+/** What the owner can ask of an application. Every move but Mark applied goes through here. */
+export const ApplicationInputSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('start'), jobId: JobId }),
+  z.strictObject({
+    action: z.literal('answer'),
+    jobId: JobId,
+    questionId: QuestionId,
+    text: z.string().trim().min(1).max(APPLICATION_LIMITS.answer),
+  }),
+  z.strictObject({ action: z.literal('skip'), jobId: JobId, questionId: QuestionId }),
+  z.strictObject({ action: z.literal('skipAll'), jobId: JobId }),
+  z.strictObject({ action: z.literal('retry'), jobId: JobId }),
+  z.strictObject({
+    action: z.literal('regenerate'),
+    jobId: JobId,
+    notes: z.string().trim().min(1).max(APPLICATION_LIMITS.notes).exactOptional(),
+  }),
+  z.strictObject({ action: z.literal('withdraw'), jobId: JobId, deleteFiles: z.boolean() }),
+]);
+export type ApplicationInput = z.infer<typeof ApplicationInputSchema>;
+
+export const ApplicationResultSchema = z.strictObject({
+  jobId: z.string().min(1),
+  stage: z.enum(APPLICATION_STAGES),
+  blocked: z.enum(BLOCKED_CODES).exactOptional(),
+  /** `answer` only: the facts the answer became (new and already-known ones). */
+  factIds: z.array(z.string().min(1)).max(5).exactOptional(),
+  /** Questions still waiting for an answer or a skip. */
+  unanswered: z.int().min(0).max(APPLICATION_LIMITS.maxQuestions),
+});
+export type ApplicationResult = z.infer<typeof ApplicationResultSchema>;
