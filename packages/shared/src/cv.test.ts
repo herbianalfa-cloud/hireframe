@@ -617,16 +617,88 @@ describe('contact details in text', () => {
     'www.example.org',
     'github.io pages',
     'my site example.co.uk',
+    'evil.co/x',
+    'evil.site',
+    't.co/abc',
+    'example[.]com',
+    'example [.] com',
+    'x dot com',
+    'x DOT co dot uk',
+    'Node.js',
+    'Socket.IO',
   ])('finds %s', (text) => {
     expect(hasContactDetails(text)).toBe(true);
   });
 
   it.each([
-    'Built dashboards with Node.js and Vue.js',
     'Led onboarding for 12 clients',
     'Cut time by 30%',
+    'Grew sign-ups by 1.5m and 12.5%',
+    'Used v1.2.3 e.g. in Q3 and i.e. later',
+    'Computed the dot product',
+    'Finished the first.',
   ])('leaves %s alone', (text) => {
     expect(hasContactDetails(text)).toBe(false);
+  });
+
+  it('allows a name only when it is in the cited facts, literally', () => {
+    const facts = 'Built APIs with ASP.NET and Booking.com data, plus Socket.IO';
+    expect(hasContactDetails('ASP.NET and Socket.IO services', facts)).toBe(false);
+    expect(hasContactDetails('worked on booking.com data', facts)).toBe(false);
+    expect(hasContactDetails('ASP.NET services')).toBe(true);
+    expect(hasContactDetails('Vue.js apps', facts)).toBe(true);
+    // A path or a longer name is a different token.
+    expect(hasContactDetails('Booking.com/jobs', facts)).toBe(true);
+    expect(hasContactDetails('Booking.com.evil.io', facts)).toBe(true);
+  });
+
+  it('never allows an obfuscated address, a link, an email or a phone number', () => {
+    const facts = `Booking.com, https://example.com/alex, www.example.org, alex@example.com, ${INTL_PHONE}`;
+    for (const text of [
+      'Booking dot com',
+      'Booking[.]com',
+      'https://example.com/alex',
+      'www.example.org',
+      'alex@example.com',
+      INTL_PHONE,
+    ]) {
+      expect(hasContactDetails(text, facts), text).toBe(true);
+    }
+  });
+
+  describe('in a CV', () => {
+    const withFact = (text: string) =>
+      CV_FACTS.map((fact) => (fact.id === 'fact-clients' ? { ...fact, text } : fact));
+    const bullet = (text: string) =>
+      edited((cv) => {
+        at(cv.experience, 0).bullets[0] = { text, factRefs: [aliasOf('fact-clients')] };
+      });
+    const found = { path: 'experience[0].bullets[0]', code: 'contact_in_text' };
+
+    it.each([
+      'Sent users to evil.co/x.',
+      'Hosted at evil.site.',
+      'Linked t.co/abc.',
+      'See example[.]com.',
+      'Hosted at x dot com.',
+    ])('rejects "%s"', (text) => {
+      expect(issuesOf(bullet(text))).toContainEqual(found);
+      // Not even a cited fact that carries it, for a text that is not a literal token.
+    });
+
+    it('passes ASP.NET and Socket.IO with a citing fact, and fails without', () => {
+      const text = 'Built ASP.NET and Socket.IO services.';
+      expect(check(bullet(text), withFact('Built ASP.NET and Socket.IO services'))).toEqual({
+        ok: true,
+      });
+      expect(issuesOf(bullet(text))).toContainEqual(found);
+    });
+
+    it('does not let a cited email or number through', () => {
+      const facts = withFact(`Emailed alex@example.com and rang ${INTL_PHONE}`);
+      expect(issuesOf(bullet('Emailed alex@example.com.'), facts)).toContainEqual(found);
+      expect(issuesOf(bullet(`Rang ${INTL_PHONE}.`), facts)).toContainEqual(found);
+    });
   });
 });
 
