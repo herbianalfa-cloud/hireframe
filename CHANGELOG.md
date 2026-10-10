@@ -6,6 +6,22 @@ All notable changes. Format: Keep a Changelog, SemVer.
 ### Changed
 - Docs: billing-guards plan for M8 (`docs/plans/m8-billing-guards.md`) and a new hard rule against self-triggering code in `CLAUDE.md`.
 
+## [0.7.3] - 2026-10-10
+### Added
+- **M7 PR 7D: the application pipeline** (ADR-055; plan `docs/plans/m7-plan.md`; handoff `docs/plans/m7d-handoff.md`). Closes M7.
+  - **`application` callable (7D.1):** the stage machine (`start`, `answer`, `skip`, `skipAll`, `retry`, `regenerate`, `withdraw`), each move a precondition transaction with an `application_stage` event. Questions come from the job's stored requirements in code; an answer becomes a versioned fact with `answerFor`. Owner only, App Check enforced and consumed, 120 s, `maxInstances: 1`.
+  - **`generateCvs` (7D.2):** scheduled `*/10 7-23 * * *` Europe/London, 540 s, `maxInstances: 1`, `retryCount: 0`. Counts an attempt before each model call (at most two per job, kills included), no new call after 210 s, at most 10 a run. `llm.call()` gained `maxSends`. The deploy bundle is split (`functions/deploy/chunks/`): a cold start loads 2.69 MB instead of 5.22 MB.
+  - **Pipeline screen, Profile CV header, Start application (7D.3):** `/pipeline` (lazy), the CV header card, **Start application** replaces **Generate CV**, stage tokens, a five-column tab bar.
+  - **The Applied mirror (7D.4):** Mark applied on a job that has an application writes the job, its event and the application's `stage`, `stageBefore` and `updatedAt` in one batch; Undo restores `stageBefore`. Mark applied is disabled, with the reason, while the CV is generating. The Applied list is ordered by `updatedAt`.
+  - **Things to do (7D.4):** a count of applications waiting on you, on the Pipeline navigation item (a badge) and as a summary bar item. One shared listener with a limit, started after `hf:usable` (Today) or first idle (elsewhere); each place has its own skeleton and fails alone as a dash.
+  - **The digest's Pipeline line (7D.4):** "n need your input · n generating · n ready to send · n applied this week of 10", linking to Pipeline. Left out, not the digest, if its reads fail.
+  - **Rules:** `applications/{jobId}` (owner read; the Applied mirror only) and `profile/cvHeader`. **Indexes:** `applications (stage, stageAt desc)` and `applications (stage, updatedAt desc)`.
+  - **Dev:** `npm run dev` seeds a CV header and five applications (Needs your input, Generating, Ready with four real files, Applied, and a blocked Chosen); `node scripts/dev-worker.ts` runs one worker pass against the emulator.
+  - Tests: every stage-table row, the killed-worker case, the mirror through the real rules, the badge and slot (no read before `hf:usable`, each failing alone), the digest line (escaping, clamping, a failed read still sends), and emulator tests for start to ready and for the digest.
+
+### Changed
+- Docs: ADR-055; PRD R7, R9 and R10; ARCHITECTURE (functions, data model, indexes, the pipeline section); DESIGN (Pipeline, tab bar, stage tokens); SECURITY (client writes, the CV threat row, retention); RUNBOOK Part I steps I6 and I7 (94, 95) and Recovery entries; ROADMAP (M7 done, parking lot); CLAUDE.md commands.
+
 ## [0.7.2] - 2026-10-09
 ### Added
 - **M7 PR 7C: the CV engine, server only** (ADR-053, ADR-054; plan `docs/plans/m7-plan.md`). There is nothing for the owner to see yet: 7C ships the parts 7D wires together. No new function, no model call, no prompt.

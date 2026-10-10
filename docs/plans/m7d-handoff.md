@@ -344,3 +344,81 @@ The seed (7D.2) already holds a CV header and four applications, so nothing new 
 | `npm run build` | passed |
 | `npm run check:bundle` | passed: 39 chunks, initial JS 293.6 kB gzip |
 | `node scripts/smoke-functions-bundle.ts` | passed: every function in europe-west2, no fixtures; `index.js` 964 KiB, 9 files 6,555 KiB |
+
+---
+
+# Session 7D.4: Applied mirror, badge, Things to do, digest Pipeline line, end-of-7D docs
+
+Same branch. This is the last 7D session. `firestore.rules` and `apps-script` are **unchanged** (the 7D.1 rules already allow the mirror). Not done, on purpose: merge and tag (`v0.7.3`).
+
+## What exists
+
+### Shared
+- `applications.ts`: `appliedApplicationsSpec` (`stage == applied`, `updatedAt desc`).
+- `pipeline-todo.ts` (new, no zod): `TODO_STAGES`, `todoApplicationsSpec` (`stage in [needs_input, ready]`, no `orderBy`), `TODO_COUNT_LIMIT` (50). A separate file, because the app shell reads it at start-up and `applications.ts`'s schemas came with it into the initial JS (+4.4 kB gzip before the move).
+- `digest.ts`: `digestStageSpec(stage)` and `digestAppliedWeekSpec(weekStart)`.
+- `firestore.indexes.json`: `applications (stage, updatedAt desc)`.
+
+### Web
+| File | What |
+|---|---|
+| `services/job-writes.ts` | `buildJobStatusWrite(jobId, raw, to, serverNow, application?)`. With an application, Mark applied adds `application: { stage: 'applied', stageBefore, updatedAt }` and Undo `{ stage: stageBefore, stageBefore: deleteField(), updatedAt }`. Refuses Mark applied from `generating` with `GENERATING_APPLIED_REASON`; no mirror for a withdrawn application or a `stageBefore` the rules would refuse. The job update and event are unchanged. |
+| `services/jobs.ts` | `setJobStatus` reads `applications/{jobId}` once, only for a move into or out of applied (a failed read fails the action: nothing is written), and `commitAction` adds the mirror update to the same batch. |
+| `services/applications.ts` | `stageSpec('applied')` is `appliedApplicationsSpec`. |
+| `services/pipeline-todo.ts` | `watchTodoCount(cb)`: one ref-counted `onSnapshot` with `limit(50)`, shared by every subscriber; `TodoCount` is `loading`, `ready { count, capped }` or `error`. No `listen` from `profile.ts` (it would have pulled that module into the shell). |
+| `lib/perf.ts` | `signalUsable()` (Today calls it right after the `hf:usable` measure) and `whenUsable(onToday)`: on Today it waits for the signal; elsewhere it resolves at first idle (`requestIdleCallback`, else 1.5 s); both give up after 10 s so a failed Apply list can't hold it for good. |
+| `features/pipeline/` | `useTodoCount(enabled)`, `PipelineBadge` (skeleton while loading, number from 1, "n+" at the limit, `–` on error, nothing at 0) and `pipelineLabel` ("Pipeline, 3 to do"). |
+| `app/Shell.tsx` | `useShellTodo`: waits on `whenUsable`, then `useTodoCount`. The sidebar link and the tab bar item carry the badge and the `aria-label`; the tab-bar badge is absolutely positioned over the icon. |
+| `features/today/SummaryBar.tsx` | `ThingsToDo` item (after Wildcard), linking to `/pipeline`, with its own skeleton and a dash and "unavailable" on failure. The bar is 8 items. |
+| `features/jobs/JobDetail.tsx` | Apply is disabled, with `aria-describedby` text, while the application is `generating`. |
+| `features/pipeline/ApplicationCard.tsx` | An Applied card says "marked applied <updatedAt>". |
+
+### Functions
+- `digest/store.ts`: `DigestStore.pipeline(now)`: three `limit(100).count()` stage reads, the week's applied-jobs count (same cap), and `getCurrentCriteria` for the weekly target (the seed's target when there are no criteria). It throws on any failure.
+- `digest/build.ts`: `readPipeline` catches that, logs `digest.pipeline_failed` (error class and code only) and omits the line; the digest is otherwise unchanged. The read runs for every digest state.
+- `digest/render.ts`: `countText` clamps each number to a whole 0 to 999 (and "n+" at the read limit), so only digits and a `+` reach the line; the link is `APP_ORIGIN/pipeline`.
+- `config.ts`: `DIGEST.pipelineCountLimit` (100). `log.ts`: `digest.pipeline_failed`.
+
+### Dev seed
+One more application: **Chosen, blocked** on `dev-job-near-miss-2` (`DEV_BLOCKED_JOB_ID`), `invalid_output`, `attempt: 2`, `lastIssues: ['unsupported_number', 'too_long']`. The seeded Applied application's `updatedAt` is now its applied time (20 h ago), as the mirror would write it.
+
+### Tests added
+- `job-writes.test.ts` (mirror builder, 5), `jobs-mirror.test.ts` (6: one read, one batch, no read for a save, generating refused, a failed read writes nothing), `tests/rules/jobs.rules.test.ts` (7: the real builders against the real rules for each of chosen, needs_input and ready, Undo to another status, withdrawn untouched, generating refused by builder and rules, mirror without a job change denied, non-owner denied).
+- `pipeline-todo.test.ts` (4: one shared listener, the limit, error and recovery), `perf.test.ts` (whenUsable, 4), `PipelineBadge.test.tsx` (7), `Shell.test.tsx` (4: no read before the signal, idle elsewhere, 0 and error, five columns), `SummaryBar.test.tsx` (5 for Things to do, bar is 8 items), `TodayPage.test.tsx` (no to-do read before the Apply snapshot), `JobDetail.test.tsx` (3), `PipelinePage.test.tsx` (Applied date), `indexes.test.ts` (Applied, to-do), `applications.test.ts`.
+- Digest: `render.test.ts` (clamp, hostile values, link only to the app), `build.test.ts` (one read, a failed read still sends without the line, the log has class and code only, the store has only reads), `queries.test.ts`, `tests/emulator/digest.test.ts` (the line from real documents, a corrupt criteria version still sends, and the "writes only the nonce" test now covers `applications` and `criteria`).
+
+## How to see each new view with `npm run dev`
+Sign in as the seeded owner. The seed has: Needs your input `dev-job-apply-2`, Generating `dev-job-apply-3`, Ready `dev-job-wildcard`, Applied `dev-job-applied`, and Chosen (blocked) `dev-job-near-miss-2`.
+- **Badge and Things to do:** open `/` (Today). After the Apply list fills, the summary bar's **Things to do** shows 2 (Needs your input + Ready) and the Pipeline item in the sidebar (and the phone tab bar) shows a "2" badge; its accessible name is "Pipeline, 2 to do". Open `/jobs` first instead and the badge appears at the first idle moment. Answer or skip the two questions on `/pipeline` and the count follows live (the application moves on to Generating, so it drops to 1).
+- **The failure state ("–") and the skeleton** aren't reachable by hand in the emulator without stopping it; they are covered by `Shell.test.tsx`, `SummaryBar.test.tsx` and `PipelineBadge.test.tsx`.
+- **Mark applied mirror:** open `/jobs?job=dev-job-apply-2` and press **Apply**: the job turns Applied, and `/pipeline` moves its card from Needs your input to Applied. Press **Applied** again (Undo): it goes back to Needs your input with its questions. The same on `dev-job-wildcard` returns it to Ready. A job with no application (`dev-job-apply-1`) is unchanged.
+- **Mark applied paused:** open `/jobs?job=dev-job-apply-3` (Generating): **Apply** is disabled, with "The CV is still being written…" under the buttons. Run `node scripts/dev-worker.ts` and it is enabled once the card is Ready.
+- **Applied list order:** mark two applications applied; the one marked last is at the top, with "marked applied <date>".
+- **Chosen (blocked):** `/pipeline` → Chosen shows Operations Analyst · Tidewater Freight, blocked with the invalid-output wording. **Retry** moves it to Generating; `node scripts/dev-worker.ts` moves it to Ready.
+- **Digest line:** `node scripts/sign-test-alert.ts digest` prints the digest. Its PIPELINE section reads `1 need your input · 1 generating · 1 ready to send · <n> applied this week of 10`; `n` is 1 if `dev-job-applied`'s 20-hour-old `appliedAt` falls in the current London week (Monday, before 20:00, it is 0).
+
+## Differences from the plan
+1. **The mirror's read is in `services/jobs.ts` `setJobStatus`, not `performJobAction`.** The plan put the single `getDoc` in `performJobAction`; components don't call Firebase, so the service owns the read and the batch. `performJobAction`, `withStatus` and the optimistic patch are untouched.
+2. **A failed application read fails the action.** The plan didn't say; writing the job alone would leave the two out of step.
+3. **Mark applied is refused while `generating`** (button disabled with the reason; the service refuses it with the same reason for the Today list shortcut). The plan's table allowed "any but withdrawn"; the rules' review fix (7D.2) refuse `generating`.
+4. **The Applied list is ordered by `updatedAt`** with a second composite, as the 7D.3 handoff flagged. The plan said `stageAt desc` for every list.
+5. **`whenUsable(onToday)` takes a flag, and Today calls `signalUsable()`.** The plan's `whenUsable()` took none; the shell decides from the route it started on. A 10 s upper bound was added so a failed Apply list can't hold the badge back.
+6. **The badge is a snapshot listener with `limit(50)` ("50+")**, not an aggregation count; the rule "every read has a limit" is why. It and the summary bar's item share one listener (`services/pipeline-todo.ts`).
+7. **The navigation item shows a skeleton before the read, and "–" if it fails**, where the plan said only "n, and nothing at 0".
+8. **Things to do shows 0** ("Nothing waiting") rather than hiding; the plan's 7A text said "hidden in 7A, wired in 7D".
+9. **The digest's Pipeline reads use `limit(100).count()`** and show "100+"; they run for every digest state, not only `ready`; the weekly target comes from the current criteria (the seed's target when there are none, no line if they can't be read); and "applied this week" counts jobs, not applications (7D.3 difference 2).
+10. **The tab-bar test asserts the structure** (five columns, the badge absolutely positioned) in jsdom. A real 360 px layout check wasn't done.
+11. **`TODO_*` live in their own shared file** (`pipeline-todo.ts`) so the shell doesn't import the application schemas. Initial JS is 294.5 kB gzip, +0.9 kB on 7D.3's 293.6 (the badge, `perf.ts` and the listener).
+12. **A fourth ROADMAP parking-lot item** (a job that gains an application between the page's read and the batch is marked applied without the mirror) was added beyond the three the handoff listed.
+13. **Not done:** no browser pass of the new views and no Lighthouse a11y run on Pipeline (R7's acceptance needs it at the end of 7D, so it belongs in RUNBOOK I7 on the live site); the Word one-page check is RUNBOOK I7 too.
+
+## Gate (after the last code change)
+
+| Command | Result |
+|---|---|
+| `npm run format:check` | passed |
+| `npm run check` | passed: lint, typecheck, 153 files and 2,276 tests, PII scan (529 files clean), eval replay (85.0%, 34/40, unchanged) |
+| `npm run test:rules` | passed: 16 files, 391 tests |
+| `npm run build` | passed |
+| `npm run check:bundle` | passed: 39 chunks, initial JS 294.5 kB gzip (7D.3: 293.6) |
+| `node scripts/smoke-functions-bundle.ts` | passed: every function in europe-west2 (`application` and `generateCvs` included), no fixtures; `index.js` 966 KiB, 9 files 6,561 KiB |

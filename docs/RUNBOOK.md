@@ -165,11 +165,11 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
 28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
     ```bash
-    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs lookup getDigest; do
+    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs lookup getDigest application; do
       gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers --project=hireframe-f6b03
     done
     ```
-    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `lookup` (M6, 6B) is a callable like the others. `ingestEmailJobs` (M6) and `getDigest` (M7B) are HTTPS functions, not callables: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
+    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `lookup` (M6, 6B) is a callable like the others. `application` (M7, 7D) is a callable like the others. `ingestEmailJobs` (M6) and `getDigest` (M7B) are HTTPS functions, not callables: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
 29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` (and `scanNow` from M3) are listed in `europe-west2`.
 30. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
 31. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
@@ -358,7 +358,7 @@ Design: ADR-046 (transport and signing), ADR-047 (parsing), ADR-048 (the lock an
 90. **Locally**, `npm run dev` seeds two Lookup-added jobs (one with a verdict, one waiting for a description), so Today shows **Added by you** and Lookup lists one job under **Waiting for a description**. Paste `https://www.linkedin.com/jobs/view/4012345678` (the seeded LinkedIn alert job) to see **Seen**, and `https://www.linkedin.com/jobs/view/4012345680` (the seeded alert job without a description) to see it waiting. Judging a pasted description uses the fake LLM unless `LIVE=1`.
 
 ### Part I: Application pipeline and digest (M7)
-Design: `docs/plans/m7-plan.md`, ADR-052 (digest). Steps I3 to I5 belong to PR 7B (`v0.7.1`). The rest of Part I (I1, I2, I6, I7) is added with the PRs that need it.
+Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 to I5 belong to PR 7B (`v0.7.1`), steps I6 and I7 to PR 7D (`v0.7.3`). I1 and I2 are the invoker check (step 77) and the step 89 measure, repeated with each tag.
 
 91. **Deploy `getDigest` and give it its invoker** (I3). A new non-callable HTTPS function needs the temporary `cloudfunctions.admin` grant for its first deploy (Part G step 80). Run all of this in Cloud Shell, with the deploy account `github-deployer`, project `hireframe-f6b03`, region `europe-west2`.
     1. Before the tag, repeat the invoker check on `scheduledScan` (Part G step 77): the bundle changes, so the deploy rewrites the invoker unless it is exact.
@@ -403,6 +403,34 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest). Steps I3 to I5 belong to PR 7
     4. If `digestNow` fails: a Script Property error is a missing `HIREFRAME_DIGEST_URL`; a mail error "Authorization is required" means the new permissions weren't accepted (run `setup` again and accept); an email "Hireframe digest unavailable (http_401)" means the secrets differ (Recovery, Gmail bridge), `http_403` the missing invoker (step 91.3), `network_error` a wrong URL.
 93. **The next weekday** (I5). Between 07:35 and 08:05 the 07:50 digest arrives, or, if the 07:30 scan was still running or the first request failed (the log says `digest.request_failed`), the 08:20 one arrives (with an in-progress notice if the scan still hadn't finished). In **Executions**, `digestMorning` shows `digest.sent` or `digest.skipped` in its log, never a failure. The email's links open the app on the job. If nothing arrives by 08:45, see Recovery. Report to Claude which of the two arrived and when.
 
+94. **Deploy the pipeline** (I6, `v0.7.3`). It adds one callable (`application`), one scheduled function (`generateCvs`), and two indexes on `applications`. In Cloud Shell, project `hireframe-f6b03`, region `europe-west2`:
+    1. **Before the tag, repeat the invoker check on `scheduledScan`** (Part G step 77): the bundle changes, so the deploy rewrites the invoker unless it is exact. Only then merge the 7D PR, push `v0.7.3` and approve the deploy (Part C step 27). The deploy folder now has a `chunks/` directory beside `index.js`; that is expected.
+    2. **Wait for the two new indexes.** Firebase console → **Firestore → Indexes**: both new `applications` indexes must say **Enabled** before you open Pipeline (a few minutes). They are `stage` ascending with `stageAt` descending (the stage lists), and `stage` ascending with `updatedAt` descending (the Applied list). Until each is Enabled, its list shows "Couldn't load these applications" and the logs say "requires an index".
+    3. **Let the browser call `application`** (new callable, Part C step 28, whose list now includes it):
+       ```bash
+       gcloud functions add-invoker-policy-binding application --region=europe-west2 --member=allUsers --project=hireframe-f6b03
+       ```
+       Public invocation is safe: it enforces App Check and checks the owner UID. Until it runs, **Start application** fails in the browser with a CORS error.
+    4. **Bind the scheduler invoker for `generateCvs`** (new scheduled function; the Part E step 68 pattern). It must be exactly `hireframe-fns`:
+       ```bash
+       PROJECT_ID=hireframe-f6b03
+       FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+       gcloud functions add-invoker-policy-binding generateCvs --region=europe-west2 --member=serviceAccount:$FNS --project=$PROJECT_ID
+       gcloud scheduler jobs describe firebase-schedule-generateCvs-europe-west2 --location=europe-west2 --format='value(schedule,timeZone,httpTarget.oidcToken.serviceAccountEmail)'
+       gcloud run services get-iam-policy generatecvs --region=europe-west2 --flatten='bindings[].members' --filter='bindings.role:roles/run.invoker' --format='value(bindings.members)'
+       ```
+       The scheduler job must print `*/10 7-23 * * *`, `Europe/London` and `hireframe-fns@…`, and the policy **only** `serviceAccount:hireframe-fns@…`. If the first deploy said "Failed to set invoker function generateCvs" and the job doesn't exist, use the Recovery entry "generateCvs has no schedule". This is the second of the three free Cloud Scheduler jobs.
+    5. **Check the functions.** **Build → Functions** lists `application` and `generateCvs` in `europe-west2`; `generateCvs` shows 540 s, 1 GiB and max instances 1.
+95. **Try one real application** (I7). In the app:
+    1. **Profile → CV header:** set your name and email (and phone, location, links if you want them on the CV) and save. Without it, Start application blocks with "Add or fix your CV header".
+    2. Open an Apply job that has a full read and press **Start application**. It goes to **Needs your input** if the posting asks for things your profile doesn't show: answer or skip each question (an answer becomes a fact on Profile, marked "From an application answer").
+    3. **Pipeline** shows it under **Generating** ("usually within 15 minutes"; the worker runs every 10 minutes from 07:00 to 23:50). It moves to **Ready to send** by itself.
+    4. Download all four files. Open the .docx in Word or Google Docs and check it is **one page**, and paste the PDF's text into a plain editor to check the reading order.
+    5. Press **Apply** on the job. The application moves to **Applied** (list ordered by when you marked it), the badge on Pipeline drops, and **Undo** (press Applied again) puts it back where it was.
+    6. **Today** shows **Things to do** in the summary bar, and the Pipeline item in the navigation shows the same number. Both appear after the Apply list, never before.
+    7. The next weekday's digest shows a **Pipeline** section ("n need your input · n generating · n ready to send · n applied this week of 10"). If the section is missing but the rest of the digest arrived, check the logs for `digest.pipeline_failed` (an index or criteria read failed); the digest is not held back for it.
+    8. Measure the Today load again (step 89, three repeat visits): the badge and the bar's new item come after `hf:usable`, so the median should not move.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -439,6 +467,20 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest). Steps I3 to I5 belong to PR 7
   - The schedule must match `SCHEDULE` in `functions/src/config.ts`.
   - The invoker must be **only** `hireframe-fns`. Any other member makes every later deploy that changes the function fail before it updates the schedule. Remove extras with `gcloud functions remove-invoker-policy-binding`.
   - Within 10 minutes, **System** shows a "Scheduled" run.
+- **`generateCvs` has no schedule after its first deploy** (the deploy said "Failed to set invoker function generateCvs", and a re-run says "Skipped (No changes detected)"). The same cause and fix as the `scheduledScan` entry above, with this function's own schedule. In Cloud Shell:
+  ```bash
+  PROJECT_ID=hireframe-f6b03; REGION=europe-west2; FN=generateCvs
+  FNS=hireframe-fns@$PROJECT_ID.iam.gserviceaccount.com
+  gcloud config set project $PROJECT_ID
+  gcloud functions add-invoker-policy-binding $FN --region=$REGION --member=serviceAccount:$FNS
+  URI=$(gcloud functions describe $FN --region=$REGION --gen2 --format='value(serviceConfig.uri)')
+  gcloud scheduler jobs create http firebase-schedule-$FN-$REGION --location=$REGION --schedule='*/10 7-23 * * *' --time-zone='Europe/London' --uri="$URI" --http-method=POST --oidc-service-account-email=$FNS --attempt-deadline=540s --max-retry-attempts=0
+  gcloud scheduler jobs run firebase-schedule-$FN-$REGION --location=$REGION
+  ```
+  - Use exactly this job name and the schedule in `CV_WORKER_SCHEDULE` (`functions/src/config.ts`); the invoker must be **only** `hireframe-fns`.
+  - Within 10 minutes a Generating application moves on (Pipeline), or becomes Chosen with the reason.
+- **An application stays at Generating for more than 30 minutes:** the worker runs every 10 minutes from 07:00 to 23:50 London time (a job started later waits for 07:00). Check **Cloud Scheduler** for `generateCvs`: a last result of `PERMISSION_DENIED` is the invoker (step 94.4). A job whose run was killed keeps its counted attempt and, after two, becomes Chosen with "attempts exhausted": press **Retry**.
+- **Pipeline shows "Couldn't load these applications", or the Applied list is empty with Applied jobs:** one of the two `applications` indexes isn't Enabled (step 94.2).
 - **A scan fails with `FAILED_PRECONDITION` and "requires an index":** the funnel's indexes are still building or weren't deployed. Wait until **Firestore → Indexes** shows them Enabled (Part E step 66), then scan again.
 - **Jobs stuck "for review":** the model's output was unusable after a retry (`jobs.review.code`: `refusal`, `max_tokens` or `schema`). Re-score picks them up again; if one keeps failing, open an issue with the job ID (never paste the posting into chat).
 - **Runs keep stopping early with "run budget used":** System shows a reason per stage (Triage, Deep reads). A stage stops on the budget only when its next call can't fit even with nothing in flight, so the backlog is larger than one run's lease. It catches up over a few runs. To go faster, raise `config/app.monthlyCapPence` or set `config/app.funnel.runBudgetPence` (Part E step 72).
