@@ -1297,3 +1297,74 @@ describe('validateCv cost', () => {
     expect(issuesOf(cv)).toContainEqual({ path: 'summary', code: 'too_long' });
   });
 });
+
+describe('rules no other test pins', () => {
+  const factsWith = (id: string, text: string, evidence = text) =>
+    CV_FACTS.map((fact) => (fact.id === id ? { ...fact, text, evidence } : fact));
+
+  it('skips personal, of and and in a heading, and each is the only difference', () => {
+    expect(check(heading('Personal Customer Onboarding Intern', 'Example Cloud'))).toEqual({
+      ok: true,
+    });
+    expect(check(heading('Intern of Customer Onboarding', 'Example Cloud'))).toEqual({ ok: true });
+    expect(check(heading('Customer and Onboarding Intern', 'Example Cloud'))).toEqual({ ok: true });
+    // Control: a word that is not skipped is refused in the same place.
+    expect(issuesOf(heading('Senior Customer Onboarding Intern', 'Example Cloud'))).toEqual([
+      { path: 'experience[0].heading.role', code: 'unsupported_text' },
+    ]);
+  });
+
+  it.each([
+    ['&', 'SQL & Python'],
+    ['+', 'SQL + Python'],
+    ['|', 'SQL | Python'],
+    [';', 'SQL; Python'],
+    ['(', 'SQL (Python)'],
+    ['•', 'SQL • Python'],
+    ['or', 'SQL or Python'],
+    ['and', 'SQL and Python'],
+    [',', 'SQL, Python'],
+    ['/', 'SQL/Python'],
+  ])('splits a skill label at %s', (_, label) => {
+    expect(skillOk(label, 'SQL', 'Python')).toBe(true);
+    expect(skillOk(label, 'SQL')).toBe(false);
+  });
+
+  it('does not let a fact with Booking.com.au allow Booking.com', () => {
+    const cv = edited((c) => {
+      at(c.experience, 0).bullets[0] = {
+        text: 'Led onboarding for 12 clients on Booking.com.',
+        factRefs: [aliasOf('fact-clients')],
+      };
+    });
+    const facts = factsWith('fact-clients', 'Led onboarding for 12 clients on Booking.com.au');
+    expect(issuesOf(cv, facts)).toContainEqual({
+      path: 'experience[0].bullets[0]',
+      code: 'contact_in_text',
+    });
+  });
+
+  it('accepts "Booking.com." at the end of a sentence when the fact has it', () => {
+    const cv = edited((c) => {
+      at(c.experience, 0).bullets[0] = {
+        text: 'Led onboarding for 12 clients on Booking.com.',
+        factRefs: [aliasOf('fact-clients')],
+      };
+    });
+    const facts = factsWith('fact-clients', 'Led onboarding for 12 clients on Booking.com');
+    expect(check(cv, facts)).toEqual({ ok: true });
+  });
+
+  it('reads "ten per cent" as 10 percent', () => {
+    const bullet = (text: string) =>
+      edited((c) => {
+        at(c.experience, 0).bullets[1] = { text, factRefs: [aliasOf('fact-ttl')] };
+      });
+    expect(issuesOf(bullet('Cut client time-to-live by ten per cent.'))).toEqual([
+      { path: 'experience[0].bullets[1]', code: 'unsupported_number' },
+    ]);
+    const facts = factsWith('fact-ttl', 'Cut client time-to-live by 10 per cent');
+    const left = issuesOf(bullet('Cut client time-to-live by ten per cent.'), facts);
+    expect(left.filter((issue) => issue.path === 'experience[0].bullets[1]')).toEqual([]);
+  });
+});
