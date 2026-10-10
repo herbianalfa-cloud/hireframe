@@ -18,7 +18,16 @@ export function foldText(text: string): string {
 
 // ---- Companies ----
 
-export const LEGAL_SUFFIXES: ReadonlySet<string> = new Set(['ltd', 'limited', 'plc', 'inc', 'llc', 'llp', 'gmbh', 'uk']);
+export const LEGAL_SUFFIXES: ReadonlySet<string> = new Set([
+  'ltd',
+  'limited',
+  'plc',
+  'inc',
+  'llc',
+  'llp',
+  'gmbh',
+  'uk',
+]);
 
 /** "Acme Analytics Ltd", "ACME Analytics (UK) Limited" and "Acme Analytics" → "acme analytics". */
 export function normaliseCompany(name: string): string {
