@@ -32,7 +32,7 @@ function startingValues(stored: CvHeaderView | null): CvHeaderValues {
   };
 }
 
-/** A new stored header (saved here or elsewhere) starts the form again from it. */
+/** Changes when the stored header does, so the form can start again from it. */
 function storedKey(stored: CvHeaderView | null): string {
   if (stored === null) return 'none';
   const at: unknown = stored.raw.updatedAt;
@@ -47,7 +47,7 @@ function storedKey(stored: CvHeaderView | null): string {
  */
 export function CvHeaderCard() {
   const state = useCvHeader();
-  // Kept here: a save changes the stored value, which starts the form again.
+  // Kept here so it outlives the form's reset when the stored value changes.
   const [message, setMessage] = useState<Message>();
   if (state.status === 'loading') {
     return (
@@ -63,14 +63,7 @@ export function CvHeaderCard() {
       </p>
     );
   }
-  return (
-    <CvHeaderForm
-      key={storedKey(state.data)}
-      stored={state.data}
-      message={message}
-      setMessage={setMessage}
-    />
-  );
+  return <CvHeaderForm stored={state.data} message={message} setMessage={setMessage} />;
 }
 
 function CvHeaderForm({
@@ -84,6 +77,15 @@ function CvHeaderForm({
 }) {
   const [values, setValues] = useState<CvHeaderValues>(() => startingValues(stored));
   const [errors, setErrors] = useState<CvHeaderErrors>({});
+  // A new stored header (saved here or elsewhere) starts the fields again from it. Not a remount
+  // by key: that would drop focus from Save and rebuild the live region that says "Saved".
+  const key = storedKey(stored);
+  const [seen, setSeen] = useState(key);
+  if (seen !== key) {
+    setSeen(key);
+    setValues(startingValues(stored));
+    setErrors({});
+  }
   const [pending, setPending] = useState(false);
   const repairing = stored !== null && stored.header === null;
 
@@ -105,6 +107,7 @@ function CvHeaderForm({
 
   async function onSubmit(event: SubmitEvent) {
     event.preventDefault();
+    if (pending) return;
     const checked = checkCvHeader(values);
     if (!checked.ok) {
       setErrors(checked.errors);
@@ -224,7 +227,8 @@ function CvHeaderForm({
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" disabled={pending}>
+          {/* aria-disabled, not disabled: a disabled button would drop focus while saving. */}
+          <Button type="submit" aria-disabled={pending} className="aria-disabled:opacity-50">
             {pending ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
             Save CV header
           </Button>

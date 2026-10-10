@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Timestamp } from 'firebase/firestore';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -137,5 +137,53 @@ describe('CvHeaderCard', () => {
     expect(
       await screen.findByText("Couldn't save. Check your connection and try again."),
     ).toBeDefined();
+  });
+
+  it('keeps focus on Save and the same live region when the saved header arrives', async () => {
+    const user = userEvent.setup();
+    let push: (data: CvHeaderView | null) => void = () => undefined;
+    vi.mocked(watchCvHeader).mockImplementation((callback) => {
+      push = (data) => {
+        callback({ status: 'ready', data, invalid: 0 });
+      };
+      push(null);
+      return () => undefined;
+    });
+    vi.mocked(saveCvHeader).mockImplementation(() => {
+      // The listener delivers the new document while the save is still in flight, as it does.
+      const saved = Timestamp.fromDate(new Date('2026-10-02T09:00:00Z'));
+      push({
+        header: {
+          name: 'Alex Example',
+          email: 'alex@example.com',
+          createdAt: saved.toDate(),
+          updatedAt: saved.toDate(),
+          schemaVersion: 1,
+        },
+        raw: {
+          name: 'Alex Example',
+          email: 'alex@example.com',
+          createdAt: saved,
+          updatedAt: saved,
+        },
+      });
+      return Promise.resolve();
+    });
+    render(<CvHeaderCard />);
+    await user.type(screen.getByLabelText('Full name'), 'Alex Example');
+    await user.type(screen.getByLabelText('Email'), 'alex@example.com');
+    const save = screen.getByRole('button', { name: 'Save CV header' });
+    const region = document.querySelector('[aria-live="polite"]');
+    await act(async () => {
+      save.focus();
+      await user.keyboard('{Enter}');
+    });
+    expect(await screen.findByText('Saved. New CVs use it.')).toBeDefined();
+    // Not remounted: the same button has focus and the same region carries the message.
+    expect(screen.getByRole('button', { name: 'Save CV header' })).toBe(save);
+    expect(document.activeElement).toBe(save);
+    expect(document.querySelector('[aria-live="polite"]')).toBe(region);
+    expect(region?.textContent).toBe('Saved. New CVs use it.');
+    expect((screen.getByLabelText('Full name') as HTMLInputElement).value).toBe('Alex Example');
   });
 });

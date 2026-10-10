@@ -479,4 +479,27 @@ describe('Ready to send', () => {
     expect(screen.getByRole('button', { name: 'Withdraw' })).toBeDefined();
     expect(withdrawApplication).not.toHaveBeenCalled();
   });
+
+  it('moves focus into the withdraw confirmation, and back to Withdraw on cancel', async () => {
+    const user = userEvent.setup();
+    given({ ready: ready(readyView) });
+    open();
+    await user.click(screen.getByRole('button', { name: 'Withdraw' }));
+    const panel = screen.getByRole('group', { name: 'Confirm withdraw' });
+    expect(document.activeElement).toBe(panel);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Withdraw' }));
+  });
+
+  it('moves focus into the notes panel, and back to its button on cancel', async () => {
+    const user = userEvent.setup();
+    given({ ready: ready(readyView) });
+    open();
+    await user.click(screen.getByRole('button', { name: 'Regenerate with notes' }));
+    expect(document.activeElement).toBe(screen.getByLabelText('What should change? (optional)'));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Regenerate with notes' }),
+    );
+  });
 });

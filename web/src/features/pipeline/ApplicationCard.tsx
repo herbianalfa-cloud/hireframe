@@ -8,7 +8,7 @@ import {
   RotateCcw,
   Trash2,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { Button } from '@/components/ui/button';
@@ -273,6 +273,18 @@ function Ready({
   const [downloadError, setDownloadError] = useState<string>();
   const [regenerating, setRegenerating] = useState(false);
   const [notes, setNotes] = useState('');
+  // The notes panel replaces its button: focus goes into the textarea when it opens and back to
+  // the button when it is cancelled.
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
+  const returnFocus = useRef(false);
+  useEffect(() => {
+    if (regenerating) notesRef.current?.focus();
+    else if (returnFocus.current) {
+      returnFocus.current = false;
+      openerRef.current?.focus();
+    }
+  }, [regenerating]);
   const cvId = application.currentCvId;
 
   async function download(file: (typeof FILES)[number]) {
@@ -344,6 +356,7 @@ function Ready({
         <div className="mt-3 rounded-md border bg-background p-3">
           <Label htmlFor={`notes-${application.jobId}`}>What should change? (optional)</Label>
           <Textarea
+            ref={notesRef}
             id={`notes-${application.jobId}`}
             className="mt-1.5"
             maxLength={NOTES_MAX}
@@ -380,6 +393,7 @@ function Ready({
             <Button
               variant="ghost"
               onClick={() => {
+                returnFocus.current = true;
                 setRegenerating(false);
               }}
             >
@@ -389,6 +403,7 @@ function Ready({
         </div>
       ) : (
         <Button
+          ref={openerRef}
           variant="secondary"
           className="mt-3"
           onClick={() => {
@@ -409,9 +424,23 @@ function Withdraw({ application, action }: { application: Application; action: A
   const [confirming, setConfirming] = useState(false);
   const hasFiles = application.cvIds.length > 0;
 
+  // The confirmation replaces the button, so focus is moved on purpose: into the panel when it
+  // opens, back to the button when it is cancelled.
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef(false);
+  useEffect(() => {
+    if (confirming) panelRef.current?.focus();
+    else if (returnFocus.current) {
+      returnFocus.current = false;
+      openerRef.current?.focus();
+    }
+  }, [confirming]);
+
   if (!confirming) {
     return (
       <Button
+        ref={openerRef}
         variant="ghost"
         onClick={() => {
           setConfirming(true);
@@ -424,9 +453,11 @@ function Withdraw({ application, action }: { application: Application; action: A
   }
   return (
     <div
+      ref={panelRef}
+      tabIndex={-1}
       role="group"
       aria-label="Confirm withdraw"
-      className="w-full rounded-md border border-danger/40 p-3"
+      className="w-full rounded-md border border-danger/40 p-3 focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <p className="text-sm">
         Withdraw this application?{' '}
@@ -464,6 +495,7 @@ function Withdraw({ application, action }: { application: Application; action: A
           variant="ghost"
           disabled={action.pending}
           onClick={() => {
+            returnFocus.current = true;
             setConfirming(false);
           }}
         >
