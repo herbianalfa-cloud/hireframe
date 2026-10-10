@@ -30,6 +30,8 @@ export interface NotePlan {
   fresh: NewFact[];
   /** Active facts the note repeated: an answer links to them instead of adding a copy. */
   knownIds: string[];
+  /** The subset of `knownIds` whose draft's evidence is a verbatim quote of the note. */
+  verifiedKnownIds: string[];
   skippedDuplicates: number;
   costPence: number;
 }
@@ -67,21 +69,26 @@ export async function planNoteFacts(
   for (const fact of await deps.existing()) known.set(factKey(fact.content), fact);
   const fresh: NewFact[] = [];
   const knownIds: string[] = [];
+  const verifiedKnownIds: string[] = [];
   let skippedDuplicates = 0;
   for (const draft of result.data.facts) {
     const key = factKey(draft);
+    const evidenceVerified = verifyEvidence(draft.evidence, text);
     if (known.has(key)) {
       skippedDuplicates++;
       const existing = known.get(key);
-      if (existing?.status === 'active' && !knownIds.includes(existing.id)) {
-        knownIds.push(existing.id);
+      if (existing?.status === 'active') {
+        if (!knownIds.includes(existing.id)) knownIds.push(existing.id);
+        if (evidenceVerified && !verifiedKnownIds.includes(existing.id)) {
+          verifiedKnownIds.push(existing.id);
+        }
       }
       continue;
     }
     known.set(key, null);
-    fresh.push({ draft, evidenceVerified: verifyEvidence(draft.evidence, text) });
+    fresh.push({ draft, evidenceVerified });
   }
-  return { fresh, knownIds, skippedDuplicates, costPence: result.costPence };
+  return { fresh, knownIds, verifiedKnownIds, skippedDuplicates, costPence: result.costPence };
 }
 
 export async function addFactHandler(data: unknown, deps: AddFactDeps): Promise<AddFactResult> {

@@ -123,11 +123,19 @@ async function answer(
 
   // The only model call: the answer text, in a `<note>` tag it can't close. The requirement
   // text is deliberately not passed.
-  const plan = await planNoteFacts({ llm: deps.llm, existing: deps.facts }, 'answerFact', text);
+  const planned = await planNoteFacts({ llm: deps.llm, existing: deps.facts }, 'answerFact', text);
+  // An answer becomes a fact only when its evidence is a verbatim quote of the answer: Profile
+  // keeps an unverified fact flagged for the owner to check, but a CV claim can't wait for that.
+  const plan = {
+    fresh: planned.fresh.filter((fact) => fact.evidenceVerified),
+    knownIds: planned.verifiedKnownIds,
+    costPence: planned.costPence,
+  };
   const factCount = plan.fresh.length + plan.knownIds.length;
   log.info('application.answered', {
     added: plan.fresh.length,
     known: plan.knownIds.length,
+    dropped: planned.fresh.length - plan.fresh.length,
     costPence: plan.costPence,
   });
   if (factCount === 0) throw new ApplicationRefusal('no_fact');
