@@ -173,6 +173,25 @@ describe('PipelinePage states', () => {
   });
 });
 
+describe('Applied', () => {
+  it('shows when it was marked applied (updatedAt, which the mirror writes), not the stage move', () => {
+    given({
+      applied: ready(
+        makeApplication('job9', {
+          stage: 'applied',
+          stageBefore: 'ready',
+          stageAt: new Date('2026-10-01T09:00:00Z'),
+          updatedAt: new Date('2026-10-09T09:00:00Z'),
+        }),
+      ),
+    });
+    open();
+    const card = screen.getByRole('link', { name: 'Open job: Data Analyst job9' }).closest('li');
+    expect(card?.textContent).toContain('marked applied 9 Oct 2026');
+    expect(card?.textContent).not.toContain('1 Oct 2026');
+  });
+});
+
 describe('Needs your input', () => {
   const view = makeApplication('job2', {
     stage: 'needs_input',

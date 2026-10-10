@@ -497,7 +497,10 @@ export function ApplicationCard({
         <div className="min-w-0">
           <p className="text-sm font-medium break-words">{application.job.title}</p>
           <p className="text-xs text-muted-foreground break-words">
-            {application.job.company} · since {formatDate(application.stageAt)}
+            {application.job.company} ·{' '}
+            {stage === 'applied'
+              ? `marked applied ${formatDate(application.updatedAt)}`
+              : `since ${formatDate(application.stageAt)}`}
           </p>
         </div>
         <div className="flex items-center gap-2">

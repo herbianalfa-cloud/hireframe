@@ -32,13 +32,21 @@ beforeEach(() => {
 
 describe('stageSpec', () => {
   it('is one stage, newest move first (the (stage, stageAt desc) composite)', () => {
-    for (const stage of PIPELINE_STAGES) {
+    for (const stage of PIPELINE_STAGES.filter((s) => s !== 'applied')) {
       expect(stageSpec(stage)).toEqual({
         collection: 'applications',
         filters: [{ field: 'stage', op: '==', value: stage }],
         orderBy: [{ field: 'stageAt', direction: 'desc' }],
       });
     }
+  });
+
+  it('orders Applied by updatedAt, which the mirror writes, not by stageAt', () => {
+    expect(stageSpec('applied')).toEqual({
+      collection: 'applications',
+      filters: [{ field: 'stage', op: '==', value: 'applied' }],
+      orderBy: [{ field: 'updatedAt', direction: 'desc' }],
+    });
   });
 
   it('never lists withdrawn applications', () => {

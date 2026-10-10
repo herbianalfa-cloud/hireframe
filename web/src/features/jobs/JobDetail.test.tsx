@@ -412,6 +412,54 @@ describe('JobDetail', () => {
     expect(setJobStatus).toHaveBeenCalledWith(view, 'applied');
   });
 
+  describe('Mark applied and the application (M7 7D.4)', () => {
+    const at = new Date('2026-10-07T09:00:00Z');
+    const application = (stage: Application['stage']): Application => ({
+      jobId: 'job1',
+      job: { title: 'Data Analyst', company: 'Acme Analytics', verdict: 'apply' },
+      stage,
+      stageAt: at,
+      startedAt: at,
+      updatedAt: at,
+      questions: [],
+      attempt: 0,
+      cvIds: [],
+      schemaVersion: 1,
+    });
+
+    it('disables Apply while the CV is being written, and says why', () => {
+      show();
+      givenApplication(application('generating'));
+      open();
+      const button = screen.getByRole('button', { name: 'Apply' });
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      const reason = screen.getByText(/still being written/);
+      expect(button.getAttribute('aria-describedby')).toBe(reason.id);
+    });
+
+    it('leaves Apply enabled in every other stage, and with no application', async () => {
+      for (const stage of ['chosen', 'needs_input', 'ready', 'withdrawn'] as const) {
+        cleanup();
+        show();
+        givenApplication(application(stage));
+        open();
+        expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(
+          false,
+        );
+        expect(screen.queryByText(/still being written/)).toBeNull();
+      }
+    });
+
+    it('keeps Undo available on an applied job whatever the application says', () => {
+      show({ status: 'applied', appliedAt: new Date('2026-10-08T09:00:00Z') });
+      givenApplication(application('applied'));
+      open();
+      expect((screen.getByRole('button', { name: 'Applied' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
+  });
+
   it('rolls the job back in the page and shows the error when an action is refused', async () => {
     const view = show();
     vi.mocked(setJobStatus).mockRejectedValue(new Error('This job changed since you opened it.'));

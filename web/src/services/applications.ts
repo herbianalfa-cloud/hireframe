@@ -2,6 +2,7 @@ import {
   ApplicationInputSchema,
   ApplicationResultSchema,
   ApplicationSchema,
+  appliedApplicationsSpec,
   clientTimeoutMs,
   COLLECTIONS,
   CvDocSchema,
@@ -58,8 +59,13 @@ const READ_TIMEOUT_MS = 15_000;
 
 // ---- Queries (each is checked against firestore.indexes.json in indexes.test.ts) ----
 
-/** One stage, newest move first. Served by the composite `(stage, stageAt desc)`. */
+/**
+ * One stage, newest move first. Served by the composite `(stage, stageAt desc)`. Applied is
+ * ordered by `updatedAt` instead: the Applied mirror writes it and leaves `stageAt` alone, so it
+ * is the time the owner marked it applied (composite `(stage, updatedAt desc)`).
+ */
 export function stageSpec(stage: PipelineStage): QuerySpec {
+  if (stage === 'applied') return appliedApplicationsSpec;
   return {
     collection: COLLECTIONS.applications,
     filters: [{ field: 'stage', op: '==', value: stage }],

@@ -108,12 +108,44 @@ async function seed(job: DocumentData = seededJob()): Promise<void> {
   });
 }
 
-/** The batch the app commits: the job update and its event. */
+/** The batch the app commits: the job update, its event, and the Applied mirror if the write has one. */
 function commit(db: TestFirestore, write: JobActionWrite, eventId = EVENT_ID): Promise<void> {
-  return writeBatch(db)
+  const batch = writeBatch(db)
     .update(doc(db, PATHS.job(JOB_ID)), write.update)
-    .set(doc(db, `events/${eventId}`), write.event)
-    .commit();
+    .set(doc(db, `events/${eventId}`), write.event);
+  if (write.application) batch.update(doc(db, PATHS.application(JOB_ID)), write.application);
+  return batch.commit();
+}
+
+/** An application as the server writes it (fake data). */
+function seededApplication(extra: DocumentData = {}): DocumentData {
+  return {
+    jobId: JOB_ID,
+    job: { title: 'Product Analyst', company: 'Acme Analytics', verdict: 'apply' },
+    stage: 'ready',
+    stageAt: CREATED,
+    startedAt: CREATED,
+    updatedAt: CREATED,
+    questions: [],
+    attempt: 0,
+    cvIds: [],
+    schemaVersion: 1,
+    ...extra,
+  };
+}
+
+async function seedApplication(application: DocumentData): Promise<void> {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), PATHS.application(JOB_ID)), application);
+  });
+}
+
+async function readApplication(): Promise<DocumentData> {
+  let data: DocumentData = {};
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    data = (await getDoc(doc(ctx.firestore(), PATHS.application(JOB_ID)))).data() ?? {};
+  });
+  return data;
 }
 
 async function readJob(): Promise<DocumentData> {
@@ -221,6 +253,106 @@ describe('status changes', () => {
     await assertFails(commit(db, { ...write, event: { ...write.event, to: 'saved' } }));
     // Event claims a different starting status.
     await assertFails(commit(db, { ...write, event: { ...write.event, from: 'saved' } }));
+  });
+});
+
+describe('the Applied mirror, built by job-writes.ts (M7 7D.4)', () => {
+  const APPLIED = { status: 'applied', appliedAt: CREATED, appliedVerdict: 'apply' };
+
+  for (const stage of ['chosen', 'needs_input', 'ready'] as const) {
+    it(`marks a ${stage} application applied with the job, and Undo restores it`, async () => {
+      await seed();
+      await seedApplication(seededApplication({ stage }));
+      const owner = dbFor('owner');
+      const mark = buildJobStatusWrite(
+        JOB_ID,
+        seededJob(),
+        'applied',
+        NOW,
+        await readApplication(),
+      );
+      expect(mark.application).toBeDefined();
+      await assertSucceeds(commit(owner, mark));
+      expect(await readApplication()).toMatchObject({
+        stage: 'applied',
+        stageBefore: stage,
+        stageAt: CREATED,
+      });
+      expect((await readJob()).status).toBe('applied');
+
+      const undo = buildJobStatusWrite(
+        JOB_ID,
+        await readJob(),
+        'new',
+        NOW,
+        await readApplication(),
+      );
+      await assertSucceeds(commit(owner, undo, 'event-2'));
+      const restored = await readApplication();
+      expect(restored.stage).toBe(stage);
+      expect('stageBefore' in restored).toBe(false);
+      expect((await readJob()).status).toBe('new');
+    });
+  }
+
+  it('undoes to any other status the same way (a skipped job leaves applied too)', async () => {
+    await seed(seededJob(APPLIED));
+    await seedApplication(seededApplication({ stage: 'applied', stageBefore: 'needs_input' }));
+    const write = buildJobStatusWrite(
+      JOB_ID,
+      seededJob(APPLIED),
+      'saved',
+      NOW,
+      await readApplication(),
+    );
+    await assertSucceeds(commit(dbFor('owner'), write));
+    expect((await readApplication()).stage).toBe('needs_input');
+  });
+
+  it('writes nothing to a withdrawn application, and the job change still goes through', async () => {
+    await seed();
+    await seedApplication(seededApplication({ stage: 'withdrawn' }));
+    const write = buildJobStatusWrite(JOB_ID, seededJob(), 'applied', NOW, await readApplication());
+    expect(write.application).toBeUndefined();
+    await assertSucceeds(commit(dbFor('owner'), write));
+    expect((await readApplication()).stage).toBe('withdrawn');
+  });
+
+  it('refuses to build Mark applied while the CV is generating, and the rules refuse the same batch', async () => {
+    await seed();
+    await seedApplication(seededApplication({ stage: 'generating' }));
+    const application = await readApplication();
+    expect(() => buildJobStatusWrite(JOB_ID, seededJob(), 'applied', NOW, application)).toThrow(
+      'still being written',
+    );
+    const jobOnly = buildJobStatusWrite(JOB_ID, seededJob(), 'applied', NOW);
+    await assertFails(
+      commit(dbFor('owner'), {
+        ...jobOnly,
+        application: { stage: 'applied', stageBefore: 'generating', updatedAt: NOW },
+      }),
+    );
+  });
+
+  it('denies the mirror without the job change', async () => {
+    await seed();
+    await seedApplication(seededApplication());
+    const mirror = buildJobStatusWrite(
+      JOB_ID,
+      seededJob(),
+      'applied',
+      NOW,
+      await readApplication(),
+    ).application;
+    await assertFails(updateDoc(doc(dbFor('owner'), PATHS.application(JOB_ID)), mirror ?? {}));
+  });
+
+  it('denies everyone but the owner', async () => {
+    await seed();
+    await seedApplication(seededApplication());
+    const write = buildJobStatusWrite(JOB_ID, seededJob(), 'applied', NOW, await readApplication());
+    await assertFails(commit(dbFor('stranger'), write));
+    await assertFails(commit(dbFor('anon'), write));
   });
 });
 

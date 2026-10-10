@@ -17,8 +17,10 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate } from '@/lib/format';
+import { useApplication } from '@/features/pipeline/hooks';
 import { StartApplication } from '@/features/pipeline/StartApplication';
 import { useFacts } from '@/features/profile/hooks';
+import { GENERATING_APPLIED_REASON } from '@/services/job-writes';
 import type { JobView } from '@/services/jobs';
 
 import { performJobAction, type JobAction, type JobActionHandlers } from './actions';
@@ -165,6 +167,7 @@ function StatusToggle({
   onLabel,
   offLabel,
   disabled,
+  describedBy,
   onPress,
   tone = 'accent',
 }: {
@@ -175,12 +178,15 @@ function StatusToggle({
   onLabel: string;
   offLabel: string;
   disabled: boolean;
+  /** The id of text that says why the button is disabled. */
+  describedBy?: string | undefined;
   onPress: () => void;
 }) {
   return (
     <Button
       variant={tone === 'apply' ? (on ? 'applyOutline' : 'apply') : on ? 'default' : 'secondary'}
       aria-pressed={on}
+      aria-describedby={describedBy}
       disabled={disabled}
       onClick={onPress}
     >
@@ -203,6 +209,12 @@ function Actions({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const serverOwned = !['new', 'saved', 'applied', 'skipped'].includes(job.status);
+  // The rules refuse Mark applied while the CV is being written, so say why instead of failing.
+  const application = useApplication(view.id);
+  const generating =
+    job.status !== 'applied' &&
+    application.status === 'ready' &&
+    application.data?.stage === 'generating';
 
   async function run(action: JobAction) {
     setPending(true);
@@ -230,7 +242,8 @@ function Actions({
           tone="apply"
           onLabel="Applied"
           offLabel="Apply"
-          disabled={pending || serverOwned}
+          disabled={pending || serverOwned || generating}
+          describedBy={generating ? 'apply-paused-reason' : undefined}
           onPress={() => void to(job.status === 'applied' ? 'new' : 'applied')()}
         />
         <StatusToggle
@@ -251,6 +264,11 @@ function Actions({
           onPress={() => void to(job.status === 'skipped' ? 'new' : 'skipped')()}
         />
       </div>
+      {generating ? (
+        <p id="apply-paused-reason" className="mt-2 text-xs text-muted-foreground">
+          {GENERATING_APPLIED_REASON}
+        </p>
+      ) : null}
       {job.verdict ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Was this verdict right?</span>
