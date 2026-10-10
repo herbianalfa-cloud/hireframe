@@ -1,6 +1,7 @@
 import {
   validateCv,
   CvDocSchema,
+  type Usage,
   type Application,
   type CvContent,
   type ExistingFact,
@@ -14,6 +15,11 @@ import * as realRenderer from '../cv/render/index.js';
 import type { LlmCallInput, LlmCallResult } from '../llm/call.js';
 import { DailyCapExceededError, LlmOutputError, SpendCapExceededError } from '../llm/errors.js';
 import { setLogSink, type LogFields } from '../log.js';
+import { llmCall } from '../llm/call.js';
+import { fakeTransport } from '../llm/fake-transport.js';
+import type { LlmTransport } from '../llm/transport.js';
+import { applyReserve, applySettle, emptyUsage, type UsageStore } from '../llm/usage-store.js';
+import { applicationLlmDeps } from './llm.js';
 import { fakeCvWrite } from './fake-answers.js';
 import type { CvFileBytes, CvFileStore } from './files.js';
 import {
@@ -682,6 +688,100 @@ describe('runCvWorker: the run', () => {
     expect(h.removed).toEqual(['job-1-v1']);
     expect(h.store.cvDocs.size).toBe(0);
     expect(get(h, 'job-1').stage).toBe('withdrawn');
+  });
+});
+
+describe('runCvWorker: spend caps (R11)', () => {
+  /** The real llm.call() over a memory usage store, with a count of requests sent. */
+  function withRealLlm(h: Harness, usage: Usage) {
+    let doc = usage;
+    const store: UsageStore = {
+      reserve(input) {
+        doc = applyReserve(doc, input);
+        return Promise.resolve();
+      },
+      settle(input) {
+        doc = applySettle(doc, input);
+        return Promise.resolve();
+      },
+    };
+    const inner = fakeTransport();
+    const sent = { count: 0, counted: 0 };
+    const transport: LlmTransport = {
+      countTokens: (request) => {
+        sent.counted += 1;
+        return inner.countTokens(request);
+      },
+      send: (request) => {
+        sent.count += 1;
+        return inner.send(request);
+      },
+    };
+    const deps = {
+      ...applicationLlmDeps({
+        transport,
+        usage: store,
+        dailyCapPence: 60,
+        capPence: 1_500,
+        fxUsdToGbp: 0.85,
+      }),
+      now: () => new Date(h.clock.now),
+    };
+    h.deps.llm = (input) => llmCall(deps, input);
+    return { sent, usage: () => doc };
+  }
+
+  const NOW = new Date(START);
+
+  it('stops a call at the monthly cap before any API request, and blocks the job', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    add(h, 'job-2', { stageAt: new Date(START - 1_000) });
+    const full = { ...emptyUsage(1_500, NOW), spendPence: 1_499.9 };
+    const real = withRealLlm(h, full);
+    const summary = await h.run();
+    expect(real.sent.count).toBe(0);
+    expect(summary).toMatchObject({ blocked: 1, stoppedBy: 'cap', untouched: 1 });
+    expect(get(h, 'job-1').blocked?.code).toBe('cap');
+    expect(get(h, 'job-2').attempt).toBe(0);
+  });
+
+  it('stops a call at the application daily cap before any API request', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    let usage = applyReserve(emptyUsage(1_500, NOW), {
+      month: '2026-10',
+      id: 'application-earlier',
+      pence: 1,
+      capPence: 1_500,
+      now: NOW,
+    });
+    usage = applySettle(usage, {
+      month: '2026-10',
+      id: 'application-earlier',
+      now: NOW,
+      model: 'claude-sonnet-5-5',
+      purpose: 'cvWrite',
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      costPence: 59.9,
+      dailyKey: 'application',
+    });
+    const real = withRealLlm(h, usage);
+    await h.run();
+    expect(real.sent.count).toBe(0);
+    expect(get(h, 'job-1').blocked?.code).toBe('daily_cap');
+  });
+
+  it('reserves with an application- ID and records the spend under cvWrite when it passes', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    const real = withRealLlm(h, emptyUsage(1_500, NOW));
+    await h.run();
+    expect(real.sent.count).toBe(1);
+    expect(get(h, 'job-1').stage).toBe('ready');
+    expect(real.usage().byPurpose.cvWrite).toBeGreaterThan(0);
+    expect(real.usage().daily?.application).toBeDefined();
+    expect(real.usage().reservations).toEqual({});
   });
 });
 
