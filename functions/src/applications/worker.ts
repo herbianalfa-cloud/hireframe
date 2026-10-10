@@ -382,8 +382,10 @@ async function generateOne(deps: CvWorkerDeps, application: Application): Promis
       now: deps.now(),
     });
     if (!written.ok) {
-      // The owner withdrew (or restarted) while the model wrote: take the files back.
-      await removeFiles(deps, id);
+      // The owner withdrew (or restarted) while the model wrote: take the files back. A
+      // transaction that reran after its first attempt landed also reports lost, and then the
+      // document lists this version: removeIfUnrecorded keeps those files.
+      await removeIfUnrecorded(deps, jobId, id);
       log.info('cv_worker.job', { outcome: 'lost', attempt: counted.attempt });
       return 'lost';
     }

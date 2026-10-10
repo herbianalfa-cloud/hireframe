@@ -800,6 +800,24 @@ describe('runCvWorker: the run', () => {
     expect(h.store.cvDocs.size).toBe(0);
     expect(get(h, 'job-1').stage).toBe('withdrawn');
   });
+
+  it('keeps the files when a rerun transaction reports lost after the first commit landed', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    const commit = h.store.commit.bind(h.store);
+    h.store.commit = async (change) => {
+      const result = await commit(change);
+      // Firestore retried the transaction; its build then saw the ready document and gave up.
+      if (change.cvDoc) return { ok: false, reason: 'lost' };
+      return result;
+    };
+    const summary = await h.run();
+    expect(summary.lost).toBe(1);
+    expect(get(h, 'job-1')).toMatchObject({ stage: 'ready', cvIds: ['job-1-v1'] });
+    expect(h.store.cvDocs.has('job-1-v1')).toBe(true);
+    expect(h.removed).toEqual([]);
+    expect(h.files.has('job-1-v1')).toBe(true);
+  });
 });
 
 describe('runCvWorker: spend caps (R11)', () => {
