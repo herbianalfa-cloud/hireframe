@@ -23,7 +23,7 @@ import {
   renderNoteDocx,
   renderNotePdf,
 } from './index.js';
-import { FAKE_HEADER, fakeDateOf, filler, maxCv } from './fixtures.js';
+import { FAKE_HEADER, WIDE_HEADER, fakeDateOf, filler, maxCv, wideCv } from './fixtures.js';
 
 const squash = (text: string) => text.replace(/\s+/g, ' ');
 
@@ -286,6 +286,34 @@ describe('fitOnePage', () => {
     if (!fit.ok) throw new Error('did not fit');
     const docx = await renderCvDocx(FAKE_HEADER, fit.content, fakeDateOf);
     expectInOrder(await extractText(docx, 'docx'), readingOrder(fit.content));
+  });
+
+  it('reports too_long for the widest content the limits allow: a real outcome, not an impossible one', async () => {
+    const content = wideCv();
+    expect(CvContentSchema.safeParse(content).success).toBe(true);
+    // Fully trimmed, the headings and education alone are over a page in capital W and M.
+    const last = trimOrder(content).length;
+    const trimmed = await renderCvPdf(FAKE_HEADER, applyTrim(content, last), fakeDateOf);
+    expect(trimmed.pages).toBeGreaterThan(1);
+    expect(await fitOnePage(FAKE_HEADER, content, fakeDateOf)).toEqual({
+      ok: false,
+      code: 'too_long',
+    });
+  });
+
+  it('wraps a header at every ceiling (three 200-character links) and still fits a short CV', async () => {
+    expect(WIDE_HEADER.links?.map((link) => link.length)).toEqual([200, 200, 200]);
+    const fit = await fitOnePage(WIDE_HEADER, validCv(), fakeDateOf);
+    if (!fit.ok) throw new Error('did not fit');
+    expect(await pageCount(fit.bytes)).toBe(1);
+    const text = squash(await extractText(fit.bytes, 'pdf')).replaceAll(' ', '');
+    for (const link of WIDE_HEADER.links ?? []) expect(text).toContain(link);
+    expect(text).toContain(WIDE_HEADER.name);
+    // The DOCX takes the same header.
+    const docx = await renderCvDocx(WIDE_HEADER, fit.content, fakeDateOf);
+    expect(squash(await extractText(docx, 'docx')).replaceAll(' ', '')).toContain(
+      WIDE_HEADER.links?.[0] ?? 'missing',
+    );
   });
 
   it('reports too_long when even the fully trimmed CV is over a page', async () => {

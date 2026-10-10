@@ -17,8 +17,9 @@ export type FitResult =
  * Renders the CV and, while the PDF runs past one page, applies the next `trimOrder` step.
  * Returns the content as rendered, how many steps it took (`trimmed` on the `cvs` doc) and the
  * PDF. Bounded by the number of steps, so it always ends. A CV that still doesn't fit after
- * every step is `too_long`; the content limits make that impossible (pinned by a test with the
- * maximum content).
+ * every step is `too_long`, and that is a real outcome: headings and education are never
+ * trimmed, so at the limits of the schema, in wide letters, they alone run past one page (pinned
+ * by a test with `wideCv()`). Ordinary words at the same limits do fit once trimmed (`maxCv()`).
  */
 export async function fitOnePage(
   header: CvHeader,

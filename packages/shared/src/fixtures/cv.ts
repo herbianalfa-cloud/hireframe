@@ -132,7 +132,12 @@ export function validCv(): CvContent {
   };
 }
 
-/** A maximum-size CV (every limit at its ceiling), citing facts that exist, for the trim tests. */
+/**
+ * A CV with every count at its ceiling (4 experience entries of 5, 5, 4 and 2 bullets, 3
+ * projects, 16 skills) for the `trimOrder` tests. The texts are a few short words and its
+ * headings are 'Role' and 'Org', so it does NOT pass `validateCv` (`unsupported_text`); it
+ * cites facts that exist and is only for counts, not for wrapping or the validator.
+ */
 export function fullCv(): CvContent {
   const bullet = (n: number) => ({
     text: `Bullet number ${String(n)}`.replace(/\d/g, ''),

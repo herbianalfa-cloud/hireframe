@@ -49,7 +49,12 @@ export function filler(length: number, seed: number): string {
   return text.slice(0, length).trim().padEnd(length, 'x');
 }
 
-/** Every limit at its ceiling and every text at its maximum length: the worst case to fit. */
+/**
+ * Every count at its ceiling and every text at its maximum length, in ordinary words: a long
+ * CV for the trim tests. It cites facts that exist but its words are not theirs, so it does NOT
+ * pass `validateCv` (`unsupported_text`, `unsupported_number`); it is for the fit only. It is
+ * not the widest case: see `wideCv`.
+ */
 export function maxCv(): CvContent {
   const a = aliasOf('fact-clients');
   const entry = (bullets: number, seed: number) => ({
@@ -85,3 +90,63 @@ export function maxCv(): CvContent {
     },
   };
 }
+
+/** Capitals W and M, the widest Helvetica letters, in words, up to exactly `length` characters. */
+export function wide(length: number, seed = 0): string {
+  const words = ['WWWWWWWW', 'MMMMMMMM', 'WMWMWMWM', 'MWMWMWMW'];
+  let text = '';
+  for (let i = seed; text.length < length; i += 1) text += `${words[i % words.length] ?? ''} `;
+  return text.slice(0, length).trim().padEnd(length, 'W');
+}
+
+/**
+ * The widest content the limits allow: every count at its ceiling and every text at its
+ * maximum length in capital W and M. Not valid for `validateCv` (the words are not facts'); a
+ * test fixture for the worst case of the fit. Headings and education are never trimmed, so this
+ * does not fit one page even when fully trimmed: `fitOnePage` reports `too_long` (ADR-054).
+ */
+export function wideCv(): CvContent {
+  const a = aliasOf('fact-clients');
+  const entry = (bullets: number, seed: number) => ({
+    heading: {
+      role: wide(CV_LIMITS.role, seed),
+      org: wide(CV_LIMITS.org, seed + 1),
+      factRef: aliasOf('fact-intern'),
+    },
+    bullets: Array.from({ length: bullets }, (_, i) => ({
+      text: wide(CV_LIMITS.bullet, seed + i),
+      factRefs: [a],
+    })),
+  });
+  return {
+    summary: { text: wide(CV_LIMITS.summary), factRefs: [a] },
+    experience: Array.from({ length: CV_LIMITS.experienceEntries }, (_, i) =>
+      entry(CV_LIMITS.bulletsPerEntry, i),
+    ),
+    projects: Array.from({ length: CV_LIMITS.projectEntries }, (_, i) => entry(2, i)),
+    education: Array.from({ length: CV_LIMITS.educationEntries }, (_, i) => ({
+      line: wide(CV_LIMITS.educationLine, i),
+      factRef: aliasOf('fact-scrum'),
+    })),
+    skills: Array.from({ length: CV_LIMITS.skills }, (_, i) => ({
+      label: wide(CV_LIMITS.skillLabel, i),
+      factRefs: [aliasOf('fact-sql')],
+    })),
+    coverNote: {
+      paragraphs: Array.from({ length: CV_LIMITS.noteParagraphsMax }, (_, i) => ({
+        text: wide(CV_LIMITS.noteParagraph, i),
+        factRefs: [a],
+      })),
+    },
+  };
+}
+
+/** A header at every ceiling of `CvHeaderSchema` (3 links of 200 characters), in wide letters. */
+export const WIDE_HEADER: CvHeader = {
+  ...FAKE_HEADER,
+  name: 'W'.repeat(80),
+  email: `${'W'.repeat(107)}@example.com`,
+  phone: `+44 ${'M'.repeat(36)}`,
+  location: 'M'.repeat(80),
+  links: ['W', 'M', 'WM'].map((letters) => `https://${letters.repeat(192).slice(0, 192)}`),
+};
