@@ -1287,7 +1287,8 @@ describe('validateCv cost', () => {
     const result = validateCv(cv, CV_ALIASES, facts);
     const elapsed = performance.now() - started;
     expect(result.ok).toBe(false);
-    expect(elapsed).toBeLessThan(300);
+    // Local is about 86 ms, the uncached version was about 2.7 s, CI runs about 4x slower.
+    expect(elapsed).toBeLessThan(1500);
   });
 
   it('reports 32 refs on one text as too_long, whatever they repeat', () => {
