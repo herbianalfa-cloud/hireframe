@@ -236,24 +236,159 @@ export interface CvIssue {
 
 export type CvValidation = { ok: true } | { ok: false; issues: CvIssue[] };
 
-/** A figure the way a reader would compare it: `12k` and `12,000` are the same, `30%` is not `30`. */
+/**
+ * A figure the way a reader would compare it: `12k` and `12,000` are the same, `30%` is not
+ * `30`, and a multiplier (`10x`, `10-fold`), an ordinal (`2nd`), a plural (`100s`), a trailing
+ * plus (`10+`) and each currency symbol is a kind of its own.
+ */
 const FIGURE =
-  /(?<![A-Za-z0-9.])([£$€]?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(%|\s?per ?cent\b|[kKmM]|bn)?(?![A-Za-z0-9])/g;
+  /(?<![A-Za-z0-9.])([£$€]?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(%|\s?per ?cent\b|-?fold|x|st|nd|rd|th|s|bn|mm|mn|k|m|b|\s(?:hundred|thousand|million|billion)\b)?(\+)?(?![A-Za-z0-9])/gi;
 
-const UNIT_FACTOR: Readonly<Record<string, number>> = { k: 1e3, m: 1e6, bn: 1e9 };
+const UNIT_FACTOR: Readonly<Record<string, number>> = {
+  k: 1e3,
+  m: 1e6,
+  mm: 1e6,
+  mn: 1e6,
+  b: 1e9,
+  bn: 1e9,
+  hundred: 100,
+  thousand: 1e3,
+  million: 1e6,
+  billion: 1e9,
+};
 
-/** Every figure in `text` as `plain:12000`, `percent:30` or `money:50000`. */
+const FRACTIONS: Readonly<Record<string, number>> = { '¼': 0.25, '½': 0.5, '¾': 0.75 };
+
+const SMALL_WORDS: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+};
+/** Words that multiply what came before (or stand for 1 of themselves): "two dozen", "a hundred". */
+const SCALE_WORDS: Readonly<Record<string, number>> = {
+  dozen: 12,
+  hundred: 100,
+  thousand: 1e3,
+  million: 1e6,
+  billion: 1e9,
+};
+/** Words that say a change or an amount without a value; each is a figure of its own kind. */
+const KIND_WORDS: Readonly<Record<string, string>> = {
+  tens: 'tens',
+  dozens: 'dozens',
+  hundreds: 'hundreds',
+  thousands: 'thousands',
+  millions: 'millions',
+  billions: 'billions',
+  half: 'half',
+  halved: 'halved',
+  double: 'double',
+  doubled: 'double',
+  triple: 'triple',
+  tripled: 'triple',
+  quadruple: 'quadruple',
+  quadrupled: 'quadruple',
+};
+
+function isNumberWord(word: string | undefined): boolean {
+  return word !== undefined && (word in SMALL_WORDS || word in SCALE_WORDS);
+}
+
+/** Number words in `text` as figures; "one" alone is not one (it is not a claim worth checking). */
+function wordFigures(text: string, figures: Set<string>): void {
+  const tokens = foldText(text).split(' ');
+  for (let i = 0; i < tokens.length;) {
+    const word = tokens[i] ?? '';
+    const kindWord = KIND_WORDS[word];
+    if (kindWord !== undefined) {
+      figures.add(`word:${kindWord}`);
+      i += 1;
+      continue;
+    }
+    const afterDigits = /^\d+$/.test(tokens[i - 1] ?? '');
+    if (!isNumberWord(word) || (afterDigits && word in SCALE_WORDS)) {
+      i += 1;
+      continue;
+    }
+    let total = 0;
+    let current = 0;
+    let onlyOne = true;
+    let j = i;
+    for (; j < tokens.length; j += 1) {
+      const token = tokens[j] ?? '';
+      const small = SMALL_WORDS[token];
+      const scale = SCALE_WORDS[token];
+      if (small !== undefined) {
+        current += small;
+        if (token !== 'one') onlyOne = false;
+      } else if (scale !== undefined) {
+        onlyOne = false;
+        if (scale >= 1e3) {
+          total += (current === 0 ? 1 : current) * scale;
+          current = 0;
+        } else {
+          current = (current === 0 ? 1 : current) * scale;
+        }
+      } else if (token === 'and' && j > i && isNumberWord(tokens[j + 1])) {
+        // "three hundred and fifty": the "and" joins the run.
+      } else {
+        break;
+      }
+    }
+    const isPercent = tokens[j] === 'percent' || (tokens[j] === 'per' && tokens[j + 1] === 'cent');
+    if (!onlyOne) figures.add(`${isPercent ? 'percent' : 'plain'}:${String(total + current)}`);
+    i = Math.max(j, i + 1);
+  }
+}
+
+/**
+ * Every figure in `text`, as `kind:value`: `plain:12000`, `percent:30`, `£plain:50000`,
+ * `times:10`, `ordinal:2`, `plural:100`, `fraction:0.5`, `plain:10+`, and number words by value
+ * (`twelve` is `plain:12`) or as `word:halved`.
+ */
 export function figuresIn(text: string): Set<string> {
   const figures = new Set<string>();
   for (const match of text.matchAll(FIGURE)) {
-    const [, currency = '', whole = '', fraction = '', unit = ''] = match;
+    const [, currency = '', whole = '', fraction = '', unit = '', plus = ''] = match;
     const base = Number(`${whole.replaceAll(',', '')}${fraction}`);
     const lower = unit.trim().toLowerCase();
-    const isPercent = lower === '%' || lower.startsWith('per');
+    let kind = 'plain';
+    if (lower === '%' || lower.startsWith('per')) kind = 'percent';
+    else if (lower === 'x' || lower.endsWith('fold')) kind = 'times';
+    else if (['st', 'nd', 'rd', 'th'].includes(lower)) kind = 'ordinal';
+    else if (lower === 's') kind = 'plural';
     const value = Number((base * (UNIT_FACTOR[lower] ?? 1)).toFixed(6));
-    const kind = isPercent ? 'percent' : currency === '' ? 'plain' : 'money';
-    figures.add(`${kind}:${String(value)}`);
+    figures.add(`${currency}${kind}:${String(value)}${plus}`);
   }
+  for (const char of text) {
+    const fraction = FRACTIONS[char];
+    if (fraction !== undefined) figures.add(`fraction:${String(fraction)}`);
+  }
+  wordFigures(text, figures);
   return figures;
 }
 

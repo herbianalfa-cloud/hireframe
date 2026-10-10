@@ -473,11 +473,11 @@ describe('citation types', () => {
 describe('figures', () => {
   it('compares figures by value and kind', () => {
     expect([...figuresIn('12k users, £50,000, 30%, 1.5m, 12 clients')].sort()).toEqual([
-      '£plain:50000',
       'percent:30',
       'plain:12',
       'plain:12000',
       'plain:1500000',
+      '£plain:50000',
     ]);
     expect(figuresIn('30 percent')).toEqual(new Set(['percent:30']));
     expect(figuresIn('12,000')).toEqual(figuresIn('12k'));
