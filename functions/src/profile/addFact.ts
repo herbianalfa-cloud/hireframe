@@ -95,7 +95,8 @@ export async function addFactHandler(data: unknown, deps: AddFactDeps): Promise<
     'addFact',
     text,
   );
-  const added = plan.fresh.length > 0 ? await deps.store.addManualFacts(plan.fresh, deps.now()) : [];
+  const added =
+    plan.fresh.length > 0 ? await deps.store.addManualFacts(plan.fresh, deps.now()) : [];
   log.info('add_fact.done', {
     added: added.length,
     skippedDuplicates: plan.skippedDuplicates,
