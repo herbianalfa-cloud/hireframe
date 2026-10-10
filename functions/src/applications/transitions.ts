@@ -210,6 +210,7 @@ export function planWithdraw(current: Application, now: Date): Application | nul
 /** After the files and `cvs` docs of a withdrawn application are deleted. */
 export function planClearCvs(current: Application, now: Date): Application | null {
   if (current.stage !== 'withdrawn') return null;
-  const { currentCvId: _drop, ...rest } = current;
-  return { ...rest, cvIds: [], updatedAt: now };
+  const next: Application = { ...current, cvIds: [], updatedAt: now };
+  delete next.currentCvId;
+  return next;
 }

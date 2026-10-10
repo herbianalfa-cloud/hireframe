@@ -332,7 +332,7 @@ describe('profile/cvHeader', () => {
   it('lets the owner update it, keeping createdAt', async () => {
     const db = dbFor('owner');
     await assertSucceeds(setDoc(ref(db), header()));
-    const created = (await getDoc(ref(db))).get('createdAt');
+    const created = (await getDoc(ref(db))).get('createdAt') as Timestamp;
     await assertSucceeds(setDoc(ref(db), header({ name: 'Alex Q Example', createdAt: created })));
     await assertFails(
       setDoc(ref(db), header({ createdAt: Timestamp.fromDate(new Date('2026-01-01T00:00:00Z')) })),
@@ -342,7 +342,7 @@ describe('profile/cvHeader', () => {
   it('denies extra keys and missing ones', async () => {
     const db = dbFor('owner');
     await assertFails(setDoc(ref(db), header({ headline: 'Data person' })));
-    const { name: _name, ...noName } = header();
+    const noName = Object.fromEntries(Object.entries(header()).filter(([key]) => key !== 'name'));
     await assertFails(setDoc(ref(db), noName));
   });
 

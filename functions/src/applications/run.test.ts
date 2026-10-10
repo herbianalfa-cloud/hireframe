@@ -1,4 +1,4 @@
-import type { AddFactExtraction, FactDraft } from '@hireframe/shared';
+import { ApplicationSchema, type FactDraft } from '@hireframe/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { llmCall, type LlmCallInput } from '../llm/call.js';
@@ -56,9 +56,9 @@ function harness(): Harness {
     store,
     facts: () => Promise.resolve(facts),
     llm: <T>(input: LlmCallInput<T>) => {
-      calls.push(input as LlmCallInput<unknown>);
+      calls.push(input);
       return Promise.resolve({
-        data: { facts: answers.facts } as AddFactExtraction as T,
+        data: { facts: answers.facts } as unknown as T,
         model: 'claude-haiku-4-5',
         costPence: 0.2,
       });
@@ -98,7 +98,7 @@ function seedApplication(h: Harness, overrides: Record<string, unknown>) {
     cvIds: [],
     schemaVersion: 1 as const,
   };
-  h.store.applications.set(TEST_JOB_ID, { ...base, ...overrides } as never);
+  h.store.applications.set(TEST_JOB_ID, ApplicationSchema.parse({ ...base, ...overrides }));
 }
 
 let h: Harness;
@@ -436,7 +436,9 @@ describe('regenerate', () => {
 
   it('loses to a worker or a mirror write that landed first', async () => {
     seedApplication(h, { stage: 'ready' });
-    h.store.beforeCommit = () => seedApplication(h, { stage: 'applied', stageBefore: 'ready' });
+    h.store.beforeCommit = () => {
+      seedApplication(h, { stage: 'applied', stageBefore: 'ready' });
+    };
     expect(await refusal(run(h, { action: 'regenerate', jobId: TEST_JOB_ID }))).toBe('lost');
     expect(h.store.events).toHaveLength(0);
   });
