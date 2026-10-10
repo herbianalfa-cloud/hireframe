@@ -18,6 +18,11 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - **Rules:** `applications/{jobId}` (owner read; the Applied mirror only) and `profile/cvHeader`. **Indexes:** `applications (stage, stageAt desc)` and `applications (stage, updatedAt desc)`.
   - **Dev:** `npm run dev` seeds a CV header and five applications (Needs your input, Generating, Ready with four real files, Applied, and a blocked Chosen); `node scripts/dev-worker.ts` runs one worker pass against the emulator.
   - Tests: every stage-table row, the killed-worker case, the mirror through the real rules, the badge and slot (no read before `hf:usable`, each failing alone), the digest line (escaping, clamping, a failed read still sends), and emulator tests for start to ready and for the digest.
+  - **Review fixes on PR #30:**
+    - `withdraw {deleteFiles}` is bounded: one listing page of 200 objects, at most 20 versions a call, nothing new after 60 s. The result says `cleanupRemaining` and repeating the withdraw finishes the job; a repeat is now allowed even when no version is recorded (orphans only).
+    - The worker keeps the files of a version whose ready commit landed even when the retried transaction reports lost.
+    - Snapshots are read with estimated server timestamps (a pending Applied or header write no longer fails to parse). One application listener per job sheet, started after `hf:usable` on Today. Focus moves into the Withdraw and notes panels and back on Cancel; saving the CV header keeps focus on Save and the "Saved" region.
+    - Tests added for each, plus the `a` key while generating, the download path from `storagePaths`, text-only rendering, and the Pipeline line in the digest's worst case.
 
 ### Changed
 - Docs: ADR-055; PRD R7, R9 and R10; ARCHITECTURE (functions, data model, indexes, the pipeline section); DESIGN (Pipeline, tab bar, stage tokens); SECURITY (client writes, the CV threat row, retention); RUNBOOK Part I steps I6 and I7 (94, 95) and Recovery entries; ROADMAP (M7 done, parking lot); CLAUDE.md commands.
