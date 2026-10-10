@@ -127,6 +127,8 @@ describe('generateCvs (ADR-053)', () => {
     expect(source).toMatch(/^\s*retryCount: 0,$/m);
   });
 
+  // A fast source guard before any build. The bundle itself (the static import graph of
+  // index.js and every chunk loading) is checked by scripts/smoke-functions-bundle.ts.
   it('does not import the renderer statically, so other functions never load it', () => {
     for (const file of ['./applications/schedule.ts', './applications/worker.ts']) {
       const source = readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -203,11 +205,8 @@ describe('application (M7, ADR-055)', () => {
     expect(endpoint?.maxInstances).toBe(1);
   });
 
-  it('enforces and consumes App Check, in the options the source states', () => {
-    const source = readFileSync(new URL('./applications/callable.ts', import.meta.url), 'utf8');
-    expect(source).toMatch(/\.\.\.ownerOptions,/);
-    expect(source).toMatch(/^\s*maxInstances: 1,$/m);
-  });
+  // App Check, the instance count and the owner check are asserted on the options `onCall`
+  // receives, in applications/callable.test.ts: the deploy manifest doesn't carry App Check.
 
   it('is not scheduled and has no event trigger (no self-triggering code)', () => {
     expect(endpoint).not.toHaveProperty('scheduleTrigger');
