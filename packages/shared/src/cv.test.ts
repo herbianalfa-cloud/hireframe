@@ -124,7 +124,7 @@ describe('validateCv', () => {
     expect(Object.keys(cases).sort()).toEqual([...CV_ISSUE_CODES].sort());
   });
 
-  it('rejects "led a team of 12" citing a fact that has a 12 only as clients, then accepts it once the fact says so', () => {
+  it('rejects a figure the cited fact does not have, then accepts it once the fact says so', () => {
     const claim = edited((cv) => {
       at(cv.experience, 0).bullets[0] = {
         text: 'Led a team of 15 engineers.',
@@ -139,6 +139,19 @@ describe('validateCv', () => {
       fact.id === 'fact-clients' ? { ...fact, text: 'Led a team of 15 engineers' } : fact,
     );
     expect(check(claim, withFact)).toEqual({ ok: true });
+  });
+
+  // ACCEPTED RISK (ADR-054): the check compares figures, not what they count. "12" in the cited
+  // fact is "12 clients", and the bullet says "12 engineers"; the validator cannot tell. A figure
+  // from any cited fact or its evidence supports the text.
+  it('accepts "Led a team of 12 engineers" citing "12 clients" (documented, accepted)', () => {
+    const claim = edited((cv) => {
+      at(cv.experience, 0).bullets[0] = {
+        text: 'Led a team of 12 engineers.',
+        factRefs: [aliasOf('fact-clients')],
+      };
+    });
+    expect(check(claim)).toEqual({ ok: true });
   });
 
   it('rejects a bullet citing an archived fact, as unknown_fact', () => {
@@ -269,6 +282,150 @@ describe('validateCv', () => {
 /** The facts with one retyped, for the citation-type tests. */
 function retyped(id: string, type: CvFact['type']): CvFact[] {
   return CV_FACTS.map((fact) => (fact.id === id ? { ...fact, type } : fact));
+}
+
+describe('counts, citations and empty text', () => {
+  const copies = <T>(item: T, n: number): T[] =>
+    Array.from({ length: n }, () => structuredClone(item));
+
+  it('allows 8 citations on a text and refuses a 9th', () => {
+    const refs = (n: number) =>
+      edited((cv) => {
+        at(at(cv.experience, 0).bullets, 0).factRefs = copies(aliasOf('fact-clients'), n);
+      });
+    expect(check(refs(8))).toEqual({ ok: true });
+    expect(issuesOf(refs(9))).toEqual([{ path: 'experience[0].bullets[0]', code: 'too_long' }]);
+  });
+
+  it('refuses text that is only whitespace, wherever it is', () => {
+    const cv = edited((c) => {
+      c.summary.text = '   ';
+      at(c.experience, 0).heading.role = '\t ';
+      at(at(c.experience, 0).bullets, 0).text = ' ';
+      at(c.education, 0).line = '  ';
+      at(c.skills, 0).label = ' ';
+      at(c.coverNote.paragraphs, 0).text = ' ';
+    });
+    const paths = issuesOf(cv)
+      .filter((issue) => issue.code === 'too_long')
+      .map((issue) => issue.path);
+    expect(paths).toEqual([
+      'summary',
+      'experience[0].heading.role',
+      'experience[0].bullets[0]',
+      'education[0]',
+      'skills[0]',
+      'coverNote.paragraphs[0]',
+    ]);
+  });
+
+  it.each([
+    ['experience', CV_LIMITS.experienceEntries],
+    ['projects', CV_LIMITS.projectEntries],
+    ['education', CV_LIMITS.educationEntries],
+    ['skills', CV_LIMITS.skills],
+  ] as const)('allows %s up to its limit and refuses one more', (section, limit) => {
+    const withCount = (n: number) =>
+      edited((cv) => {
+        const first: unknown = at<unknown>(cv[section], 0);
+        Object.assign(cv, { [section]: copies(first, n) });
+      });
+    expect(issuesOf(withCount(limit + 1))).toContainEqual({ path: section, code: 'too_long' });
+    expect(issuesOf(withCount(limit + 1)).filter((i) => i.path === section)).toHaveLength(1);
+    expect(check(withCount(limit))).toEqual({ ok: true });
+  });
+
+  it('reports an empty heading reference as uncited, not as an unknown fact', () => {
+    const cv = edited((c) => {
+      at(c.experience, 0).heading.factRef = '';
+      at(c.education, 0).factRef = '';
+    });
+    expect(issuesOf(cv)).toEqual([
+      { path: 'experience[0].heading', code: 'uncited' },
+      { path: 'education[0]', code: 'uncited' },
+    ]);
+  });
+});
+
+/** A small seeded generator, so a failure names its seed and reruns the same way. */
+function random(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe('validateCv ok implies the strict schema', () => {
+  const TEXTS = [
+    '',
+    '   ',
+    ' padded ',
+    'Led onboarding for 12 clients.',
+    'Cut client time-to-live by 30%.',
+    'Customer Onboarding Intern',
+    'Example Cloud Ltd',
+    'SQL',
+    'Python',
+    'Scrum Fundamentals Certificate',
+    'Olist e-commerce analysis',
+    'x'.repeat(CV_LIMITS.bullet + 1),
+    'w'.repeat(CV_LIMITS.summary),
+    'line\nbreak',
+    '日本語',
+    'a'.repeat(5),
+  ];
+
+  it('holds for random edits of the valid CV, and some of them are valid', () => {
+    const rng = random(20260101);
+    const pick = <T>(items: readonly T[]): T => at(items, Math.floor(rng() * items.length));
+    const aliasPool = [...CV_ALIASES.keys(), 'F99', '', 'F1234567890'];
+    const refs = () => Array.from({ length: Math.floor(rng() * 10) }, () => pick(aliasPool));
+    let valid = 0;
+    for (let run = 0; run < 1500; run += 1) {
+      const cv = structuredClone(validCv());
+      const maybe = (p: number) => rng() < p;
+      if (maybe(0.04)) cv.summary.text = pick(TEXTS);
+      if (maybe(0.04)) cv.summary.factRefs = refs();
+      for (const entry of [...cv.experience, ...cv.projects]) {
+        if (maybe(0.04)) entry.heading.role = pick(TEXTS);
+        if (maybe(0.04)) entry.heading.org = pick(TEXTS);
+        if (maybe(0.04)) entry.heading.factRef = pick(aliasPool);
+        for (const bullet of entry.bullets) {
+          if (maybe(0.04)) bullet.text = pick(TEXTS);
+          if (maybe(0.04)) bullet.factRefs = refs();
+        }
+        if (maybe(0.02)) entry.bullets.push(...copies5(entry.bullets));
+      }
+      for (const line of cv.education) {
+        if (maybe(0.04)) line.line = pick(TEXTS);
+        if (maybe(0.04)) line.factRef = pick(aliasPool);
+      }
+      for (const skill of cv.skills) {
+        if (maybe(0.04)) skill.label = pick(TEXTS);
+        if (maybe(0.04)) skill.factRefs = refs();
+      }
+      for (const paragraph of cv.coverNote.paragraphs) {
+        if (maybe(0.04)) paragraph.text = pick(TEXTS);
+        if (maybe(0.04)) paragraph.factRefs = refs();
+      }
+      if (maybe(0.02)) cv.coverNote.paragraphs.pop();
+      if (maybe(0.02)) cv.experience.push(...structuredClone(cv.experience));
+      if (maybe(0.02)) cv.skills.push(...structuredClone(cv.skills).slice(0, 20));
+
+      if (check(cv).ok) {
+        valid += 1;
+        expect(CvContentSchema.safeParse(cv).success, `run ${String(run)}`).toBe(true);
+      }
+    }
+    expect(valid).toBeGreaterThan(50);
+  });
+});
+
+function copies5<T>(items: readonly T[]): T[] {
+  return structuredClone([...items]).slice(0, 5);
 }
 
 describe('unsupported_text: heading, education and skill words come from the cited fact', () => {
