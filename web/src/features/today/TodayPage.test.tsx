@@ -16,6 +16,7 @@ import {
   type SummaryCountResults,
 } from '@/services/dashboard';
 import { setJobStatus, watchJob, type JobView } from '@/services/jobs';
+import { watchTodoCount } from '@/services/pipeline-todo';
 import type { LiveState } from '@/services/profile';
 
 import { TodayPage } from './TodayPage';
@@ -29,6 +30,7 @@ vi.mock('@/services/dashboard', async (importOriginal) => ({
   watchSpend: vi.fn(),
   loadAgreement: vi.fn(),
 }));
+vi.mock('@/services/pipeline-todo', () => ({ watchTodoCount: vi.fn() }));
 vi.mock('@/services/jobs', () => ({
   watchJob: vi.fn(),
   loadJobDescription: vi.fn(() => Promise.resolve(null)),
@@ -103,6 +105,10 @@ function setup(
       (options.kpis === 'one-fails' ? { ...COUNTS, nearMiss: null } : COUNTS);
     markOnce('hf:counts');
     return counts;
+  });
+  vi.mocked(watchTodoCount).mockImplementation((callback) => {
+    callback({ status: 'ready', count: 2, capped: false });
+    return () => undefined;
   });
   vi.mocked(watchLastRun).mockImplementation((callback) => {
     callback({ status: 'ready', data: options.run === undefined ? RUN : options.run, invalid: 0 });
@@ -305,6 +311,20 @@ describe('TodayPage', () => {
     });
     expect(watchLastRun).toHaveBeenCalledTimes(1);
     expect(watchSpend).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts no Things to do read until the Apply snapshot arrives, then shows it', async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    setup({ apply: ready(makeView('a1')) }, { applyGate: gate });
+    await Promise.resolve();
+    expect(watchTodoCount).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: /things to do/i })).toBeNull();
+    open();
+    expect(await screen.findByRole('link', { name: 'Things to do 2' })).toBeDefined();
+    expect(watchTodoCount).toHaveBeenCalledTimes(1);
   });
 
   it('shows no count query or last run while the Apply list is loading', () => {

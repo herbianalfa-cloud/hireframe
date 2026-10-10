@@ -16,6 +16,15 @@ vi.mock('@/services/auth', () => ({
   signOut: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/services/access', () => ({ checkAccess: vi.fn() }));
+// The shell's pipeline badge reads Firestore; this file is about the gate.
+vi.mock('@/services/pipeline-todo', () => ({
+  watchTodoCount: (
+    callback: (state: { status: 'ready'; count: number; capped: boolean }) => void,
+  ) => {
+    callback({ status: 'ready', count: 0, capped: false });
+    return () => undefined;
+  },
+}));
 
 const user = { uid: 'uid-1', email: 'person@example.com' };
 
