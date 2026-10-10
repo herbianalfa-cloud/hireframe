@@ -91,7 +91,7 @@ export function Shell() {
 
       <nav
         aria-label="Tabs"
-        className="fixed inset-x-0 bottom-0 grid grid-cols-4 border-t bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 grid grid-cols-5 border-t bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {NAV_ITEMS.filter((item) => item.inTabBar).map((item) => (
           <TabLink key={item.path} path={item.path} label={item.label} Icon={item.Icon} />
