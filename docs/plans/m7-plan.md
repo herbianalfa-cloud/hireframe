@@ -243,8 +243,9 @@ There is nothing for the owner to see yet. 7C ships the parts 7D wires together,
 **`validateCv(content, aliases, facts)`** returns `{ ok } | { issues: [{ path, code }] }`. It is pure, and the codes are:
 - `uncited`: a citation is missing;
 - `unknown_fact`: an alias that isn't in `aliases`, or a fact that is now archived;
-- `wrong_fact_type`: a heading must cite an `experience`, `education` or `project` fact, and a skill a `skill` fact;
-- `unsupported_number`: every number, `%`, `£`/`$` amount or `k`/`m` figure in a text must appear, normalised, in the text or evidence of a fact it cites;
+- `wrong_fact_type`: an experience heading cites an `experience` fact, a project heading a `project` or `experience` fact, an education line an `education` fact, a skill `skill` facts; nothing cites a `preference` fact, and only the summary and the note may cite a `constraint` fact;
+- `unsupported_text`: the words of a heading, education line or skill label are in the cited fact (ADR-054);
+- `unsupported_number`: every figure (number, number word, `%`, currency amount, `k`/`m`/`b`, multiplier, ordinal, plural, fraction, `10+`) in a text must appear, by value and kind, in the text or evidence of a fact it cites;
 - `contact_in_text`: an email, phone number or URL in model text (contact details come only from the header);
 - `too_long`: past the length limits.
 
@@ -269,7 +270,7 @@ There is nothing for the owner to see yet. 7C ships the parts 7D wires together,
 - purpose `cvWrite`: `claude-sonnet-5-5`, effort `medium`, `maxTokens` 8,000, `timeoutMs` 150 s, `budgetMs` 300 s (the call plus its invalid-output retry), bounded by the worker's 540 s timeout (`CALLABLE_TIMEOUT_SECONDS.generateCvs = 540`; the timeout table is where budgets are checked, as for `ingestEmailJobs`);
 - purpose `answerFact`: Haiku, the `addFact` prompt, under the `application` callable;
 - `DAILY_CAP_KEYS` gains `application`;
-- `APPLICATIONS = { dailyCapPence: 60, maxQuestions: 5, maxAttempts: 2, workerMaxPerRun: 10, workerStartDeadlineMs: 300_000 }`;
+- `APPLICATIONS = { dailyCapPence: 60, maxQuestions: 5, maxAttempts: 2, workerMaxPerRun: 10, workerStartDeadlineMs: 210_000 }` (it was 300_000 in the first plan; 300 + 300 + 30 s is 630 s and cannot fit the worker's 540 s, so the deadline is 540 − `budgetMs` 300 − margin 30 = 210 s; ADR-053);
 - overrides from `config/app.applications` (an `unknown` parsed on its own, like `lookup`);
 - `config.test.ts`: `budgetMs + callableMarginMs ≤ 540 s`, and `workerStartDeadlineMs + budgetMs + margin ≤ 540 s`, so a call started at the deadline still settles before the function is killed.
 - **Daily cap sizing (realtime prices):**
@@ -295,7 +296,7 @@ All fixtures use the fake candidate's facts.
   - `renderCvPdf(header, content, facts)` → `{ bytes, pages }`, and `renderNotePdf`.
   - Text outside WinAnsi (Helvetica's encoding) is a validation issue (`unsupported_char`), never dropped silently.
 - **DOCX uses `docx`** (npm): the same content and the same spacing, Arial (metric-compatible with Helvetica), real headings and bullets, and no tables, text boxes or images (ATS-safe). `renderCvDocx`, `renderNoteDocx`.
-- **`fitOnePage`:** render, and while the PDF has more than 1 page apply the next `trimOrder` step, up to 12 times. It returns the content used and `trimmed: n`. If it still doesn't fit, `too_long` (cannot happen with the schema limits; pinned by a test with the maximum content).
+- **`fitOnePage`:** render, and while the PDF has more than 1 page apply the next `trimOrder` step, up to 12 times. It returns the content used and `trimmed: n`. If it still doesn't fit, `too_long`: a real outcome (headings and education are never trimmed; ADR-054), so the worker retries with the code.
 - **Tests:**
   - the fake CV renders to exactly 1 page;
   - the maximum-size content fits after trimming;
@@ -366,7 +367,7 @@ All fixtures use the fake candidate's facts.
 - **`generateCvs`:** `onSchedule('*/10 7-23 * * *', Europe/London)`, 540 s, 1 GiB, `maxInstances: 1`, `retryCount: 0`, mounts the Anthropic key.
 - **Each run:**
   1. reads `applications where stage == 'generating'` (limit `workerMaxPerRun` 10, oldest `stageAt` first, sorted in code, so no composite index);
-  2. one at a time, oldest first, and **no new call starts after `workerStartDeadlineMs` (300 s)**:
+  2. one at a time, oldest first, and **no new call starts after `workerStartDeadlineMs` (210 s, `APPLICATIONS` in `functions/src/config.ts`)**:
      - first, a transaction checks that the job is still `stage == 'generating'` and increments `attempt`. That happens **before** the model call.
      - A job whose `attempt` is already at `maxAttempts` (2) is not called again. It moves to chosen with `blocked: attempts_exhausted`.
      - Only then: a realtime `llmCall` (purpose `cvWrite`, under the monthly cap and the `application` daily cap, with the issue codes appended when `attempt` is 1). The output then goes through alias resolution, `validateCv`, `fitOnePage`, and the render of the four files;
@@ -387,7 +388,7 @@ All fixtures use the fake candidate's facts.
     - a third run that finds `attempt == 2` makes no call (spy) and moves the job to chosen with `attempts_exhausted`;
     - two kills in a row → exactly 2 calls in total;
   - the increment happens before the call (call order on the spy);
-  - the start deadline: no call starts after 300 s on a fake clock, and the remaining jobs are untouched;
+  - the start deadline: no call starts after `APPLICATIONS.workerStartDeadlineMs` (210 s) on a fake clock, and the remaining jobs are untouched;
   - at most 10 a run, oldest first;
   - a cap refusal stops the run;
   - the transaction loses when the owner withdrew in between (files deleted);
@@ -462,7 +463,7 @@ All fixtures use the fake candidate's facts.
 - **ADR-053 CV generation: realtime `llm.call()` from a scheduled worker; batch rejected for now** (7C):
   - `cvWrite` is a normal realtime call under the monthly cap and a 60p daily `application` cap, sized for realtime prices;
   - one retry with the validator's issue codes;
-  - a scheduled worker every 10 minutes (07:00–23:50), oldest first, with no new call after its start deadline, at most 10 a run, `maxInstances: 1`, `retryCount: 0`, never re-enqueued (the no-self-triggering rule);
+  - a scheduled worker every 10 minutes (07:00–23:50), oldest first, with no new call after its start deadline (210 s, so a call started at the deadline settles inside the 540 s timeout), at most 10 a run, `maxInstances: 1`, `retryCount: 0`, never re-enqueued (the no-self-triggering rule);
   - **Message Batches rejected for now:** they save about £1 a month at 10 applications a week, and they add a wait of up to 24 hours, a reservation that outlives ADR-016's 15-minute stale rule, and a second delivery path in `llm.call()`. Parked on the ROADMAP.
 - **ADR-054 CV content, citation validator and rendering** (7C):
   - the alias-cited content schema, and dates and contact details from code;
@@ -489,7 +490,7 @@ All fixtures use the fake candidate's facts.
 - Index `applications (stage, stageAt desc)`.
 
 ## Risks
-- **Worker throughput.** At most 10 a run and no new call after 300 s; sequential calls of about 30–90 s each mean about 4–8 CVs a run, which is plenty at 10 a week. Jobs left over wait at most 10 minutes. A job started after 23:50 waits until 07:00, and the UI says "usually within 15 minutes" (accurate in the day).
+- **Worker throughput.** At most 10 a run and no new call after 210 s (`workerStartDeadlineMs`); sequential calls of about 30–90 s each mean about 3–7 CVs a run (7 at 30 s, 5 at 50 s, 3 at 90 s), which is still well above 10 a week. Jobs left over wait at most 10 minutes. A job started after 23:50 waits until 07:00, and the UI says "usually within 15 minutes" (accurate in the day).
 - **Daily caps can add up past the 25% manual share.** Lookup 25p, alerts 10p and applications 60p a day could together pass the 800p manual share in a worst-case month. The monthly cap (3200p) still holds in `llm.call()`, but scheduled runs could find less lease room late in the month. Typical CV spend is about 4.3p × 10 a week, roughly £1.85 a month. The digest's 80% warning surfaces it.
 - **One page in Word versus PDF.** The fit is measured in the PDF; Arial and Helvetica are metric-compatible, but Word's line breaking can differ slightly. RUNBOOK I-step: open one .docx in Word or Google Docs and check that it is one page. The fallback is smaller limits in `trimOrder`.
 - **pdf-lib standard fonts are WinAnsi only.** A name or fact with characters outside it gives `unsupported_char` and blocks with a message. The fallback is embedding Arimo (Apache 2.0, metric-compatible) with fontkit, decided only if it happens.

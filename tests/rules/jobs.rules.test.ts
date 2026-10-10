@@ -569,6 +569,22 @@ describe('events are create-only', () => {
     await assertFails(commit(db, { ...write, event: { ...write.event, jobId: 'missing' } }));
   });
 
+  it('denies a client-created application_stage event: the server writes those (M7)', async () => {
+    const db = dbFor('owner');
+    const stage = {
+      type: 'application_stage',
+      jobId: JOB_ID,
+      from: null,
+      to: 'chosen',
+      at: NOW,
+      schemaVersion: 1,
+    };
+    await assertFails(setDoc(doc(db, `events/${EVENT_ID}`), stage));
+    // Not even beside a valid job change.
+    const write = buildJobStatusWrite(JOB_ID, seededJob(), 'saved', NOW);
+    await assertFails(commit(db, { ...write, event: stage }));
+  });
+
   it('denies an event for a change that did not happen (ADR-038)', async () => {
     const db = dbFor('owner');
     // from == to, with the job already there: nothing changed.

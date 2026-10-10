@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   API_TERMS_HOSTS,
+  ApplicationOverridesSchema,
+  APPLICATIONS,
   defaultRunBudgetPence,
   ALERT_LINK_HOSTS,
   ALERTS,
@@ -30,6 +32,54 @@ describe('time limits', () => {
       expect(model.timeoutMs).toBeLessThanOrEqual(model.budgetMs - LLM.countTokensTimeoutMs);
     },
   );
+});
+
+describe('CV worker budgets (M7, ADR-053)', () => {
+  const workerMs = CALLABLE_TIMEOUT_SECONDS.generateCvs * 1000;
+
+  it('runs the worker for 540 s and writes CVs with Sonnet 5.5 at medium effort', () => {
+    expect(workerMs).toBe(540_000);
+    expect(PURPOSE_CALLABLE.cvWrite).toBe('generateCvs');
+    expect(MODELS.cvWrite).toEqual({
+      id: 'claude-sonnet-5-5',
+      effort: 'medium',
+      maxTokens: 8_000,
+      timeoutMs: 150_000,
+      budgetMs: 300_000,
+    });
+  });
+
+  it('rule 1: one call (its retry included) plus the margin fits the worker timeout', () => {
+    expect(MODELS.cvWrite.budgetMs + LLM.callableMarginMs).toBeLessThanOrEqual(workerMs);
+  });
+
+  it('rule 2: a call started at the start deadline still settles before the worker is killed', () => {
+    expect(
+      APPLICATIONS.workerStartDeadlineMs + MODELS.cvWrite.budgetMs + LLM.callableMarginMs,
+    ).toBeLessThanOrEqual(workerMs);
+    // The deadline is the latest one that fits: raising it by a second would break rule 2.
+    expect(
+      APPLICATIONS.workerStartDeadlineMs + 1_000 + MODELS.cvWrite.budgetMs + LLM.callableMarginMs,
+    ).toBeGreaterThan(workerMs);
+  });
+
+  it('answers turn into facts under the application callable timeout', () => {
+    expect(PURPOSE_CALLABLE.answerFact).toBe('application');
+    expect(CALLABLE_TIMEOUT_SECONDS.application).toBe(120);
+    expect(MODELS.answerFact.id).toBe(MODELS.addFact.id);
+  });
+
+  it('bounds the worker and the daily spend', () => {
+    expect(APPLICATIONS).toMatchObject({
+      dailyCapPence: 60,
+      maxQuestions: 5,
+      maxAttempts: 2,
+      workerMaxPerRun: 10,
+    });
+    expect(ApplicationOverridesSchema.safeParse({ dailyCapPence: 80 }).success).toBe(true);
+    expect(ApplicationOverridesSchema.safeParse({ dailyCapPence: -1 }).success).toBe(false);
+    expect(ApplicationOverridesSchema.safeParse({}).success).toBe(true);
+  });
 });
 
 describe('funnel deadlines (ADR-032)', () => {
