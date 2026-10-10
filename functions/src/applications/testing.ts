@@ -1,8 +1,11 @@
 import {
   ApplicationSchema,
+  CvDocSchema,
   EventSchema,
   type Application,
   type AppEvent,
+  type CvDoc,
+  type CvHeader,
   type ExistingFact,
   type FactDraft,
   type JobRequirement,
@@ -10,14 +13,19 @@ import {
 } from '@hireframe/shared';
 
 import type { NewFact } from '../profile/store.js';
-import type { ApplicationStore, Change, CommitResult } from './store.js';
+import type { ApplicationStore, Change, CommitResult, JobForCv } from './store.js';
 import type { JobForApplication } from './transitions.js';
 
 /** Test support: an in-memory `ApplicationStore` with the production store's rules. */
 export interface MemoryApplicationStore extends ApplicationStore {
   applications: Map<string, Application>;
   jobs: Map<string, JobForApplication>;
-  header: { exists: boolean };
+  /** `exists: false` is a missing or invalid header; `value` overrides `TEST_HEADER`. */
+  header: { exists: boolean; value?: CvHeader };
+  /** What `getJobForCv` returns; a job in `jobs` with no entry here has no deep read. */
+  jobTexts: Map<string, JobForCv>;
+  /** `cvs/{cvId}` documents written beside a ready move. */
+  cvDocs: Map<string, CvDoc>;
   events: AppEvent[];
   /** Facts written by answers: the draft, its ID and the job it answered for. */
   facts: { id: string; draft: FactDraft; jobId: string }[];
@@ -33,6 +41,8 @@ export function memoryApplicationStore(): MemoryApplicationStore {
     applications: new Map(),
     jobs: new Map(),
     header: { exists: true },
+    jobTexts: new Map(),
+    cvDocs: new Map(),
     events: [],
     facts: [],
     deletedCvDocs: [],
@@ -41,6 +51,16 @@ export function memoryApplicationStore(): MemoryApplicationStore {
     getApplication: (jobId) => Promise.resolve(store.applications.get(jobId) ?? null),
     getJob: (jobId) => Promise.resolve(store.jobs.get(jobId) ?? null),
     hasCvHeader: () => Promise.resolve(store.header.exists),
+    getCvHeader: () =>
+      Promise.resolve(store.header.exists ? (store.header.value ?? TEST_HEADER) : null),
+    listGenerating: (limit) =>
+      Promise.resolve(
+        [...store.applications.values()]
+          .filter((application) => application.stage === 'generating')
+          .sort((a, b) => a.stageAt.getTime() - b.stageAt.getTime())
+          .slice(0, limit),
+      ),
+    getJobForCv: (jobId) => Promise.resolve(store.jobTexts.get(jobId) ?? null),
 
     commit(change): Promise<CommitResult> {
       store.commits += 1;
@@ -63,6 +83,9 @@ export function memoryApplicationStore(): MemoryApplicationStore {
           jobId: change.jobId,
         });
       });
+      if (change.cvDoc) {
+        store.cvDocs.set(change.cvDoc.cvId, CvDocSchema.parse(change.cvDoc.doc));
+      }
       store.applications.set(change.jobId, valid);
       const from = current?.stage ?? null;
       if (from !== valid.stage) {
@@ -89,6 +112,15 @@ export function memoryApplicationStore(): MemoryApplicationStore {
 }
 
 export const TEST_JOB_ID = 'job-1';
+
+/** The fake candidate's header: example addresses only. */
+export const TEST_HEADER: CvHeader = {
+  name: 'Alex Example',
+  email: 'alex@example.com',
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+  updatedAt: new Date('2026-01-01T00:00:00Z'),
+  schemaVersion: 1,
+};
 
 export function requirementOf(
   text: string,

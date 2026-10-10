@@ -4,6 +4,7 @@ import {
   type Application,
   type ApplicationStage,
   type BlockedCode,
+  type CvIssueCode,
   type JobDeep,
   type Question,
   type Verdict,
@@ -212,5 +213,72 @@ export function planClearCvs(current: Application, now: Date): Application | nul
   if (current.stage !== 'withdrawn') return null;
   const next: Application = { ...current, cvIds: [], updatedAt: now };
   delete next.currentCvId;
+  return next;
+}
+
+// ---- The CV worker's moves (M7 7D.2) ----
+//
+// Unlike the owner's moves above, these keep `attempt`: the worker's counter must survive every
+// step it takes. `attempt` goes back to 0 only in `withStage`, i.e. on an owner's start, retry,
+// answer or skip that settles, regenerate or withdraw.
+
+const generating = (current: Application): boolean => current.stage === 'generating';
+
+/** Counts one model call before it is made. Null when the stage moved or no attempt is left. */
+export function planAttempt(current: Application, now: Date): Application | null {
+  if (!generating(current) || current.attempt >= APPLICATION_LIMITS.maxAttempts) return null;
+  return { ...current, attempt: current.attempt + 1, updatedAt: now };
+}
+
+/**
+ * An invalid output with an attempt left: stays generating, with the codes the next call is told.
+ * `attempt` stays as counted, so the next run's call is the second and the last.
+ */
+export function planRetry(
+  current: Application,
+  issues: readonly CvIssueCode[],
+  now: Date,
+): Application | null {
+  if (!generating(current) || current.attempt >= APPLICATION_LIMITS.maxAttempts) return null;
+  const next: Application = { ...current, updatedAt: now };
+  if (issues.length > 0) next.lastIssues = [...issues];
+  else delete next.lastIssues;
+  return next;
+}
+
+/** Back to chosen with a reason; keeps `attempt` and the issue codes for the card. */
+export function planBlocked(
+  current: Application,
+  code: BlockedCode,
+  now: Date,
+  issues: readonly CvIssueCode[] = [],
+): Application | null {
+  if (!generating(current)) return null;
+  const next: Application = {
+    ...current,
+    stage: 'chosen',
+    stageAt: now,
+    updatedAt: now,
+    blocked: { code, at: now },
+  };
+  if (issues.length > 0) next.lastIssues = [...issues];
+  else delete next.lastIssues;
+  return next;
+}
+
+/** A written CV: ready, with the new version current. Clears the issue codes. */
+export function planReady(current: Application, cvId: string, now: Date): Application | null {
+  if (!generating(current)) return null;
+  if (current.cvIds.length >= APPLICATION_LIMITS.cvIds) return null;
+  const next: Application = {
+    ...current,
+    stage: 'ready',
+    stageAt: now,
+    updatedAt: now,
+    cvIds: [...current.cvIds, cvId],
+    currentCvId: cvId,
+  };
+  delete next.blocked;
+  delete next.lastIssues;
   return next;
 }

@@ -1,16 +1,24 @@
 import {
   ApplicationSchema,
+  CvDocSchema,
   CvHeaderSchema,
   DOCS,
   EventSchema,
+  JobDescriptionSchema,
   JobSchema,
   PATHS,
   COLLECTIONS,
+  FUNNEL_LIMITS,
+  generatingApplicationsSpec,
   type Application,
   type ApplicationStage,
+  type CvDoc,
+  type CvHeader,
+  type JobRequirement,
 } from '@hireframe/shared';
-import type { Firestore } from 'firebase-admin/firestore';
+import type { Firestore, Query } from 'firebase-admin/firestore';
 
+import { log } from '../log.js';
 import { manualFactWrites, type NewFact } from '../profile/store.js';
 import { timestampsToDates } from '../timestamps.js';
 import type { JobForApplication } from './transitions.js';
@@ -39,7 +47,21 @@ export interface Change {
    * null when the move no longer applies (a question was answered meanwhile).
    */
   build: (current: Application | null, factIds: string[]) => Application | null;
+  /** The `cvs/{cvId}` document written in the same transaction (the worker's ready move). */
+  cvDoc?: { cvId: string; doc: CvDoc };
   now: Date;
+}
+
+/** What the CV prompt reads of a job: the untrusted posting and the S3 analysis of it. */
+export interface JobForCv {
+  title: string;
+  company: string;
+  location: string;
+  remote: string;
+  /** The stored description, cut to what S3 reads. Empty when none is stored. */
+  description: string;
+  requirements: JobRequirement[];
+  talkingPoints: string[];
 }
 
 export type CommitResult =
@@ -50,12 +72,28 @@ export interface ApplicationStore {
   getJob(jobId: string): Promise<JobForApplication | null>;
   /** `profile/cvHeader` exists and is valid. */
   hasCvHeader(): Promise<boolean>;
+  /** `profile/cvHeader`, parsed with `CvHeaderSchema`; null when missing or invalid. */
+  getCvHeader(): Promise<CvHeader | null>;
+  /**
+   * The applications at `generating`, oldest `stageAt` first, at most `limit`. Reads at most
+   * `readLimit` documents (the query has no ordering) and skips invalid ones.
+   */
+  listGenerating(limit: number, readLimit: number): Promise<Application[]>;
+  /** The job as the CV prompt needs it; null when it is missing, invalid or has no deep read. */
+  getJobForCv(jobId: string): Promise<JobForCv | null>;
   commit(change: Change): Promise<CommitResult>;
   /** Removes the `cvs/{cvId}` documents of a withdrawn application. */
   deleteCvDocs(cvIds: readonly string[]): Promise<void>;
 }
 
 export function firestoreApplicationStore(db: Firestore): ApplicationStore {
+  async function readHeader(): Promise<CvHeader | null> {
+    const snapshot = await db.doc(DOCS.cvHeader).get();
+    if (!snapshot.exists) return null;
+    const parsed = CvHeaderSchema.safeParse(timestampsToDates(snapshot.data()));
+    return parsed.success ? parsed.data : null;
+  }
+
   return {
     async getApplication(jobId) {
       const snapshot = await db.doc(PATHS.application(jobId)).get();
@@ -80,10 +118,54 @@ export function firestoreApplicationStore(db: Firestore): ApplicationStore {
     },
 
     async hasCvHeader() {
-      const snapshot = await db.doc(DOCS.cvHeader).get();
-      return (
-        snapshot.exists && CvHeaderSchema.safeParse(timestampsToDates(snapshot.data())).success
-      );
+      return (await readHeader()) !== null;
+    },
+
+    getCvHeader: readHeader,
+
+    async listGenerating(limit, readLimit) {
+      let query: Query = db.collection(generatingApplicationsSpec.collection);
+      for (const filter of generatingApplicationsSpec.filters) {
+        query = query.where(filter.field, filter.op, filter.value);
+      }
+      const snapshot = await query.limit(readLimit).get();
+      const found: Application[] = [];
+      let invalid = 0;
+      for (const doc of snapshot.docs) {
+        const parsed = ApplicationSchema.safeParse(timestampsToDates(doc.data()));
+        if (parsed.success) found.push(parsed.data);
+        else invalid += 1;
+      }
+      if (invalid > 0)
+        log.warn('store.invalid_doc', { collection: 'applications', count: invalid });
+      return found
+        .sort((a, b) => a.stageAt.getTime() - b.stageAt.getTime())
+        .slice(0, Math.max(0, limit));
+    },
+
+    async getJobForCv(jobId) {
+      const [jobSnapshot, descriptionSnapshot] = await Promise.all([
+        db.doc(PATHS.job(jobId)).get(),
+        db.doc(PATHS.jobDescription(jobId)).get(),
+      ]);
+      if (!jobSnapshot.exists) return null;
+      const job = JobSchema.safeParse(timestampsToDates(jobSnapshot.data()));
+      if (!job.success || !job.data.deep) return null;
+      const description = descriptionSnapshot.exists
+        ? JobDescriptionSchema.safeParse(timestampsToDates(descriptionSnapshot.data()))
+        : null;
+      const { title, company, location, remote, deep } = job.data;
+      return {
+        title,
+        company,
+        location,
+        remote,
+        description: description?.success
+          ? description.data.text.slice(0, FUNNEL_LIMITS.s3Description)
+          : '',
+        requirements: deep.requirements,
+        talkingPoints: deep.talkingPoints,
+      };
     },
 
     commit(change) {
@@ -111,6 +193,9 @@ export function firestoreApplicationStore(db: Firestore): ApplicationStore {
         if (!next) return { ok: false, reason: 'lost' };
         const valid = ApplicationSchema.parse(next);
         for (const write of writes) tx.create(db.doc(write.path), write.data);
+        if (change.cvDoc) {
+          tx.set(db.doc(PATHS.cv(change.cvDoc.cvId)), CvDocSchema.parse(change.cvDoc.doc));
+        }
         tx.set(ref, valid);
         const from = current?.stage ?? null;
         if (from !== valid.stage) {
