@@ -557,9 +557,22 @@ const SKIPPED_WORDS: ReadonlySet<string> = new Set([
   'or',
 ]);
 
+/**
+ * `foldText` for a claim: a single letter followed by `++` or `#` is one token, so `C++`, `C#`
+ * and `F#` are three different skills and not all "c" and "f".
+ */
+function foldClaim(text: string): string {
+  return foldText(
+    text.replace(
+      /\b([a-z])(\+\+|#)/gi,
+      (_, letter: string, mark: string) => `${letter}${mark === '#' ? 'sharp' : 'plusplus'}`,
+    ),
+  );
+}
+
 /** The words of 2+ letters in `text`, folded, without the skipped ones. Single letters stay unchecked. */
 function wordsOf(text: string): string[] {
-  return [...foldText(text).matchAll(/\p{L}{2,}/gu)]
+  return [...foldClaim(text).matchAll(/\p{L}{2,}/gu)]
     .map((match) => match[0])
     .filter((word) => !SKIPPED_WORDS.has(word));
 }
@@ -569,7 +582,11 @@ function factWords(fact: CvFact): Set<string> {
   return new Set(wordsOf(`${fact.text}\n${fact.evidence}`));
 }
 
-const LABEL_PARTS = /[,;/&+|()\u2022]|\s(?:and|or)\s/i;
+/**
+ * Where a skill label splits: a list mark, a `+` or a dash with a space on both sides (so `C++`
+ * and `time-to-live` stay whole), a colon, and `and` or `or`.
+ */
+const LABEL_PARTS = /[,;/&|():\u2022]|\s\+\s|\s[-\u2013\u2014\u00b7]\s|\s(?:and|or)\s/i;
 
 /**
  * Whether a skill label's parts are each backed by one cited fact: all the part's words are in
@@ -578,14 +595,14 @@ const LABEL_PARTS = /[,;/&+|()\u2022]|\s(?:and|or)\s/i;
  */
 function labelSupported(label: string, cited: readonly CvFact[]): boolean {
   const sets = cited.map(factWords);
-  const phrases = cited.map((fact) => ` ${foldText(`${fact.text}\n${fact.evidence}`)} `);
-  const parts = label.split(LABEL_PARTS).filter((part) => foldText(part) !== '');
+  const phrases = cited.map((fact) => ` ${foldClaim(`${fact.text}\n${fact.evidence}`)} `);
+  const parts = label.split(LABEL_PARTS).filter((part) => foldClaim(part) !== '');
   // A label of separators alone ("-") says nothing, so nothing backs it.
   if (parts.length === 0) return false;
   return parts.every((part) => {
     const words = wordsOf(part);
     if (words.length > 0) return sets.some((set) => words.every((word) => set.has(word)));
-    const folded = foldText(part);
+    const folded = foldClaim(part);
     return phrases.some((phrase) => phrase.includes(` ${folded} `));
   });
 }
