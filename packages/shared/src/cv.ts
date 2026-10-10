@@ -579,11 +579,14 @@ const LABEL_PARTS = /[,;/&+|()\u2022]|\s(?:and|or)\s/i;
 function labelSupported(label: string, cited: readonly CvFact[]): boolean {
   const sets = cited.map(factWords);
   const phrases = cited.map((fact) => ` ${foldText(`${fact.text}\n${fact.evidence}`)} `);
-  return label.split(LABEL_PARTS).every((part) => {
+  const parts = label.split(LABEL_PARTS).filter((part) => foldText(part) !== '');
+  // A label of separators alone ("-") says nothing, so nothing backs it.
+  if (parts.length === 0) return false;
+  return parts.every((part) => {
     const words = wordsOf(part);
     if (words.length > 0) return sets.some((set) => words.every((word) => set.has(word)));
     const folded = foldText(part);
-    return folded === '' || phrases.some((phrase) => phrase.includes(` ${folded} `));
+    return phrases.some((phrase) => phrase.includes(` ${folded} `));
   });
 }
 
@@ -668,11 +671,14 @@ export function validateCv(
 
     if (cite.words === 'fact' && cited.length > 0) {
       const allowed = new Set(cited.flatMap((fact) => [...factWords(fact)]));
+      let checked = 0;
       for (const text of cite.texts) {
-        if (wordsOf(text.value).some((word) => !allowed.has(word))) {
-          add(text.path, 'unsupported_text');
-        }
+        const words = wordsOf(text.value);
+        checked += words.length;
+        if (words.some((word) => !allowed.has(word))) add(text.path, 'unsupported_text');
       }
+      // Role and org together (or the line) must have one word the fact backs: all-skipped says nothing.
+      if (checked === 0) add(cite.texts[0]?.path ?? cite.path, 'unsupported_text');
     }
     if (cite.words === 'parts' && cited.length > 0) {
       for (const text of cite.texts) {
