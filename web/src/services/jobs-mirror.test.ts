@@ -10,15 +10,15 @@ import { setJobStatus } from './jobs';
  */
 
 const batch = {
-  update: vi.fn(),
+  update: vi.fn<(ref: { path: string }, data: DocumentData) => void>(),
   set: vi.fn(),
   commit: vi.fn(() => Promise.resolve()),
 };
-const getDoc = vi.fn();
+const getDoc = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock('firebase/firestore', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  getDoc: (...args: unknown[]) => getDoc(...args) as unknown,
+  getDoc: (...args: unknown[]) => getDoc(...args),
   writeBatch: () => batch,
   doc: (first: { path?: string }, path?: string) => ({ path: path ?? `${first.path ?? ''}/new` }),
   collection: (_db: unknown, path: string) => ({ path }),

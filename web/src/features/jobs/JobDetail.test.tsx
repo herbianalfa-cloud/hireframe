@@ -437,15 +437,13 @@ describe('JobDetail', () => {
       expect(button.getAttribute('aria-describedby')).toBe(reason.id);
     });
 
-    it('leaves Apply enabled in every other stage, and with no application', async () => {
+    it('leaves Apply enabled in every other stage, and with no application', () => {
       for (const stage of ['chosen', 'needs_input', 'ready', 'withdrawn'] as const) {
         cleanup();
         show();
         givenApplication(application(stage));
         open();
-        expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(
-          false,
-        );
+        expect(screen.getByRole('button', { name: 'Apply' })).toHaveProperty('disabled', false);
         expect(screen.queryByText(/still being written/)).toBeNull();
       }
     });
@@ -454,9 +452,7 @@ describe('JobDetail', () => {
       show({ status: 'applied', appliedAt: new Date('2026-10-08T09:00:00Z') });
       givenApplication(application('applied'));
       open();
-      expect((screen.getByRole('button', { name: 'Applied' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      );
+      expect(screen.getByRole('button', { name: 'Applied' })).toHaveProperty('disabled', false);
     });
   });
 
