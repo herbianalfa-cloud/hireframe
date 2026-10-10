@@ -6,6 +6,7 @@ import { fakeTransport } from '../llm/fake-transport.js';
 import { DailyCapExceededError, LlmOutputError } from '../llm/errors.js';
 import { setLogSink, type LogFields } from '../log.js';
 import { memoryUsage } from '../lookup/testing.js';
+import { bucketFileDeleter, bucketFileLister } from '../profile/store.js';
 import { applicationLlmDeps } from './llm.js';
 import { ApplicationRefusal, runApplication, type ApplicationDeps } from './run.js';
 import {
@@ -35,8 +36,12 @@ interface Harness {
   deps: ApplicationDeps;
   calls: LlmCallInput<unknown>[];
   deleted: string[];
-  /** Object names in the fake bucket; `deleteFiles` and `listFiles` use string-prefix matching. */
+  /** Object names in the fake bucket; it matches a prefix as a plain string, like Storage. */
   objects: Set<string>;
+  /** Every `getFiles` option set the production lister and deleter sent to the fake bucket. */
+  listings: { prefix?: string; maxResults?: number; autoPaginate?: boolean }[];
+  /** The clock `deps.now` reads; a delete advances it by `deleteTakesMs`. */
+  clock: { now: Date; deleteTakesMs: number };
   facts: ReturnType<typeof existingFact>[];
   answers: { facts: FactDraft[] };
 }
@@ -55,7 +60,26 @@ function harness(): Harness {
   const answers = { facts: [draft('Built weekly SQL reports for a sales team')] };
   const deleted: string[] = [];
   const objects = new Set<string>();
+  const listings: Harness['listings'] = [];
+  const clock = { now: NOW, deleteTakesMs: 0 };
   const facts: ReturnType<typeof existingFact>[] = [];
+  // The production lister and deleter over a fake bucket: only Storage itself is faked.
+  const bucket = {
+    getFiles: (options: { prefix?: string; maxResults?: number; autoPaginate?: boolean }) => {
+      listings.push(options);
+      const matching = [...objects].filter((name) => name.startsWith(options.prefix ?? ''));
+      const page =
+        options.maxResults === undefined ? matching : matching.slice(0, options.maxResults);
+      const next = page.length < matching.length ? { pageToken: 'more' } : null;
+      return Promise.resolve([page.map((name) => ({ name })), next]);
+    },
+    deleteFiles: (options: { prefix: string }) => {
+      deleted.push(options.prefix);
+      for (const name of [...objects]) if (name.startsWith(options.prefix)) objects.delete(name);
+      clock.now = new Date(clock.now.getTime() + clock.deleteTakesMs);
+      return Promise.resolve();
+    },
+  } as unknown as Parameters<typeof bucketFileDeleter>[0];
   const deps: ApplicationDeps = {
     store,
     facts: () => Promise.resolve(facts),
@@ -67,16 +91,11 @@ function harness(): Harness {
         costPence: 0.2,
       });
     },
-    deleteFiles: (prefix) => {
-      deleted.push(prefix);
-      const gone = [...objects].filter((name) => name.startsWith(prefix));
-      for (const name of gone) objects.delete(name);
-      return Promise.resolve(gone.length);
-    },
-    listFiles: (prefix) => Promise.resolve([...objects].filter((name) => name.startsWith(prefix))),
-    now: () => NOW,
+    deleteFiles: bucketFileDeleter(bucket),
+    listFiles: bucketFileLister(bucket),
+    now: () => clock.now,
   };
-  return { store, deps, calls, deleted, objects, facts, answers };
+  return { store, deps, calls, deleted, objects, listings, clock, facts, answers };
 }
 
 const run = (h: Harness, input: Parameters<typeof runApplication>[1]) =>
@@ -105,7 +124,8 @@ function seedApplication(h: Harness, overrides: Record<string, unknown>) {
     cvIds: [],
     schemaVersion: 1 as const,
   };
-  h.store.applications.set(TEST_JOB_ID, ApplicationSchema.parse({ ...base, ...overrides }));
+  const application = ApplicationSchema.parse({ ...base, ...overrides });
+  h.store.applications.set(application.jobId, application);
 }
 
 let h: Harness;
@@ -605,11 +625,11 @@ describe('withdraw', () => {
   });
 
   it('deletes one version by its folder, so v1 never reaches v10', async () => {
-    await h.deps.deleteFiles(`cvs/${TEST_JOB_ID}-v1/`);
-    expect(h.deleted).toEqual([`cvs/${TEST_JOB_ID}-v1/`]);
+    // The production deleter (bucketFileDeleter) over the fake bucket, not the harness's own.
     h.objects.add(`cvs/${TEST_JOB_ID}-v1/cv.pdf`);
     h.objects.add(`cvs/${TEST_JOB_ID}-v10/cv.pdf`);
-    await h.deps.deleteFiles(`cvs/${TEST_JOB_ID}-v1/`);
+    expect(await h.deps.deleteFiles(`cvs/${TEST_JOB_ID}-v1/`)).toBe(1);
+    expect(h.deleted).toEqual([`cvs/${TEST_JOB_ID}-v1/`]);
     expect([...h.objects]).toEqual([`cvs/${TEST_JOB_ID}-v10/cv.pdf`]);
   });
 
@@ -635,11 +655,128 @@ describe('withdraw', () => {
         `cvs/${TEST_JOB_ID}-v3`,
       ].sort(),
     );
+    // Unrecorded versions first, then the recorded ones.
     expect(h.deleted).toEqual([
-      `cvs/${TEST_JOB_ID}-v1/`,
       `cvs/${TEST_JOB_ID}-v2/`,
       `cvs/${TEST_JOB_ID}-v10/`,
+      `cvs/${TEST_JOB_ID}-v1/`,
     ]);
+  });
+
+  describe('the bounded clean-up', () => {
+    const withdrawAll = () => run(h, { action: 'withdraw', jobId: TEST_JOB_ID, deleteFiles: true });
+
+    it('lists one page of at most 200 objects, without auto-pagination', async () => {
+      seedApplication(h, { cvIds: [] });
+      await withdrawAll();
+      const listed = h.listings.filter((options) => options.maxResults !== undefined);
+      expect(listed).toEqual([
+        { prefix: `cvs/${TEST_JOB_ID}-v`, maxResults: 200, autoPaginate: false },
+      ]);
+    });
+
+    it('says a repeat is needed when the listing was cut short', async () => {
+      seedApplication(h, { cvIds: [] });
+      // 51 versions of 4 files is 204 objects: past the 200 the listing returns.
+      for (let n = 1; n <= 51; n += 1) {
+        for (const file of ['cv.pdf', 'cv.docx', 'cover-note.pdf', 'cover-note.docx']) {
+          h.objects.add(`cvs/${TEST_JOB_ID}-v${n}/${file}`);
+        }
+      }
+      expect((await withdrawAll()).cleanupRemaining).toBe(true);
+    });
+
+    it('deletes at most 20 versions per call, and repeating finishes the job', async () => {
+      const ids = Array.from({ length: 45 }, (_, i) => `${TEST_JOB_ID}-v${i + 1}`);
+      seedApplication(h, { cvIds: ids, currentCvId: ids[44] });
+      for (const id of ids) h.objects.add(`cvs/${id}/cv.pdf`);
+
+      const first = await withdrawAll();
+      expect(h.deleted).toHaveLength(20);
+      expect(first.cleanupRemaining).toBe(true);
+      expect(h.store.applications.get(TEST_JOB_ID)?.cvIds).toEqual(ids.slice(20));
+      expect(h.store.deletedCvDocs).toEqual(ids.slice(0, 20));
+      expect(h.objects.size).toBe(25);
+
+      const second = await withdrawAll();
+      expect(h.deleted).toHaveLength(40);
+      expect(second.cleanupRemaining).toBe(true);
+
+      const third = await withdrawAll();
+      expect(h.deleted).toHaveLength(45);
+      expect(third).not.toHaveProperty('cleanupRemaining');
+      expect(h.objects.size).toBe(0);
+      const stored = h.store.applications.get(TEST_JOB_ID);
+      expect(stored?.cvIds).toEqual([]);
+      expect(stored).not.toHaveProperty('currentCvId');
+    });
+
+    it('keeps currentCvId while its version is still recorded', async () => {
+      const ids = Array.from({ length: 25 }, (_, i) => `${TEST_JOB_ID}-v${i + 1}`);
+      seedApplication(h, { cvIds: ids, currentCvId: ids[24] });
+      await withdrawAll();
+      expect(h.store.applications.get(TEST_JOB_ID)?.currentCvId).toBe(ids[24]);
+    });
+
+    it('finishes unrecorded versions by repeating, with nothing recorded', async () => {
+      seedApplication(h, { cvIds: [] });
+      for (let n = 1; n <= 25; n += 1) h.objects.add(`cvs/${TEST_JOB_ID}-v${n}/cv.pdf`);
+      expect((await withdrawAll()).cleanupRemaining).toBe(true);
+      expect(h.objects.size).toBe(5);
+      expect((await withdrawAll()).cleanupRemaining).toBeUndefined();
+      expect(h.objects.size).toBe(0);
+    });
+
+    it('starts no delete after the deadline (a fake clock), and a repeat continues', async () => {
+      const ids = Array.from({ length: 6 }, (_, i) => `${TEST_JOB_ID}-v${i + 1}`);
+      seedApplication(h, { cvIds: ids });
+      for (const id of ids) h.objects.add(`cvs/${id}/cv.pdf`);
+      // Each delete "takes" 25 s: two start inside the 60 s deadline, then a third at 50 s, and
+      // the fourth would start at 75 s.
+      h.clock.deleteTakesMs = 25_000;
+      const result = await withdrawAll();
+      expect(h.deleted).toHaveLength(3);
+      expect(result.cleanupRemaining).toBe(true);
+      expect(h.store.applications.get(TEST_JOB_ID)?.cvIds).toEqual(ids.slice(3));
+
+      h.clock.deleteTakesMs = 0;
+      expect((await withdrawAll()).cleanupRemaining).toBeUndefined();
+      expect(h.objects.size).toBe(0);
+    });
+
+    for (const jobId of ['job.1', 'job*1']) {
+      it(`matches ${jobId} by whole folder name, as plain text`, async () => {
+        h.store.jobs.set(jobId, h.store.jobs.get(TEST_JOB_ID)!);
+        seedApplication(h, { jobId, cvIds: [] });
+        const other = jobId.replace(/[.*]/, 'x'); // what the pattern character would match
+        for (const name of [
+          `cvs/${jobId}-v1/cv.pdf`, // ours
+          `cvs/${jobId}-v12/cv.pdf`, // ours
+          `cvs/${other}-v1/cv.pdf`, // a different job
+          `cvs/${jobId}-v1-v1/cv.pdf`, // a different job whose ID extends ours
+        ]) {
+          h.objects.add(name);
+        }
+        await run(h, { action: 'withdraw', jobId, deleteFiles: true });
+        expect([...h.objects].sort()).toEqual(
+          [`cvs/${other}-v1/cv.pdf`, `cvs/${jobId}-v1-v1/cv.pdf`].sort(),
+        );
+      });
+    }
+
+    it('drops names that do not start with the prefix, and names with no folder', async () => {
+      seedApplication(h, { jobId: 'job.1', cvIds: [] });
+      h.store.jobs.set('job.1', h.store.jobs.get(TEST_JOB_ID)!);
+      // A lister may return more than it was asked for; the names must be checked again.
+      const stray = [
+        `${'x'.repeat('cvs/job.1-v'.length)}7/cv.pdf`, // only matches after a blind slice
+        'cvs/job.1-v55', // a file named like a folder: no slash, so no version "5"
+        'cvs/job.1-v/cv.pdf', // an empty version number
+      ];
+      h.deps.listFiles = () => Promise.resolve({ names: stray, more: false });
+      await run(h, { action: 'withdraw', jobId: 'job.1', deleteFiles: true });
+      expect(h.deleted).toEqual([]);
+    });
   });
 
   it('keeps unrecorded versions when files are kept', async () => {

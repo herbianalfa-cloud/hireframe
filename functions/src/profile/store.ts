@@ -280,10 +280,17 @@ export function bucketFileDeleter(bucket: ReturnType<Storage['bucket']>) {
   };
 }
 
-/** The names of the objects under a string prefix (withdraw's sweep for unrecorded CV versions). */
+/**
+ * The names of at most `limit` objects under a string prefix, one page and never auto-paginated
+ * (withdraw's sweep for unrecorded CV versions). `more` is true when the listing was cut short.
+ */
 export function bucketFileLister(bucket: ReturnType<Storage['bucket']>) {
-  return async (prefix: string): Promise<string[]> => {
-    const [files] = await bucket.getFiles({ prefix });
-    return files.map((file) => file.name);
+  return async (prefix: string, limit: number): Promise<{ names: string[]; more: boolean }> => {
+    const [files, nextQuery] = await bucket.getFiles({
+      prefix,
+      maxResults: limit,
+      autoPaginate: false,
+    });
+    return { names: files.map((file) => file.name), more: Boolean(nextQuery) };
   };
 }

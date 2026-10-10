@@ -215,6 +215,11 @@ export const ApplicationResultSchema = z.strictObject({
   factIds: z.array(z.string().min(1)).max(5).exactOptional(),
   /** Questions still waiting for an answer or a skip. */
   unanswered: z.int().min(0).max(APPLICATION_LIMITS.maxQuestions),
+  /**
+   * `withdraw` with `deleteFiles` only: some CV versions are still in Storage (the clean-up is
+   * bounded per call). Repeat the withdraw with `deleteFiles` to finish.
+   */
+  cleanupRemaining: z.literal(true).exactOptional(),
 });
 export type ApplicationResult = z.infer<typeof ApplicationResultSchema>;
 

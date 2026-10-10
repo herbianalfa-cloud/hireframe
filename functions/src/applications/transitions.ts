@@ -216,6 +216,20 @@ export function planClearCvs(current: Application, now: Date): Application | nul
   return next;
 }
 
+/** After some, not all, of a withdrawn application's versions are deleted (a bounded clean-up). */
+export function planDropCvs(
+  current: Application,
+  removed: readonly string[],
+  now: Date,
+): Application | null {
+  if (current.stage !== 'withdrawn') return null;
+  const gone = new Set(removed);
+  const cvIds = current.cvIds.filter((id) => !gone.has(id));
+  const next: Application = { ...current, cvIds, updatedAt: now };
+  if (current.currentCvId !== undefined && gone.has(current.currentCvId)) delete next.currentCvId;
+  return next;
+}
+
 // ---- The CV worker's moves (M7 7D.2) ----
 //
 // Unlike the owner's moves above, these keep `attempt`: the worker's counter must survive every

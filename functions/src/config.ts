@@ -527,6 +527,15 @@ export const APPLICATIONS = {
    * 540 s - 300 s budget - 30 s margin.
    */
   workerStartDeadlineMs: 210_000,
+  /**
+   * One `withdraw` with `deleteFiles` is bounded: it lists at most `withdrawListLimit` objects
+   * (one page, never auto-paginated), deletes at most `withdrawMaxVersions` versions, and starts no
+   * new delete after `withdrawDeadlineMs`, well inside the callable's 120 s timeout. Repeating the
+   * withdraw finishes the job (the result says `cleanupRemaining`).
+   */
+  withdrawListLimit: 200,
+  withdrawMaxVersions: 20,
+  withdrawDeadlineMs: 60_000,
 } as const;
 
 /** The CV worker's schedule: every 10 minutes, 07:00 to 23:50, UK time (ADR-053). */

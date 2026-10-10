@@ -7,12 +7,14 @@ import {
 } from '@hireframe/shared';
 
 import type { LlmCallInput, LlmCallResult } from '../llm/call.js';
+import { APPLICATIONS } from '../config.js';
 import { log } from '../log.js';
 import { planNoteFacts } from '../profile/addFact.js';
 import type { ApplicationStore, Change, Expect } from './store.js';
 import {
   planAnswer,
   planClearCvs,
+  planDropCvs,
   planRegenerate,
   planSkipAll,
   planStart,
@@ -52,8 +54,11 @@ export interface ApplicationDeps {
   llm: <T>(input: LlmCallInput<T>) => Promise<LlmCallResult<T>>;
   /** Deletes every object under a prefix; returns how many. */
   deleteFiles: (prefix: string) => Promise<number>;
-  /** The names of the objects under a prefix (a plain string prefix, not a folder). */
-  listFiles: (prefix: string) => Promise<string[]>;
+  /**
+   * The names of at most `limit` objects under a prefix (a plain string prefix, not a folder), one
+   * page: `more` is true when the listing was cut short.
+   */
+  listFiles: (prefix: string, limit: number) => Promise<{ names: string[]; more: boolean }>;
   now: () => Date;
 }
 
@@ -203,14 +208,15 @@ async function regenerate(
 }
 
 /**
- * The CV folders in Storage named exactly `{jobId}-v{digits}`. The listing is a string prefix,
- * so `job-1-v` also matches `job-1-v10/` and another job's `job-1-v2-v1/`: only a folder whose
- * whole name is the job's ID, `-v` and digits is returned. `jobId` is the stored document's.
+ * The CV folders in a listing of object names named exactly `{jobId}-v{digits}`. The listing is a
+ * string prefix, so `job-1-v` also matches `job-1-v10/` and another job's `job-1-v2-v1/`: only a
+ * folder whose whole name is the job's ID, `-v` and digits is returned. `jobId` is the stored
+ * document's. The guards are repeated here because a lister can return more than it was asked for.
  */
-async function unrecordedVersions(deps: ApplicationDeps, jobId: string): Promise<string[]> {
+export function versionFolders(jobId: string, names: readonly string[]): string[] {
   const base = `cvs/${jobId}-v`;
   const found = new Set<string>();
-  for (const name of await deps.listFiles(base)) {
+  for (const name of names) {
     if (!name.startsWith(base)) continue;
     const rest = name.slice(base.length);
     const slash = rest.indexOf('/');
@@ -221,25 +227,46 @@ async function unrecordedVersions(deps: ApplicationDeps, jobId: string): Promise
   return [...found];
 }
 
-/** Deletes a withdrawn application's files and `cvs` docs, then forgets them. */
-async function deleteCvs(deps: ApplicationDeps, jobId: string): Promise<Application> {
+/**
+ * Deletes a withdrawn application's files and `cvs` docs, then forgets them. Bounded: one listing
+ * page, at most `withdrawMaxVersions` versions, nothing new started after the deadline. Versions
+ * the document never recorded go first (a worker that died between the upload and the commit), so
+ * a repeat always has the recorded ones to find them by. `more` says a repeat is needed.
+ */
+async function deleteCvs(
+  deps: ApplicationDeps,
+  jobId: string,
+): Promise<{ application: Application; more: boolean }> {
   const current = await required(deps, jobId);
-  if (current.stage !== 'withdrawn') return current;
-  for (const cvId of current.cvIds) await deps.deleteFiles(`cvs/${cvId}/`);
-  // Versions the document never recorded (a worker that died between the upload and the commit).
+  if (current.stage !== 'withdrawn') return { application: current, more: false };
+  const started = deps.now().getTime();
+  const listing = await deps.listFiles(`cvs/${current.jobId}-v`, APPLICATIONS.withdrawListLimit);
   const recorded = new Set<string>(current.cvIds);
-  for (const cvId of await unrecordedVersions(deps, current.jobId)) {
-    if (!recorded.has(cvId)) await deps.deleteFiles(`cvs/${cvId}/`);
+  const todo = [
+    ...versionFolders(current.jobId, listing.names).filter((cvId) => !recorded.has(cvId)),
+    ...current.cvIds,
+  ];
+  const done: string[] = [];
+  for (const cvId of todo) {
+    if (done.length >= APPLICATIONS.withdrawMaxVersions) break;
+    if (deps.now().getTime() - started >= APPLICATIONS.withdrawDeadlineMs) break;
+    await deps.deleteFiles(`cvs/${cvId}/`);
+    done.push(cvId);
   }
-  await deps.store.deleteCvDocs(current.cvIds);
+  const more = done.length < todo.length || listing.more;
+  const removedRecorded = done.filter((cvId) => recorded.has(cvId));
+  if (removedRecorded.length === 0) return { application: current, more };
+  await deps.store.deleteCvDocs(removedRecorded);
   const now = deps.now();
+  const all = removedRecorded.length === current.cvIds.length;
   const { application } = await commit(deps, {
     jobId,
     expect: expectOf(current),
-    build: (fresh) => (fresh ? planClearCvs(fresh, now) : null),
+    build: (fresh) =>
+      fresh ? (all ? planClearCvs(fresh, now) : planDropCvs(fresh, removedRecorded, now)) : null,
     now,
   });
-  return application;
+  return { application, more };
 }
 
 async function withdraw(
@@ -248,10 +275,10 @@ async function withdraw(
   deleteFiles: boolean,
 ): Promise<ApplicationResult> {
   const before = await required(deps, jobId);
-  // Withdrawn already: only the clean-up of an earlier "keep files" withdraw is left to do.
+  // Withdrawn already: only the clean-up of an earlier withdraw is left to do.
   if (before.stage === 'withdrawn') {
-    if (!deleteFiles || before.cvIds.length === 0) throw new ApplicationRefusal('wrong_stage');
-    return resultOf(await deleteCvs(deps, jobId));
+    if (!deleteFiles) throw new ApplicationRefusal('wrong_stage');
+    return cleanupResult(await deleteCvs(deps, jobId));
   }
   const now = deps.now();
   if (!planWithdraw(before, now)) throw new ApplicationRefusal('wrong_stage');
@@ -263,7 +290,14 @@ async function withdraw(
   });
   log.info('application.withdrawn', { deleteFiles, cvs: application.cvIds.length });
   // The stage moved first, so the worker can write nothing more for it while the files go.
-  return resultOf(deleteFiles ? await deleteCvs(deps, jobId) : application);
+  return deleteFiles ? cleanupResult(await deleteCvs(deps, jobId)) : resultOf(application);
+}
+
+function cleanupResult(done: { application: Application; more: boolean }): ApplicationResult {
+  return {
+    ...resultOf(done.application),
+    ...(done.more ? { cleanupRemaining: true as const } : {}),
+  };
 }
 
 export async function runApplication(
