@@ -263,8 +263,9 @@ export function firestoreResetStore(firestore: Firestore): ResetStore {
       // recursiveDelete also removes each fact's versions subcollection.
       await firestore.recursiveDelete(facts);
       await firestore.recursiveDelete(documents);
-      // The work-rights setting (M4) is profile data too.
+      // The work-rights setting (M4) and the CV header (M7) are profile data too.
       await firestore.doc(DOCS.profileMain).delete();
+      await firestore.doc(DOCS.cvHeader).delete();
       return { facts: factCount.data().count, documents: documentCount.data().count };
     },
   };
