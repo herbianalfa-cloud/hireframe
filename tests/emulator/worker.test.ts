@@ -181,6 +181,38 @@ function workerDeps(transport: LlmTransport) {
   return cvWorkerDeps({ firestore: db, bucket: bucket(), transport, config, now: () => NOW });
 }
 
+/**
+ * Worker deps whose listing waits at `arrive` until every party has listed: with two runs, both
+ * have read the same `generating` document before either counts an attempt.
+ */
+function workerDepsAfter(transport: LlmTransport, arrive: () => Promise<void>) {
+  const deps = workerDeps(transport);
+  return {
+    ...deps,
+    store: {
+      ...deps.store,
+      listGenerating: async (limit: number, readLimit: number) => {
+        const found = await deps.store.listGenerating(limit, readLimit);
+        await arrive();
+        return found;
+      },
+    },
+  };
+}
+
+function barrier(parties: number): () => Promise<void> {
+  let arrived = 0;
+  let open: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return () => {
+    arrived += 1;
+    if (arrived >= parties) open();
+    return gate;
+  };
+}
+
 async function startGenerating() {
   const call = (data: unknown) =>
     applicationHandler(data, () => Promise.resolve(applicationDeps()));
@@ -249,12 +281,16 @@ describe('the CV worker on the emulator', () => {
     await startGenerating();
     const a = countingTransport();
     const b = countingTransport();
-    const results = await Promise.allSettled([
-      runCvWorker(workerDeps(a)),
-      runCvWorker(workerDeps(b)),
+    const arrive = barrier(2);
+    // Both runs have listed the same generating document before either counts its attempt.
+    const results = await Promise.all([
+      runCvWorker(workerDepsAfter(a, arrive)),
+      runCvWorker(workerDepsAfter(b, arrive)),
     ]);
-    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
     expect(a.sends() + b.sends()).toBe(1);
+    expect(results.map((r) => r.read)).toEqual([1, 1]);
+    expect(results.reduce((sum, r) => sum + r.ready, 0)).toBe(1);
+    expect(results.reduce((sum, r) => sum + r.lost, 0)).toBe(1);
     expect((await application()).stage).toBe('ready');
     expect((await application()).attempt).toBe(1);
   });
