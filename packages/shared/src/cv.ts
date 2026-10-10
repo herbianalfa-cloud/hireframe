@@ -415,7 +415,7 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&
 /**
  * An email, a phone number or a web address: contact details come only from the header. A bare
  * `label.tld` (ASP.NET, Booking.com) is allowed when the same token is in `allowed`, the text of
- * the cited facts; an email, a phone number, a link and an obfuscated spelling never are.
+ * the cited facts (their text, not their evidence); an email, a phone number, a link and an obfuscated spelling never are.
  */
 export function hasContactDetails(text: string, allowed = ''): boolean {
   if (text.match(EMAIL) !== null) return true;
@@ -662,7 +662,7 @@ export function validateCv(
     const allowedText = cite.refs
       .map((ref) => byId.get(aliases.get(ref) ?? ''))
       .filter((fact) => fact?.status === 'active')
-      .map((fact) => `${fact?.text ?? ''}\n${fact?.evidence ?? ''}`)
+      .map((fact) => fact?.text ?? '')
       .join('\n');
     for (const text of cite.texts) {
       if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');

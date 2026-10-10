@@ -1192,22 +1192,15 @@ describe('contact allowance comes from the fact text, not its evidence', () => {
   };
 
   it('refuses a token only the evidence has, and allows one the text has', () => {
+    const text = 'Led onboarding for 12 clients on Booking.com.';
     expect(
-      bullet(
-        'Built Booking.com integrations.',
-        'Built partner integrations',
-        'Booking.com partner integrations',
-      ),
+      bullet(text, 'Led onboarding for 12 clients', 'Led onboarding for 12 clients on Booking.com'),
     ).toEqual({
       ok: false,
       issues: [{ path: 'experience[0].bullets[0]', code: 'contact_in_text' }],
     });
     expect(
-      bullet(
-        'Built Booking.com integrations.',
-        'Built Booking.com integrations',
-        'Built integrations',
-      ),
+      bullet(text, 'Led onboarding for 12 clients on Booking.com', 'Led onboarding for 12 clients'),
     ).toEqual({ ok: true });
   });
 });
