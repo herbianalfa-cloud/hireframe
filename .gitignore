@@ -30,3 +30,6 @@ apps-script/.clasp.json
 *.jsonl
 !**/fixtures/**
 !evals/*.jsonl
+
+# Vitest local output (a direct `vitest run` writes .vitest/json/output.json)
+.vitest/
