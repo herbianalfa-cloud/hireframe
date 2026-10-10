@@ -10,6 +10,8 @@ rules_version = '2';
 //   criteria versions (ADR-034).
 //   M6 (Gmail bridge) adds server-only `nonces` and `alertMessages`, denied to every client.
 //   M5 lets the owner act on jobs (status, applied stamps, 👍/👎) and append `events` (ADR-038).
+//   M7 lets the owner set the CV header on `profile/cvHeader` and mirror Applied onto
+//   `applications/{jobId}` beside the job's status change (ADR-055).
 //   Everything else, including every write by the Admin SDK paths, stays client-deny.
 //   Unknown paths fall through to the default deny.
 service cloud.firestore {
@@ -107,6 +109,41 @@ service cloud.firestore {
         && (!('validUntil' in data)
             || (data.validUntil is string
                 && data.validUntil.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')))
+        && data.updatedAt == request.time
+        && data.schemaVersion == 1
+        && (resource == null
+            ? data.createdAt == request.time
+            : data.createdAt == resource.data.createdAt);
+    }
+
+    // ---- CV header (`profile/cvHeader`, M7, ADR-055) ----
+
+    function httpsLink(value) {
+      return value is string && value.size() <= 200 && value.matches('^https://\\S+$');
+    }
+
+    function nonBlank(value, max) {
+      return value is string && value.trim().size() >= 1 && value.size() <= max;
+    }
+
+    // The contact block code puts on every generated CV. Mirrors CvHeaderSchema: exactly these
+    // keys, at most three https links, server time on every write, createdAt fixed. Rules can't
+    // loop, so the three link slots are checked by index.
+    function validCvHeader() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['name', 'email', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && data.keys().hasOnly(['name', 'email', 'phone', 'location', 'links', 'createdAt',
+                                'updatedAt', 'schemaVersion'])
+        && nonBlank(data.name, 80)
+        && data.email is string && data.email.size() <= 120
+        && data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && (!('phone' in data) || nonBlank(data.phone, 40))
+        && (!('location' in data) || nonBlank(data.location, 80))
+        && (!('links' in data)
+            || (data.links is list && data.links.size() <= 3
+                && (data.links.size() < 1 || httpsLink(data.links[0]))
+                && (data.links.size() < 2 || httpsLink(data.links[1]))
+                && (data.links.size() < 3 || httpsLink(data.links[2]))))
         && data.updatedAt == request.time
         && data.schemaVersion == 1
         && (resource == null
@@ -323,7 +360,9 @@ service cloud.firestore {
 
     match /profile/{profileId} {
       allow read: if isOwner();
-      allow create, update: if isOwner() && profileId == 'main' && validProfileSettings();
+      allow create, update: if isOwner()
+        && ((profileId == 'main' && validProfileSettings())
+            || (profileId == 'cvHeader' && validCvHeader()));
 
       match /facts/{factId} {
         allow read: if isOwner();
@@ -344,6 +383,32 @@ service cloud.firestore {
       }
     }
 
+    // The Applied mirror (M7, ADR-055). The stage machine is server-side; the one move a client
+    // makes is Mark applied and its undo, in the same batch as the job's status change. Only
+    // `stage`, `stageBefore` and `updatedAt` may change. Applied needs the job to become applied
+    // in this batch and remembers where it came from; leaving it goes back to exactly that stage,
+    // with the job no longer applied.
+    function validApplicationMirror(jobId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let changed = after.diff(before).affectedKeys();
+      let jobBefore = get(jobPath(jobId)).data;
+      let jobAfter = getAfter(jobPath(jobId)).data;
+      return changed.hasOnly(['stage', 'stageBefore', 'updatedAt'])
+        && changed.hasAll(['stage', 'updatedAt'])
+        && after.updatedAt == request.time
+        && (after.stage == 'applied'
+            ? before.stage in ['chosen', 'needs_input', 'generating', 'ready']
+              && after.get('stageBefore', null) == before.stage
+              && jobBefore.status != 'applied'
+              && jobAfter.status == 'applied'
+            : before.stage == 'applied'
+              && after.stage == before.get('stageBefore', null)
+              && !('stageBefore' in after)
+              && jobBefore.status == 'applied'
+              && jobAfter.status != 'applied');
+    }
+
     match /companies/{companyId} {
       allow read: if isOwner();
     }
@@ -355,6 +420,11 @@ service cloud.firestore {
       match /description/{descId} {
         allow read: if isOwner();
       }
+    }
+
+    match /applications/{jobId} {
+      allow read: if isOwner();
+      allow update: if isOwner() && validApplicationMirror(jobId);
     }
 
     match /cvs/{cvId} {
