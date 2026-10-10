@@ -1179,3 +1179,57 @@ describe('skill tokens: C++, C#, F# and the separators', () => {
     },
   );
 });
+
+describe('contact allowance comes from the fact text, not its evidence', () => {
+  const bullet = (text: string, factText: string, evidence: string) => {
+    const facts = CV_FACTS.map((fact) =>
+      fact.id === 'fact-clients' ? { ...fact, text: factText, evidence } : fact,
+    );
+    const cv = edited((c) => {
+      at(c.experience, 0).bullets[0] = { text, factRefs: [aliasOf('fact-clients')] };
+    });
+    return check(cv, facts);
+  };
+
+  it('refuses a token only the evidence has, and allows one the text has', () => {
+    expect(
+      bullet(
+        'Built Booking.com integrations.',
+        'Built partner integrations',
+        'Booking.com partner integrations',
+      ),
+    ).toEqual({
+      ok: false,
+      issues: [{ path: 'experience[0].bullets[0]', code: 'contact_in_text' }],
+    });
+    expect(
+      bullet(
+        'Built Booking.com integrations.',
+        'Built Booking.com integrations',
+        'Built integrations',
+      ),
+    ).toEqual({ ok: true });
+  });
+});
+
+describe('org suffixes and NFC', () => {
+  it.each(['plc', 'LLC', 'GmbH', 'llp'])('accepts "Example Cloud %s" as the org', (suffix) => {
+    expect(check(heading('Customer Onboarding Intern', `Example Cloud ${suffix}`))).toEqual({
+      ok: true,
+    });
+  });
+
+  it('prints a decomposed é, normalised to NFC, instead of unsupported_char', () => {
+    const cv = edited((c) => {
+      c.summary.text = 'Café onboarding lead who cut client time-to-live by 30%.';
+    });
+    expect(check(cv)).toEqual({ ok: true });
+  });
+
+  it('still refuses a character with no precomposed WinAnsi form', () => {
+    const cv = edited((c) => {
+      c.summary.text = 'Onboarding lead who cut client time-to-live by 30% ́́ α.';
+    });
+    expect(issuesOf(cv)).toContainEqual({ path: 'summary', code: 'unsupported_char' });
+  });
+});
