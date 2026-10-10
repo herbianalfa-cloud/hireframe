@@ -66,18 +66,51 @@ function factDocument(
   source: 'cv' | 'manual',
   sourceDocId: string | undefined,
   now: Date,
+  answerFor?: { jobId: string },
 ) {
   return {
     ...fact.draft,
     status: 'active' as const,
     source,
     ...(sourceDocId ? { sourceDocId } : {}),
+    ...(answerFor ? { answerFor } : {}),
     version: 1,
     evidenceVerified: fact.evidenceVerified,
     createdAt: now,
     updatedAt: now,
     schemaVersion: 1 as const,
   };
+}
+
+/** One document to create: a fact, or the v1 snapshot beside it. */
+export interface FactWrite {
+  path: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * A manual fact and its v1 snapshot, ready to create in a batch or a transaction. `answerFor`
+ * marks a fact that came from an application answer (M7). Returns the new IDs in order.
+ */
+export function manualFactWrites(
+  firestore: Firestore,
+  facts: readonly NewFact[],
+  now: Date,
+  answerFor?: { jobId: string },
+): { ids: string[]; writes: FactWrite[] } {
+  const ids: string[] = [];
+  const writes: FactWrite[] = [];
+  for (const fact of facts) {
+    const ref = firestore.collection(PATHS.facts).doc();
+    const data = factDocument(fact, 'manual', undefined, now, answerFor);
+    ids.push(ref.id);
+    writes.push({ path: ref.path, data });
+    writes.push({
+      path: PATHS.factVersion(ref.id, 1),
+      data: { snapshot: data, change: 'created', at: now },
+    });
+  }
+  return { ids, writes };
 }
 
 export function firestoreProfileStore(firestore: Firestore): ProfileStore {
