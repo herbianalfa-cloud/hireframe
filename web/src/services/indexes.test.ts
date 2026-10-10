@@ -12,6 +12,7 @@ import {
   digestRunsSpec,
   digestSourcesSpec,
   digestWaitingSpec,
+  generatingApplicationsSpec,
 } from '@hireframe/shared';
 import { dashboardQuerySpecs, lastRunSpec, summarySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
@@ -91,6 +92,17 @@ describe('firestore.indexes.json', () => {
     for (const spec of [digestRunsSpec, digestWaitingSpec, digestSourcesSpec]) {
       expect(indexServes(spec, [])).toBe(true);
     }
+  });
+
+  it('serves the CV worker query without a composite index', () => {
+    // Equality only, sorted by stageAt in code: the single-field indexes serve it.
+    expect(generatingApplicationsSpec).toEqual({
+      collection: 'applications',
+      filters: [{ field: 'stage', op: '==', value: 'generating' }],
+      orderBy: [],
+    });
+    expect(indexServes(generatingApplicationsSpec, indexes)).toBe(true);
+    expect(indexServes(generatingApplicationsSpec, [])).toBe(true);
   });
 
   it('serves every funnel diagnostics query', () => {

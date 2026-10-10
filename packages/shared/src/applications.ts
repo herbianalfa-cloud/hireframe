@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { fnv1a64 } from './dedupe.js';
+import { COLLECTIONS } from './firestore.js';
 import {
   FUNNEL_LIMITS,
   MATCHES,
@@ -10,6 +11,7 @@ import {
   type JobRequirement,
 } from './funnel.js';
 import { foldText } from './normalise.js';
+import type { QuerySpec } from './query-spec.js';
 
 /**
  * The application pipeline's data (M7, docs/plans/m7-plan.md): `applications/{jobId}`, one per job
@@ -215,3 +217,15 @@ export const ApplicationResultSchema = z.strictObject({
   unanswered: z.int().min(0).max(APPLICATION_LIMITS.maxQuestions),
 });
 export type ApplicationResult = z.infer<typeof ApplicationResultSchema>;
+
+// ---- The CV worker's query (M7 7D.2) ----
+
+/**
+ * The applications waiting for the worker: equality only, so the single-field index serves it and
+ * no composite is needed. The worker sorts by `stageAt` in code (oldest first).
+ */
+export const generatingApplicationsSpec: QuerySpec = {
+  collection: COLLECTIONS.applications,
+  filters: [{ field: 'stage', op: '==', value: 'generating' }],
+  orderBy: [],
+};
