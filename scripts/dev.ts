@@ -23,6 +23,7 @@ import {
   usageSeedDocument,
   morningRunSeedDocument,
   seedWorkerEnv,
+  withEmulatorDefaults,
   cvHeaderSeed,
   readyApplicationSeed,
   applicationSeeds,
@@ -116,7 +117,7 @@ await emulatorRequest(
 // Always the fake model, even under LIVE=1: seeding makes no live call (seedWorkerEnv).
 execFileSync('node', ['scripts/dev-worker.ts'], {
   stdio: 'inherit',
-  env: seedWorkerEnv(process.env),
+  env: withEmulatorDefaults(seedWorkerEnv(process.env)),
 });
 for (const { jobId, data } of applicationSeeds(now)) {
   await emulatorRequest('PATCH', `${documents}/applications/${jobId}`, restDocument(data));

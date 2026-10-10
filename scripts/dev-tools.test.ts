@@ -40,6 +40,8 @@ import {
   usageSeedDocument,
   morningRunSeedDocument,
   seedWorkerEnv,
+  DEV_EMULATOR_ENV,
+  withEmulatorDefaults,
 } from './dev-seed.ts';
 
 describe('isCiDeploy', () => {
@@ -338,6 +340,28 @@ describe('the seed-time worker environment', () => {
       GCLOUD_PROJECT: 'demo-hireframe',
       FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
     });
+  });
+});
+
+describe('the emulator defaults for a hand-run dev-worker', () => {
+  it('fills unset variables with the demo project and emulator hosts', () => {
+    const env = withEmulatorDefaults({ PATH: '/bin' });
+    expect(env).toMatchObject(DEV_EMULATOR_ENV);
+    expect(env.GCLOUD_PROJECT).toMatch(/^demo-/);
+    expect(env.PATH).toBe('/bin');
+  });
+
+  it('never overrides a variable that is set, so a non-demo project is still refused downstream', () => {
+    const env = withEmulatorDefaults({
+      GCLOUD_PROJECT: 'hireframe-f6b03',
+      FIRESTORE_EMULATOR_HOST: 'localhost:9000',
+    });
+    expect(env.GCLOUD_PROJECT).toBe('hireframe-f6b03');
+    expect(env.FIRESTORE_EMULATOR_HOST).toBe('localhost:9000');
+    expect(env.FIREBASE_STORAGE_EMULATOR_HOST).toBe(
+      DEV_EMULATOR_ENV.FIREBASE_STORAGE_EMULATOR_HOST,
+    );
+    expect(() => assertDemoProject(env.GCLOUD_PROJECT)).toThrow(/demo-\*/);
   });
 });
 

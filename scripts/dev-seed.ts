@@ -759,6 +759,26 @@ export function readyApplicationSeed(now: Date) {
 }
 
 /**
+ * The emulator project and hosts `npm run dev` runs under (ports from firebase.json). The seed-time
+ * worker gets these from `emulators:exec`; `node scripts/dev-worker.ts` run by hand in a second
+ * terminal falls back to them, so both use the same values.
+ */
+export const DEV_EMULATOR_ENV = {
+  GCLOUD_PROJECT: 'demo-hireframe',
+  FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+  FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:9199',
+} as const;
+
+/** Fills only the unset variables from `DEV_EMULATOR_ENV`; a variable that is set is never overridden. */
+export function withEmulatorDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const [key, value] of Object.entries(DEV_EMULATOR_ENV)) {
+    if (!out[key]) out[key] = value;
+  }
+  return out;
+}
+
+/**
  * The environment for the seed-time worker pass. LIVE and the API key are removed, so the pass
  * always uses the fake model: `LIVE=1 npm run dev` must neither stop while seeding (a missing
  * key) nor make a paid call before the owner has done anything.

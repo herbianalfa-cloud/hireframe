@@ -10,6 +10,12 @@ import { pathToFileURL } from 'node:url';
 
 import { build } from 'esbuild';
 
+import { withEmulatorDefaults } from './dev-seed.ts';
+
+// Run by hand next to `npm run dev`, the emulator variables aren't set: fill in the same ones the
+// seed-time worker gets. A set variable wins, so the demo-* guard in runDevWorker still applies.
+Object.assign(process.env, withEmulatorDefaults(process.env));
+
 const outfile = 'tmp/dev-worker.mjs';
 mkdirSync('tmp', { recursive: true });
 await build({

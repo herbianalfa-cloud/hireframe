@@ -3,6 +3,9 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Fixed
+- `node scripts/dev-worker.ts` run by hand next to `npm run dev` no longer refuses "(unset)": unset project and emulator variables default to the ones the seed-time worker gets (`DEV_EMULATOR_ENV`); set ones are never overridden and the `demo-*` guard stays.
+
 ### Changed
 - Docs: billing-guards plan for M8 (`docs/plans/m8-billing-guards.md`) and a new hard rule against self-triggering code in `CLAUDE.md`.
 
