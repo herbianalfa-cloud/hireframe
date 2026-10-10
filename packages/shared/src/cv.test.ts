@@ -1152,3 +1152,30 @@ describe('word rule: at least one checked word', () => {
     expect(skillOk('SQL,', 'SQL')).toBe(true);
   });
 });
+
+describe('skill tokens: C++, C#, F# and the separators', () => {
+  it('does not read C# or C as C++, or the reverse', () => {
+    expect(skillOk('C#', 'C++')).toBe(false);
+    expect(skillOk('C', 'C++')).toBe(false);
+    expect(skillOk('C++', 'C#')).toBe(false);
+    expect(skillOk('C++', 'C')).toBe(false);
+    expect(skillOk('F#', 'F')).toBe(false);
+    expect(skillOk('C++', 'C++')).toBe(true);
+    expect(skillOk('C#', 'C#')).toBe(true);
+    expect(skillOk('F#', 'F#')).toBe(true);
+  });
+
+  it('splits on + only with a space on both sides', () => {
+    expect(skillOk('SQL + Python', 'SQL', 'Python')).toBe(true);
+    expect(skillOk('SQL+Python', 'SQL', 'Python')).toBe(false);
+    expect(skillOk('C++ + Python', 'C++', 'Python')).toBe(true);
+  });
+
+  it.each(['SQL – Python', 'SQL: Python', 'SQL · Python', 'SQL - Python', 'SQL — Python'])(
+    'splits "%s" into two parts',
+    (label) => {
+      expect(skillOk(label, 'SQL', 'Python')).toBe(true);
+      expect(skillOk(label, 'SQL')).toBe(false);
+    },
+  );
+});
