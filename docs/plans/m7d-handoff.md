@@ -221,3 +221,53 @@ Nothing the worker does resets it: `planAttempt` adds one; `planRetry`, `planBlo
 | `npm run build` | passed |
 | `npm run check:bundle` | passed: 35 chunks, initial JS 293.3 kB gzip (unchanged) |
 | `node scripts/smoke-functions-bundle.ts` | passed: `generateCvs` is in the list, europe-west2, no fixtures; `index.js` 962 KiB, 9 files 6,553 KiB |
+
+---
+
+# Review fixes after 7D.2
+
+Same branch, no new feature. Twelve review findings fixed; 7D.3 not started; no web code, ADR-055, CHANGELOG or end-of-7D docs.
+
+## What changed
+
+| # | Change |
+|---|---|
+| 1 | `firestore.rules` `validApplicationMirror`: Mark applied is refused from `generating`; Undo is refused when `stageBefore` is `generating`. A client can never write stage `generating`. Two rules tests; the allow-lists in the existing tests no longer include `generating`. |
+| 2 | `planNoteFacts` also returns `verifiedKnownIds` (the repeated active facts whose draft evidence is a verbatim quote of the note). `run.ts` `answer` keeps only fresh facts with `evidenceVerified` and only `verifiedKnownIds`; with none left it refuses `no_fact`, writes nothing and doesn't move the stage. The Profile add-fact path is unchanged (it still stores an unverified fact, flagged). The log gains `dropped`. |
+| 3a | `worker.ts` removes the four files when `put` fails part-way, when the ready commit throws, and (as before) when the commit is lost. A failing remove is logged as `cv_worker.failed {step: 'cleanup'}` with error codes only. |
+| 3b | `ApplicationDeps.listFiles` (`bucketFileLister`). A `withdraw {deleteFiles: true}` also deletes `cvs/{jobId}-v{digits}/` folders that `cvIds` doesn't list. The prefix is built from the stored document's `jobId`; a name counts only when the part after `-v` is digits followed by `/`. |
+| 3c | Tests: v1 deletion by folder leaves v10; unrecorded version deleted on withdraw, and other jobs' folders (`-v1-v1`, `-vx`, `0-v1`, a plain file) kept; a put rejects after a successful call; the ready commit throws (files removed), and throws after landing (files kept); the remove fails; a render error that is not a `CvRenderError`. The emulator withdraw test now expects the unrecorded `-v10` folder gone. |
+| 4 | `seedWorkerEnv(env)` in `scripts/dev-seed.ts` drops `LIVE` and `ANTHROPIC_API_KEY`; `scripts/dev.ts` runs the seed's `dev-worker.ts` with it. `LIVE=1 npm run dev` neither stops at seeding nor makes a live call. `node scripts/dev-worker.ts` run by hand still honours `LIVE=1`. Unit test on `seedWorkerEnv`. |
+| 5 | `scripts/smoke-functions-bundle.ts` imports every `.js` in `functions/deploy/` (chunks included) and fails if one doesn't load; follows `index.js`'s static `import`/`export … from` graph and fails if it reaches `chunks/render-*` or `chunks/pdfjs-*`; fails if `PDFRawStream`, `PDFPageLeaf` or `DocumentAttributeNamespaces` is in `index.js` (and if one of them is no longer in the render chunk, so a stale marker can't pass). Both failures were checked by hand against a doctored `index.js`. |
+| 6 | The regex test in `index.test.ts` is kept as a fast pre-build guard and says so; item 5 covers the real bundle. |
+| 7 | New `applications/callable.test.ts`: `onCall` is captured, and the options asserted are the final values (`enforceAppCheck`, `consumeAppCheckToken` true, `maxInstances` 1, `timeoutSeconds` 120, secrets `ANTHROPIC_API_KEY`). The captured handler refuses an anonymous caller (no access at all), a non-owner (only `config/app` read) and a replayed App Check token (no access). The old source-text test for App Check in `index.test.ts` is removed. |
+| 8 | The three `setTimeout(…, 20)` in `worker.test.ts` are a `killedCall(h)` promise the fake call resolves when entered. |
+| 9 | `tests/emulator/worker.test.ts`: a barrier in each run's `listGenerating` makes both list before either counts; asserts one send, one `ready`, one `lost`. |
+| 10 | Log tests: ready, API error, storage error, clean-up failure and ready-commit failure with CV text in the error messages; the answer path (answered, dropped and refused) with a marker in the answer text. |
+| 11 | In-memory `listGenerating(limit, readLimit)` reads at most `readLimit` first, like the query. Worker test with `readLimit: 3`. |
+| 12 | Title now says what it asserts: two calls in total and none on the next run. |
+
+## Decisions worth knowing
+- **A ready commit that throws may have landed.** The worker re-reads the application and removes the files only when `cvIds` doesn't list the version; if the re-read fails it leaves them (an orphan is overwritten by the next attempt, a deleted ready CV is not recoverable).
+- **A repeated active fact is linked on the answer path only when its quote verifies**, the same rule as a new fact.
+- **A withdraw with `deleteFiles` now deletes unrecorded versions of this job**, so an owner who kept files, then asks for deletion, loses any orphan too. A withdraw that keeps files lists nothing.
+
+## For 7D.3 and 7D.4
+- The Profile CV header form validates with `CvHeaderSchema` before it writes (the rules' email pattern is looser).
+- Mark applied is disabled while the stage is `generating` (the rules refuse it).
+
+## Park in ROADMAP at 7D.4
+- `addFact.ts` (`planNoteFacts`): an archived fact can overwrite an active one in the `known` map, so an answer that repeats only archived facts returns `no_fact` even when an active twin exists.
+- `run.ts` `withdraw {deleteFiles}` can race a `start`: the clean-up isn't guarded against a restart that lands inside it.
+- `firestore.rules` `validCvHeader`: the email regex is looser than `z.email()`.
+
+## Gate (after the last code change)
+
+| Command | Result |
+|---|---|
+| `npm run format:check` | passed |
+| `npm run check` | passed: lint, typecheck, 145 files and 2,157 tests, PII scan (508 files clean), eval replay (85.0%, 34/40, unchanged) |
+| `npm run test:rules` | passed: 16 files, 379 tests |
+| `npm run build` | passed |
+| `npm run check:bundle` | passed: 35 chunks, initial JS 293.3 kB gzip (unchanged) |
+| `node scripts/smoke-functions-bundle.ts` | passed: every file in `functions/deploy/` loads, no static path to `render-*`/`pdfjs-*`, no pdf-lib or docx code in `index.js`; `index.js` 964 KiB, 9 files 6,555 KiB |
