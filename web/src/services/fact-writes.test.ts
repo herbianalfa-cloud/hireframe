@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAcceptReview,
   buildCriteriaWrite,
+  buildCvHeaderWrite,
+  checkCvHeader,
   buildFactWrite,
   buildKeepReview,
   buildUploadRemoval,
@@ -185,5 +187,78 @@ describe('buildUploadRemoval', () => {
     expect(() =>
       buildUploadRemoval({ archive: ['zzz'], dropReviews: [], skippedEdited: 0 }, rawById, NOW),
     ).toThrow(/Reload/);
+  });
+});
+
+describe('the CV header', () => {
+  const values = {
+    name: ' Alex Example ',
+    email: 'alex@example.com',
+    phone: '',
+    location: ' London, UK',
+    links: ['', 'https://example.com/alex', ''] as const,
+  };
+
+  it('is checked with the shared schema and trimmed, leaving blank optional fields out', () => {
+    const checked = checkCvHeader(values);
+    expect(checked).toEqual({
+      ok: true,
+      input: {
+        name: 'Alex Example',
+        email: 'alex@example.com',
+        location: 'London, UK',
+        links: ['https://example.com/alex'],
+      },
+    });
+  });
+
+  it('reports each bad field where the owner typed it', () => {
+    const checked = checkCvHeader({
+      name: '   ',
+      email: 'not-an-email',
+      phone: 'x'.repeat(41),
+      location: 'y'.repeat(81),
+      links: ['https://ok.example/a', 'http://plain.example', 'https://bad.example/a b'],
+    });
+    expect(checked.ok).toBe(false);
+    if (checked.ok) return;
+    expect(Object.keys(checked.errors).sort()).toEqual([
+      'email',
+      'link1',
+      'link2',
+      'location',
+      'name',
+      'phone',
+    ]);
+  });
+
+  it('refuses more than the schema allows that the rules would let through', () => {
+    // The rules' email pattern accepts "a@b.c"-shaped text that z.email() may still refuse.
+    expect(checkCvHeader({ ...values, email: 'a b@example.com' }).ok).toBe(false);
+    expect(checkCvHeader({ ...values, email: `${'a'.repeat(120)}@example.com` }).ok).toBe(false);
+  });
+
+  it('builds exactly the keys the rules allow, with the server time on create', () => {
+    const write = buildCvHeaderWrite(values, undefined, NOW);
+    expect(write).toEqual({
+      name: 'Alex Example',
+      email: 'alex@example.com',
+      location: 'London, UK',
+      links: ['https://example.com/alex'],
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+    });
+    expect('phone' in write).toBe(false);
+  });
+
+  it('keeps the stored createdAt on update, exactly as read', () => {
+    const write = buildCvHeaderWrite(values, CREATED, NOW);
+    expect(write.createdAt).toBe(CREATED);
+    expect(write.updatedAt).toBe(NOW);
+  });
+
+  it('throws on an invalid header, so nothing is written', () => {
+    expect(() => buildCvHeaderWrite({ ...values, email: 'nope' }, undefined, NOW)).toThrow();
   });
 });

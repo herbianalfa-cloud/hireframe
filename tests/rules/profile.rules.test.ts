@@ -33,6 +33,7 @@ import {
   buildAcceptReview,
   buildFactWrite,
   buildKeepReview,
+  buildCvHeaderWrite,
   buildUploadRemoval,
   buildWorkRightsWrite,
   type FactWrite,
@@ -664,6 +665,56 @@ describe('removing an upload (ADR-023)', () => {
       await commit();
       await assertFails(commit());
     });
+  });
+});
+
+describe('CV header on profile/cvHeader (M7 7D.3)', () => {
+  const header = () => doc(dbFor('owner'), DOCS.cvHeader);
+  const values = {
+    name: 'Alex Example',
+    email: 'alex@example.com',
+    phone: '',
+    location: 'London, UK',
+    links: ['https://example.com/alex', '', ''] as const,
+  };
+
+  beforeEach(async () => {
+    await env.clearFirestore();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), DOCS.appConfig), { ownerUid: OWNER, schemaVersion: 1 });
+    });
+  });
+
+  it('lets the owner create it and then update it with the web builder, keeping createdAt', async () => {
+    await assertSucceeds(
+      setDoc(header(), buildCvHeaderWrite(values, undefined, serverTimestamp())),
+    );
+    const created = (await getDoc(header())).data();
+    expect(created && 'phone' in created).toBe(false);
+    expect(created?.links).toEqual(['https://example.com/alex']);
+
+    await assertSucceeds(
+      setDoc(
+        header(),
+        buildCvHeaderWrite(
+          { ...values, name: 'Alex Q Example', links: ['', '', ''] },
+          created?.createdAt,
+          serverTimestamp(),
+        ),
+      ),
+    );
+    const updated = (await getDoc(header())).data();
+    expect(updated?.name).toBe('Alex Q Example');
+    // A field left empty is gone, not an empty string.
+    expect(updated && 'links' in updated).toBe(false);
+    expect(updated?.createdAt).toEqual(created?.createdAt);
+  });
+
+  it('is refused when createdAt is not the stored value (the builder cannot create over it)', async () => {
+    await assertSucceeds(
+      setDoc(header(), buildCvHeaderWrite(values, undefined, serverTimestamp())),
+    );
+    await assertFails(setDoc(header(), buildCvHeaderWrite(values, undefined, serverTimestamp())));
   });
 });
 
