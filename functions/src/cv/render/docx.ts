@@ -8,6 +8,7 @@ import {
   LineRuleType,
   Packer,
   Paragraph,
+  Tab,
   TabStopType,
   TextRun,
 } from 'docx';
@@ -43,6 +44,16 @@ function run(text: string, kind: Block['kind'], bold = STYLES[kind].bold): TextR
   return new TextRun({ text, font: FONT, size: STYLES[kind].size * 2, bold, color: '000000' });
 }
 
+/** A real `<w:tab/>` element; a tab character in a run's text is not one (ADR-054). */
+function tab(kind: Block['kind']): TextRun {
+  return new TextRun({
+    children: [new Tab()],
+    font: FONT,
+    size: STYLES[kind].size * 2,
+    color: '000000',
+  });
+}
+
 function paragraph(block: Block): Paragraph {
   const style = STYLES[block.kind];
   const heading = HEADINGS[block.kind];
@@ -69,7 +80,7 @@ function paragraph(block: Block): Paragraph {
       children:
         block.dates === undefined
           ? [run(block.text, 'entry')]
-          : [run(block.text, 'entry'), run('\t', 'entry'), run(block.dates, 'entry', false)],
+          : [run(block.text, 'entry'), tab('entry'), run(block.dates, 'entry', false)],
     });
   }
   return new Paragraph({
