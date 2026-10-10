@@ -1242,3 +1242,58 @@ describe('normaliseCvText', () => {
     expect(normaliseCvText(validCv())).toEqual(validCv());
   });
 });
+
+describe('validateCv cost', () => {
+  it('validates content at 4x the shape limits with 32 refs per text in under 300 ms', () => {
+    const refs = Array.from({ length: CV_LIMITS.refs * 4 }, (_, i) =>
+      aliasOf(['fact-clients', 'fact-ttl', 'fact-articles', 'fact-sql'][i % 4] ?? 'fact-sql'),
+    );
+    const long = (n: number) =>
+      'Led onboarding for 12 clients and cut time by 30% with SQL. '.repeat(40).slice(0, n);
+    // Facts with long text and evidence, so the figure and word reads are not trivial.
+    const facts = CV_FACTS.map((fact) => ({
+      ...fact,
+      text: `${fact.text}. ${long(1500)}`,
+      evidence: `${fact.evidence}. ${long(1500)}`,
+    }));
+    const cited = (max: number) => ({ text: long(max * 4), factRefs: refs });
+    const entry = {
+      heading: {
+        role: long(CV_LIMITS.role * 4),
+        org: long(CV_LIMITS.org * 4),
+        factRef: aliasOf('fact-intern'),
+      },
+      bullets: Array.from({ length: CV_LIMITS.bulletsPerEntry * 4 }, () => cited(CV_LIMITS.bullet)),
+    };
+    const cv: CvContent = {
+      summary: cited(CV_LIMITS.summary),
+      experience: Array.from({ length: CV_LIMITS.experienceEntries * 4 }, () => entry),
+      projects: Array.from({ length: CV_LIMITS.projectEntries * 4 }, () => entry),
+      education: Array.from({ length: CV_LIMITS.educationEntries * 4 }, () => ({
+        line: long(CV_LIMITS.educationLine * 4),
+        factRef: aliasOf('fact-scrum'),
+      })),
+      skills: Array.from({ length: CV_LIMITS.skills * 4 }, () => ({
+        label: long(CV_LIMITS.skillLabel * 4),
+        factRefs: refs,
+      })),
+      coverNote: {
+        paragraphs: Array.from({ length: CV_LIMITS.noteParagraphsMax * 4 }, () =>
+          cited(CV_LIMITS.noteParagraph),
+        ),
+      },
+    };
+    const started = performance.now();
+    const result = validateCv(cv, CV_ALIASES, facts);
+    const elapsed = performance.now() - started;
+    expect(result.ok).toBe(false);
+    expect(elapsed).toBeLessThan(300);
+  });
+
+  it('reports 32 refs on one text as too_long, whatever they repeat', () => {
+    const cv = edited((c) => {
+      c.summary.factRefs = Array.from({ length: 32 }, () => aliasOf('fact-ttl'));
+    });
+    expect(issuesOf(cv)).toContainEqual({ path: 'summary', code: 'too_long' });
+  });
+});
