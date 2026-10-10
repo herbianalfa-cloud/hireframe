@@ -70,6 +70,7 @@ describe('deployed functions (ADR-017)', () => {
     ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['lookup', ['ANTHROPIC_API_KEY']],
     ['application', ['ANTHROPIC_API_KEY']],
+    ['generateCvs', ['ANTHROPIC_API_KEY']],
     ['ingestEmailJobs', ['ANTHROPIC_API_KEY', 'INGEST_HMAC_SECRET']],
     ['getDigest', ['INGEST_HMAC_SECRET']],
   ])('%s mounts %j', (name, secrets) => {
@@ -77,6 +78,65 @@ describe('deployed functions (ADR-017)', () => {
     expect(endpoint).toBeDefined();
     const mounted = (endpoint?.secretEnvironmentVariables ?? []).map((secret) => secret.key);
     expect(mounted.sort()).toEqual(secrets);
+  });
+});
+
+describe('generateCvs (ADR-053)', () => {
+  const endpoint = (
+    deployed.generateCvs as unknown as {
+      __endpoint?: {
+        scheduleTrigger?: {
+          schedule?: string;
+          timeZone?: string;
+          retryConfig?: { retryCount?: number };
+        };
+        timeoutSeconds?: number;
+        availableMemoryMb?: number | string;
+        maxInstances?: number | string;
+        callableTrigger?: object;
+        httpsTrigger?: object;
+        eventTrigger?: object;
+      };
+    }
+  ).__endpoint;
+
+  it('runs every 10 minutes from 07:00 to 23:50, UK time, without platform retries', () => {
+    expect(endpoint?.scheduleTrigger).toMatchObject({
+      schedule: '*/10 7-23 * * *',
+      timeZone: 'Europe/London',
+      retryConfig: { retryCount: 0 },
+    });
+  });
+
+  it('states the 540 s timeout from the shared table, 1 GiB and one instance', () => {
+    expect(endpoint?.timeoutSeconds).toBe(CALLABLE_TIMEOUT_SECONDS.generateCvs);
+    expect(endpoint?.timeoutSeconds).toBe(540);
+    expect(endpoint?.availableMemoryMb).toBe(1024);
+    expect(endpoint?.maxInstances).toBe(1);
+  });
+
+  it('is started by its schedule only: no HTTPS, callable or event trigger', () => {
+    expect(endpoint?.callableTrigger).toBeUndefined();
+    expect(endpoint?.httpsTrigger).toBeUndefined();
+    expect(endpoint?.eventTrigger).toBeUndefined();
+  });
+
+  it('states maxInstances in its own options, not only the global ones', () => {
+    const source = readFileSync(new URL('./applications/schedule.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/^\s*maxInstances: 1,$/m);
+    expect(source).toMatch(/^\s*retryCount: 0,$/m);
+  });
+
+  it('does not import the renderer statically, so other functions never load it', () => {
+    for (const file of ['./applications/schedule.ts', './applications/worker.ts']) {
+      const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+      expect(source, file).not.toMatch(/^import\s+(?!type)[^;]*cv\/render/m);
+    }
+    const wiring = readFileSync(
+      new URL('./applications/worker-wiring.ts', import.meta.url),
+      'utf8',
+    );
+    expect(wiring).toMatch(/import\('\.\.\/cv\/render\/index\.js'\)/);
   });
 });
 
