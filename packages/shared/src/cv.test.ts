@@ -1105,3 +1105,50 @@ describe('word rule: a 2-letter word in a skill label is checked', () => {
     });
   });
 });
+
+/** The valid CV with one skill label citing one new skill fact per text; the result of `validateCv`. */
+function skillCheck(label: string, ...factTexts: string[]) {
+  const extra: CvFact[] = factTexts.map((text, i) => ({
+    id: `fact-x${String(i)}`,
+    type: 'skill',
+    text,
+    evidence: text,
+    status: 'active',
+  }));
+  const aliases = new Map([
+    ...CV_ALIASES,
+    ...extra.map((f, i): [string, string] => [`F9${String(i)}`, f.id]),
+  ]);
+  const cv = edited((c) => {
+    c.skills = [{ label, factRefs: extra.map((_, i) => `F9${String(i)}`) }];
+  });
+  return validateCv(cv, aliases, [...CV_FACTS, ...extra]);
+}
+const skillOk = (label: string, ...factTexts: string[]) => skillCheck(label, ...factTexts).ok;
+
+describe('word rule: at least one checked word', () => {
+  it('rejects a heading whose role and org are all skipped words', () => {
+    expect(issuesOf(heading('The', 'Ltd'))).toContainEqual({
+      path: 'experience[0].heading.role',
+      code: 'unsupported_text',
+    });
+  });
+
+  it('accepts "Personal project" with a real org, which has the words', () => {
+    expect(check(heading('Personal project', 'Example Cloud'))).toEqual({ ok: true });
+  });
+
+  it('rejects an education line with no checked word', () => {
+    const cv = edited((c) => {
+      at(c.education, 0).line = 'of the';
+    });
+    expect(issuesOf(cv)).toEqual([{ path: 'education[0]', code: 'unsupported_text' }]);
+  });
+
+  it('rejects a skill label with no word, and accepts one real part', () => {
+    expect(skillOk('-', 'SQL')).toBe(false);
+    expect(skillOk(' , ; ', 'SQL')).toBe(false);
+    expect(skillOk('SQL', 'SQL')).toBe(true);
+    expect(skillOk('SQL,', 'SQL')).toBe(true);
+  });
+});
