@@ -184,6 +184,6 @@ describe('CvHeaderCard', () => {
     expect(document.activeElement).toBe(save);
     expect(document.querySelector('[aria-live="polite"]')).toBe(region);
     expect(region?.textContent).toBe('Saved. New CVs use it.');
-    expect((screen.getByLabelText('Full name') as HTMLInputElement).value).toBe('Alex Example');
+    expect(screen.getByLabelText<HTMLInputElement>('Full name').value).toBe('Alex Example');
   });
 });

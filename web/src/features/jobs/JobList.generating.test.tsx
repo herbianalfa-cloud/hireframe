@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { GENERATING_APPLIED_REASON } from '@/services/job-writes';
 
@@ -9,8 +9,12 @@ import { JobList } from './JobList';
 
 // The real status write over a fake Firestore: only the document read and the batch are faked, so
 // "nothing is written" is checked at the batch, not at a mocked service.
-const store = vi.hoisted(() => ({
-  application: { stage: 'generating' } as Record<string, unknown> | null,
+interface Store {
+  application: Record<string, unknown> | null;
+  batch: { update: Mock; set: Mock; commit: Mock };
+}
+const store = vi.hoisted<Store>(() => ({
+  application: { stage: 'generating' },
   batch: { update: vi.fn(), set: vi.fn(), commit: vi.fn() },
 }));
 

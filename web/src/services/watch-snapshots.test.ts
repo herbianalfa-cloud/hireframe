@@ -1,7 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
-import { watchApplication, watchStage } from './applications';
+import { watchApplication, watchStage, type ApplicationView } from './applications';
 import { watchCvHeader, type CvHeaderView } from './profile';
 import type { LiveState } from './profile';
 
@@ -12,7 +12,9 @@ import type { LiveState } from './profile';
  * `serverTimestamps: 'estimate'` and parses without an error or a log line.
  */
 
-type DataOptions = { serverTimestamps?: 'estimate' | 'previous' | 'none' };
+interface DataOptions {
+  serverTimestamps?: 'estimate' | 'previous' | 'none';
+}
 
 interface FakeDoc {
   id: string;
@@ -80,8 +82,13 @@ const header = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+function dataOf(seen: LiveState<ApplicationView[]>[]): ApplicationView[] {
+  const last = seen.at(-1);
+  return last?.status === 'ready' ? last.data : [];
+}
+
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-let errors: ReturnType<typeof vi.spyOn>;
+let errors: MockInstance<typeof console.error>;
 
 beforeEach(() => {
   live.next = undefined;
@@ -116,8 +123,8 @@ describe('watchApplication', () => {
 
 describe('watchStage', () => {
   it('counts an invalid document and still lists the valid ones', async () => {
-    const seen: LiveState<{ id: string }[]>[] = [];
-    const stop = watchStage('applied', (state) => seen.push(state as never));
+    const seen: LiveState<ApplicationView[]>[] = [];
+    const stop = watchStage('applied', (state) => seen.push(state));
     await tick();
     live.next?.({
       docs: [
@@ -126,20 +133,20 @@ describe('watchStage', () => {
       ],
     });
     expect(seen.at(-1)).toMatchObject({ status: 'ready', invalid: 1 });
-    expect((seen.at(-1) as { data: unknown[] }).data).toHaveLength(1);
+    expect(dataOf(seen)).toHaveLength(1);
     expect(errors).toHaveBeenCalledTimes(1);
     stop();
   });
 
   it('parses the local copy of a pending write, with no error and no log', async () => {
-    const seen: LiveState<{ id: string }[]>[] = [];
-    const stop = watchStage('applied', (state) => seen.push(state as never));
+    const seen: LiveState<ApplicationView[]>[] = [];
+    const stop = watchStage('applied', (state) => seen.push(state));
     await tick();
     live.next?.({
       docs: [snapshotDoc({ id: 'job1', data: application(), pendingFields: ['updatedAt'] })],
     });
     expect(seen.at(-1)).toMatchObject({ status: 'ready', invalid: 0 });
-    expect((seen.at(-1) as { data: unknown[] }).data).toHaveLength(1);
+    expect(dataOf(seen)).toHaveLength(1);
     expect(errors).not.toHaveBeenCalled();
     stop();
   });

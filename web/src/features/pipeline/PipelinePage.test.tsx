@@ -503,7 +503,7 @@ describe('Ready to send', () => {
     );
   });
 
-  it('renders job titles, companies, questions and notes as text, never as markup', async () => {
+  it('renders job titles, companies, questions and notes as text, never as markup', () => {
     const markup = '<img src=x onerror=alert(1)><script>alert(2)</script><b>bold</b>';
     given({
       needs_input: ready(

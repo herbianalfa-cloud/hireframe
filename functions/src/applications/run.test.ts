@@ -128,6 +128,12 @@ function seedApplication(h: Harness, overrides: Record<string, unknown>) {
   h.store.applications.set(application.jobId, application);
 }
 
+function jobOf(h: Harness) {
+  const job = h.store.jobs.get(TEST_JOB_ID);
+  if (!job) throw new Error('the harness has no job');
+  return job;
+}
+
 let h: Harness;
 beforeEach(() => {
   h = harness();
@@ -680,14 +686,14 @@ describe('withdraw', () => {
       // 51 versions of 4 files is 204 objects: past the 200 the listing returns.
       for (let n = 1; n <= 51; n += 1) {
         for (const file of ['cv.pdf', 'cv.docx', 'cover-note.pdf', 'cover-note.docx']) {
-          h.objects.add(`cvs/${TEST_JOB_ID}-v${n}/${file}`);
+          h.objects.add(`cvs/${TEST_JOB_ID}-v${String(n)}/${file}`);
         }
       }
       expect((await withdrawAll()).cleanupRemaining).toBe(true);
     });
 
     it('deletes at most 20 versions per call, and repeating finishes the job', async () => {
-      const ids = Array.from({ length: 45 }, (_, i) => `${TEST_JOB_ID}-v${i + 1}`);
+      const ids = Array.from({ length: 45 }, (_, i) => `${TEST_JOB_ID}-v${String(i + 1)}`);
       seedApplication(h, { cvIds: ids, currentCvId: ids[44] });
       for (const id of ids) h.objects.add(`cvs/${id}/cv.pdf`);
 
@@ -712,7 +718,7 @@ describe('withdraw', () => {
     });
 
     it('keeps currentCvId while its version is still recorded', async () => {
-      const ids = Array.from({ length: 25 }, (_, i) => `${TEST_JOB_ID}-v${i + 1}`);
+      const ids = Array.from({ length: 25 }, (_, i) => `${TEST_JOB_ID}-v${String(i + 1)}`);
       seedApplication(h, { cvIds: ids, currentCvId: ids[24] });
       await withdrawAll();
       expect(h.store.applications.get(TEST_JOB_ID)?.currentCvId).toBe(ids[24]);
@@ -720,7 +726,7 @@ describe('withdraw', () => {
 
     it('finishes unrecorded versions by repeating, with nothing recorded', async () => {
       seedApplication(h, { cvIds: [] });
-      for (let n = 1; n <= 25; n += 1) h.objects.add(`cvs/${TEST_JOB_ID}-v${n}/cv.pdf`);
+      for (let n = 1; n <= 25; n += 1) h.objects.add(`cvs/${TEST_JOB_ID}-v${String(n)}/cv.pdf`);
       expect((await withdrawAll()).cleanupRemaining).toBe(true);
       expect(h.objects.size).toBe(5);
       expect((await withdrawAll()).cleanupRemaining).toBeUndefined();
@@ -728,7 +734,7 @@ describe('withdraw', () => {
     });
 
     it('starts no delete after the deadline (a fake clock), and a repeat continues', async () => {
-      const ids = Array.from({ length: 6 }, (_, i) => `${TEST_JOB_ID}-v${i + 1}`);
+      const ids = Array.from({ length: 6 }, (_, i) => `${TEST_JOB_ID}-v${String(i + 1)}`);
       seedApplication(h, { cvIds: ids });
       for (const id of ids) h.objects.add(`cvs/${id}/cv.pdf`);
       // Each delete "takes" 25 s: two start inside the 60 s deadline, then a third at 50 s, and
@@ -746,7 +752,7 @@ describe('withdraw', () => {
 
     for (const jobId of ['job.1', 'job*1']) {
       it(`matches ${jobId} by whole folder name, as plain text`, async () => {
-        h.store.jobs.set(jobId, h.store.jobs.get(TEST_JOB_ID)!);
+        h.store.jobs.set(jobId, jobOf(h));
         seedApplication(h, { jobId, cvIds: [] });
         const other = jobId.replace(/[.*]/, 'x'); // what the pattern character would match
         for (const name of [
@@ -766,7 +772,7 @@ describe('withdraw', () => {
 
     it('drops names that do not start with the prefix, and names with no folder', async () => {
       seedApplication(h, { jobId: 'job.1', cvIds: [] });
-      h.store.jobs.set('job.1', h.store.jobs.get(TEST_JOB_ID)!);
+      h.store.jobs.set('job.1', jobOf(h));
       // A lister may return more than it was asked for; the names must be checked again.
       const stray = [
         `${'x'.repeat('cvs/job.1-v'.length)}7/cv.pdf`, // only matches after a blind slice
