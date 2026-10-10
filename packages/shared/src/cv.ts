@@ -427,30 +427,50 @@ const DOT_TLDS = new Set(
   ),
 );
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** An address token as the check compares it: no trailing punctuation, lower case. */
+function addressToken(raw: string): string {
+  return raw.replace(/[.,;:!?)\]"']+$/, '').toLowerCase();
+}
+
+/**
+ * The bare `label.tld` tokens in `text` (the cited facts' text), each also without its path, so
+ * `Booking.com` is allowed by a fact that says `Booking.com/jobs` but `Booking.com.au` allows
+ * neither `Booking.com` nor anything longer. Built once per citation.
+ */
+export function contactAllowance(text: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const match of text.matchAll(ADDRESS)) {
+    const token = addressToken(match[0]);
+    tokens.add(token);
+    tokens.add(token.split('/')[0] ?? token);
+  }
+  return tokens;
+}
 
 /**
  * An email, a phone number or a web address: contact details come only from the header. A bare
  * `label.tld` (ASP.NET, Booking.com) is allowed when the same token is in `allowed`, the text of
- * the cited facts (their text, not their evidence); an email, a phone number, a link and an obfuscated spelling never are.
+ * the cited facts (their text, not their evidence), or in its `contactAllowance`; an email, a
+ * phone number, a link and an obfuscated spelling never are.
  */
-export function hasContactDetails(text: string, allowed = ''): boolean {
+export function hasContactDetails(
+  text: string,
+  allowed: string | ReadonlySet<string> = '',
+): boolean {
   if (text.match(EMAIL) !== null) return true;
   if ((text.match(PHONE) ?? []).some(isPhoneLike)) return true;
   if (LINK.test(text)) return true;
+  const tokens = typeof allowed === 'string' ? contactAllowance(allowed) : allowed;
   for (const match of text.matchAll(ADDRESS)) {
-    const token = match[0].replace(/[.,;:!?)\]"']+$/, '');
-    const spelled = /\[\.\]|\s/.test(token.split('/')[0] ?? token);
+    const token = addressToken(match[0]);
+    const host = match[0].replace(/[.,;:!?)\]"']+$/, '').split('/')[0] ?? '';
+    const spelled = /\[\.\]|\s/.test(host);
     if (spelled) {
-      const tld = (token.split('/')[0] ?? token).split(/\s*\[\.\]\s*|\s+dot\s+|\./i).pop() ?? '';
-      if (token.includes('[.]') || DOT_TLDS.has(tld.toLowerCase())) return true;
+      const tld = host.split(/\s*\[\.\]\s*|\s+dot\s+|\./i).pop() ?? '';
+      if (host.includes('[.]') || DOT_TLDS.has(tld.toLowerCase())) return true;
       continue;
     }
-    const literal = new RegExp(
-      String.raw`(?<![\w@.-])${escapeRegExp(token)}(?![\w@-]|\.[a-z0-9])`,
-      'i',
-    );
-    if (!literal.test(allowed)) return true;
+    if (!tokens.has(token)) return true;
   }
   return false;
 }
@@ -470,8 +490,6 @@ interface Cite {
   refs: readonly string[];
   /** Fact types the cited facts must have; `undefined` for any. */
   types?: readonly Fact['type'][];
-  /** The most citations allowed. */
-  maxRefs: number;
 }
 
 function cites(content: CvContent): Cite[] {
@@ -481,7 +499,6 @@ function cites(content: CvContent): Cite[] {
       texts: [{ path: 'summary', value: content.summary.text, max: CV_LIMITS.summary }],
       refs: content.summary.factRefs,
       denied: NEVER_CITED,
-      maxRefs: CV_LIMITS.refs,
     },
   ];
   const entries = (section: 'experience' | 'projects') => {
@@ -498,7 +515,6 @@ function cites(content: CvContent): Cite[] {
           section === 'experience' ? EXPERIENCE_HEADING_FACT_TYPES : PROJECT_HEADING_FACT_TYPES,
         words: 'fact',
         denied: NOT_IN_ENTRIES,
-        maxRefs: 1,
       });
       entry.bullets.forEach((bullet, j) => {
         const path = `${base}.bullets[${String(j)}]`;
@@ -507,7 +523,6 @@ function cites(content: CvContent): Cite[] {
           texts: [{ path, value: bullet.text, max: CV_LIMITS.bullet }],
           refs: bullet.factRefs,
           denied: NOT_IN_ENTRIES,
-          maxRefs: CV_LIMITS.refs,
         });
       });
     });
@@ -523,7 +538,6 @@ function cites(content: CvContent): Cite[] {
       types: EDUCATION_FACT_TYPES,
       words: 'fact',
       denied: NOT_IN_ENTRIES,
-      maxRefs: 1,
     });
   });
   content.skills.forEach((skill, i) => {
@@ -535,7 +549,6 @@ function cites(content: CvContent): Cite[] {
       types: SKILL_FACT_TYPES,
       words: 'parts',
       denied: NOT_IN_ENTRIES,
-      maxRefs: CV_LIMITS.refs,
     });
   });
   content.coverNote.paragraphs.forEach((paragraph, i) => {
@@ -545,7 +558,6 @@ function cites(content: CvContent): Cite[] {
       texts: [{ path, value: paragraph.text, max: CV_LIMITS.noteParagraph }],
       refs: paragraph.factRefs,
       denied: NEVER_CITED,
-      maxRefs: CV_LIMITS.refs,
     });
   });
   return out;
@@ -596,9 +608,22 @@ function wordsOf(text: string): string[] {
     .filter((word) => !SKIPPED_WORDS.has(word));
 }
 
-/** What a label or heading may borrow words from: one cited fact's text and evidence. */
-function factWords(fact: CvFact): Set<string> {
-  return new Set(wordsOf(`${fact.text}\n${fact.evidence}`));
+/** What one cited fact gives the checks, read once per `validateCv` call. */
+interface FactReads {
+  /** The words a label or heading may borrow: the fact's text and evidence. */
+  words: Set<string>;
+  /** The folded text and evidence, for a part with no word (`R`). */
+  phrase: string;
+  figures: Set<string>;
+}
+
+function readFact(fact: CvFact): FactReads {
+  const both = `${fact.text}\n${fact.evidence}`;
+  return {
+    words: new Set(wordsOf(both)),
+    phrase: ` ${foldClaim(both)} `,
+    figures: figuresIn(both),
+  };
 }
 
 /**
@@ -610,19 +635,19 @@ const LABEL_PARTS = /[,;/&|():\u2022]|\s\+\s|\s[-\u2013\u2014\u00b7]\s|\s(?:and|
 /**
  * Whether a skill label's parts are each backed by one cited fact: all the part's words are in
  * that fact's text or evidence. A part without a word of 2+ letters ("R") has to be a whole
- * word or phrase of a cited fact instead.
+ * word or phrase of a cited fact instead. `C++`, `C#` and `F#` are tokens of their own.
  */
-function labelSupported(label: string, cited: readonly CvFact[]): boolean {
-  const sets = cited.map(factWords);
-  const phrases = cited.map((fact) => ` ${foldClaim(`${fact.text}\n${fact.evidence}`)} `);
+function labelSupported(label: string, cited: readonly FactReads[]): boolean {
   const parts = label.split(LABEL_PARTS).filter((part) => foldClaim(part) !== '');
   // A label of separators alone ("-") says nothing, so nothing backs it.
   if (parts.length === 0) return false;
   return parts.every((part) => {
     const words = wordsOf(part);
-    if (words.length > 0) return sets.some((set) => words.every((word) => set.has(word)));
-    const folded = foldClaim(part);
-    return phrases.some((phrase) => phrase.includes(` ${folded} `));
+    if (words.length > 0) {
+      return cited.some((reads) => words.every((word) => reads.words.has(word)));
+    }
+    const folded = ` ${foldClaim(part)} `;
+    return cited.some((reads) => reads.phrase.includes(folded));
   });
 }
 
@@ -675,24 +700,25 @@ export function validateCv(
     }
   };
 
+  // Per fact, not per citation: a fact is read once however many texts cite it.
+  const reads = new Map<string, FactReads>();
+  const readsOf = (fact: CvFact): FactReads => {
+    let read = reads.get(fact.id);
+    if (read === undefined) {
+      read = readFact(fact);
+      reads.set(fact.id, read);
+    }
+    return read;
+  };
+
   for (const cite of cites(content)) {
     if (cite.refs.length === 0) add(cite.path, 'uncited');
-    if (cite.refs.length > cite.maxRefs) add(cite.path, 'too_long');
-    const allowedText = cite.refs
-      .map((ref) => byId.get(aliases.get(ref) ?? ''))
-      .filter((fact) => fact?.status === 'active')
-      .map((fact) => fact?.text ?? '')
-      .join('\n');
-    for (const text of cite.texts) {
-      if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
-      if (hasContactDetails(text.value, allowedText)) add(text.path, 'contact_in_text');
-      // Never dropped or swapped silently: the PDF fonts can't print it (ADR-054).
-      // NFC first: "e" + a combining accent is the é the font has, written the long way.
-      if (!isPrintable(text.value.normalize('NFC'))) add(text.path, 'unsupported_char');
-    }
+    // The count is the model's, so a text citing one fact 32 times is still too long.
+    if (cite.refs.length > CV_LIMITS.refs) add(cite.path, 'too_long');
 
+    // Distinct refs only: the work below is per fact, not per mention.
     const cited: CvFact[] = [];
-    for (const ref of cite.refs) {
+    for (const ref of new Set(cite.refs)) {
       const id = aliases.get(ref);
       const fact = id === undefined ? undefined : byId.get(id);
       if (fact?.status !== 'active') {
@@ -703,11 +729,22 @@ export function validateCv(
         cite.denied.includes(fact.type) ||
         (cite.types !== undefined && !cite.types.includes(fact.type));
       if (wrongType) add(cite.path, 'wrong_fact_type');
-      cited.push(fact);
+      if (!cited.includes(fact)) cited.push(fact);
+    }
+    const citedReads = cited.map(readsOf);
+
+    // Contact allowance: the cited facts' text only, tokenised once for every text under the cite.
+    const allowance = contactAllowance(cited.map((fact) => fact.text).join('\n'));
+    for (const text of cite.texts) {
+      if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
+      if (hasContactDetails(text.value, allowance)) add(text.path, 'contact_in_text');
+      // NFC first: "e" + a combining accent is the é the font has, written the long way.
+      // Never dropped or swapped silently: the PDF fonts can't print it (ADR-054).
+      if (!isPrintable(text.value.normalize('NFC'))) add(text.path, 'unsupported_char');
     }
 
     if (cite.words === 'fact' && cited.length > 0) {
-      const allowed = new Set(cited.flatMap((fact) => [...factWords(fact)]));
+      const allowed = new Set(citedReads.flatMap((read) => [...read.words]));
       let checked = 0;
       for (const text of cite.texts) {
         const words = wordsOf(text.value);
@@ -719,11 +756,11 @@ export function validateCv(
     }
     if (cite.words === 'parts' && cited.length > 0) {
       for (const text of cite.texts) {
-        if (!labelSupported(text.value, cited)) add(text.path, 'unsupported_text');
+        if (!labelSupported(text.value, citedReads)) add(text.path, 'unsupported_text');
       }
     }
 
-    const supported = figuresIn(cited.map((fact) => `${fact.text}\n${fact.evidence}`).join('\n'));
+    const supported = new Set(citedReads.flatMap((read) => [...read.figures]));
     for (const text of cite.texts) {
       for (const figure of figuresIn(text.value)) {
         if (!supported.has(figure)) add(text.path, 'unsupported_number');
