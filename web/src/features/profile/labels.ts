@@ -48,6 +48,7 @@ export function formatFactDates(dates: Fact['dates']): string | undefined {
   return undefined;
 }
 
-export function sourceLabel(fact: Pick<Fact, 'source'>): string {
+export function sourceLabel(fact: Pick<Fact, 'source' | 'answerFor'>): string {
+  if (fact.answerFor) return 'From an application answer';
   return fact.source === 'cv' ? 'From your CV' : 'Added by you';
 }

@@ -94,3 +94,29 @@ export const digestSourcesSpec: QuerySpec = {
   filters: [],
   orderBy: [],
 };
+
+// ---- The Pipeline line's reads (M7 7D.4) ----
+
+/** Applications in one stage: equality only, so the single-field index serves it. */
+export function digestStageSpec(stage: 'needs_input' | 'generating' | 'ready'): QuerySpec {
+  return {
+    collection: COLLECTIONS.applications,
+    filters: [{ field: 'stage', op: '==', value: stage }],
+    orderBy: [],
+  };
+}
+
+/**
+ * Jobs marked applied since the London week began: the `(status, appliedAt desc)` composite the
+ * summary bar's count already uses.
+ */
+export function digestAppliedWeekSpec(weekStart: Date): QuerySpec {
+  return {
+    collection: COLLECTIONS.jobs,
+    filters: [
+      { field: 'status', op: '==', value: 'applied' },
+      { field: 'appliedAt', op: '>=', value: weekStart },
+    ],
+    orderBy: [{ field: 'appliedAt', direction: 'desc' }],
+  };
+}

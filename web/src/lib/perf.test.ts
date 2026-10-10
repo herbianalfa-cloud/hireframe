@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { hfMarks, markOnce, resetMarksForTest } from './perf';
+import { hfMarks, markOnce, resetMarksForTest, signalUsable, whenUsable } from './perf';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -56,5 +56,61 @@ describe('hfMarks', () => {
       ['hf:second', 20],
       ['hf:usable', 30],
     ]);
+  });
+});
+
+describe('whenUsable', () => {
+  it('on Today resolves only when Today signals usable', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolved = false;
+      void whenUsable(true).then(() => {
+        resolved = true;
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(resolved).toBe(false);
+      signalUsable();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(resolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resolves at once once usable has been signalled', async () => {
+    signalUsable();
+    await expect(whenUsable(true)).resolves.toBeUndefined();
+  });
+
+  it('elsewhere resolves at the first idle moment, or after 1.5 s without one', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolved = false;
+      void whenUsable(false).then(() => {
+        resolved = true;
+      });
+      await vi.advanceTimersByTimeAsync(1_499);
+      expect(resolved).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(resolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('on Today still gives up after 10 s if usable never comes', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolved = false;
+      void whenUsable(true).then(() => {
+        resolved = true;
+      });
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(resolved).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(resolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

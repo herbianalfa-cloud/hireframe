@@ -46,6 +46,11 @@ export interface LlmCallInput<T> {
   schema: z.ZodType<T>;
   /** Cache the system prompt (S3, where it repeats for every job in a run). */
   cacheSystem?: boolean;
+  /**
+   * Sends this call may make (default and ceiling 2: the invalid-output retry). The CV worker
+   * passes 1 and keeps its own retry, so its attempt counter bounds every request (M7, ADR-053).
+   */
+  maxSends?: 1 | 2;
 }
 
 export interface LlmCallResult<T> {
@@ -204,7 +209,7 @@ export async function llmCall<T>(
     }
 
     log.warn('llm.output_invalid', { purpose: input.purpose, attempt: attemptNo, failure });
-    if (attemptNo >= MAX_ATTEMPTS || remainingMs() < LLM.minSendMs) {
+    if (attemptNo >= (input.maxSends ?? MAX_ATTEMPTS) || remainingMs() < LLM.minSendMs) {
       throw new LlmOutputError(failure, totalPence);
     }
     messages.push(

@@ -6,7 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { PATHS } from '@hireframe/shared';
+import { CRITERIA_SEED_V1, PATHS } from '@hireframe/shared';
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -36,7 +36,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  for (const path of ['jobs', 'runs', 'sources', 'usage', 'nonces']) {
+  for (const path of ['jobs', 'runs', 'sources', 'usage', 'nonces', 'applications', 'criteria']) {
     await db.recursiveDelete(db.collection(path));
   }
 });
@@ -114,6 +114,38 @@ async function seed(): Promise<void> {
   });
 }
 
+async function seedPipeline(): Promise<void> {
+  const application = (stage: string) => ({ stage, stageAt: NOW, updatedAt: NOW });
+  await db.doc('applications/a1').set(application('needs_input'));
+  await db.doc('applications/a2').set(application('generating'));
+  await db.doc('applications/a3').set(application('ready'));
+  await db.doc('applications/a4').set(application('ready'));
+  await db.doc('applications/a5').set(application('withdrawn'));
+  // This London week starts Mon 5 Oct: two applied inside it, one before.
+  await db.doc('jobs/applied-this-week').set(
+    job('Applied A', '2026-10-05T10:00:00Z', {
+      status: 'applied',
+      appliedAt: new Date('2026-10-06T10:00:00Z'),
+    }),
+  );
+  await db.doc('jobs/applied-this-week-2').set(
+    job('Applied B', '2026-10-05T10:00:00Z', {
+      status: 'applied',
+      appliedAt: new Date('2026-10-07T05:00:00Z'),
+    }),
+  );
+  await db.doc('jobs/applied-last-week').set(
+    job('Applied C', '2026-09-28T10:00:00Z', {
+      status: 'applied',
+      appliedAt: new Date('2026-10-02T10:00:00Z'),
+    }),
+  );
+  await db.doc('criteria/current').set({ version: 1, updatedAt: NOW, schemaVersion: 1 });
+  await db
+    .doc('criteria/v1')
+    .set({ ...CRITERIA_SEED_V1, weekly_target: 6, version: 1, createdAt: NOW, schemaVersion: 1 });
+}
+
 function request(
   options: { nonce?: string; purpose?: 'digest' | 'ingest'; body?: string } = {},
 ): SignedRequest {
@@ -166,6 +198,29 @@ describe('getDigest against the emulator', () => {
     expect(body.html).toContain('?job=new-today');
   });
 
+  it('adds the Pipeline line from the applications and the week’s applied jobs', async () => {
+    await seed();
+    await seedPipeline();
+    const result = await digestHandler(request(), deps());
+    expect(result.status).toBe(200);
+    const text = (result.body as { text: string }).text;
+    expect(text).toContain(
+      '1 need your input · 1 generating · 2 ready to send · 2 applied this week of 6',
+    );
+  });
+
+  it('still sends, without the Pipeline line, when the criteria can’t be read', async () => {
+    await seed();
+    await seedPipeline();
+    await db.doc('criteria/v1').set({ version: 1, broken: true });
+    const result = await digestHandler(request(), deps());
+    expect(result.status).toBe(200);
+    const body = result.body as { state: string; text: string };
+    expect(body.state).toBe('ready');
+    expect(body.text).toContain('Product Analyst');
+    expect(body.text).not.toContain('PIPELINE');
+  });
+
   it('counts exactly past the listed jobs', async () => {
     await seed();
     for (let i = 0; i < 12; i += 1) {
@@ -180,9 +235,10 @@ describe('getDigest against the emulator', () => {
   it('writes only the nonce: runs, jobs, usage and sources are untouched', async () => {
     await seed();
     await db.doc('sources/reed').set({ status: 'failing', lastErrorCode: 'http_429' });
+    await seedPipeline();
     const snapshot = async () => {
       const state: Record<string, unknown> = {};
-      for (const name of ['runs', 'jobs', 'usage', 'sources']) {
+      for (const name of ['runs', 'jobs', 'usage', 'sources', 'applications', 'criteria']) {
         const docs = await db.collection(name).get();
         for (const doc of docs.docs) {
           state[doc.ref.path] = { data: doc.data(), updated: doc.updateTime.toMillis() };

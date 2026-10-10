@@ -1,8 +1,9 @@
 /**
  * Bundles Cloud Functions for deploy (ADR-017). Cloud Build can't install the workspace package
  * `@hireframe/shared`, so esbuild inlines it with the pure-JS dependencies into
- * `functions/deploy/index.js`. Only `firebase-functions` and `firebase-admin` stay external;
- * the generated `functions/deploy/package.json` pins them to the exact versions in
+ * `functions/deploy/index.js`. Code loaded by a dynamic `import()` (the CV renderer, the PDF
+ * reader) is split into `functions/deploy/chunks/`, so a cold start of any other function never
+ * parses it. Only `firebase-functions` and `firebase-admin` stay external; the generated `functions/deploy/package.json` pins them to the exact versions in
  * functions/package.json. `firebase.json` deploys from `functions/deploy`.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,7 +32,11 @@ mkdirSync(outDir, { recursive: true });
 
 await build({
   entryPoints: [join(functionsDir, 'src/index.ts')],
-  outfile: join(outDir, 'index.js'),
+  outdir: outDir,
+  // Code only the CV worker imports dynamically (pdf-lib, docx) goes to its own chunk, so it is
+  // neither parsed nor evaluated on any other function's cold start (M7 7D.2, ADR-054).
+  splitting: true,
+  chunkNames: 'chunks/[name]-[hash]',
   bundle: true,
   platform: 'node',
   target: 'node22',

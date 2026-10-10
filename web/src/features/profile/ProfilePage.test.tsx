@@ -46,6 +46,11 @@ vi.mock('@/services/profile', () => ({
     return () => undefined;
   }),
   saveWorkRights: vi.fn(),
+  watchCvHeader: vi.fn((callback: (state: unknown) => void) => {
+    callback({ status: 'ready', data: null, invalid: 0 });
+    return () => undefined;
+  }),
+  saveCvHeader: vi.fn(),
 }));
 
 const NOW = new Date('2026-10-01T09:00:00Z');

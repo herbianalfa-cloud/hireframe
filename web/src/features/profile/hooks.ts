@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
+  watchCvHeader,
   watchDocuments,
   watchFacts,
   watchFactVersions,
   watchWorkRights,
+  type CvHeaderView,
   type DocumentView,
   type FactView,
   type LiveState,
@@ -38,4 +40,8 @@ export function useFactVersions(factId: string): LiveState<VersionView[]> {
 
 export function useWorkRights(): LiveState<WorkRightsView> {
   return useLive(watchWorkRights);
+}
+
+export function useCvHeader(): LiveState<CvHeaderView | null> {
+  return useLive(watchCvHeader);
 }

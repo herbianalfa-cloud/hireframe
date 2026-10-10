@@ -9,6 +9,7 @@ import {
   watchSpend,
   type SummaryCountResults,
 } from '@/services/dashboard';
+import { watchTodoCount, type TodoCount } from '@/services/pipeline-todo';
 import type { LiveState } from '@/services/profile';
 
 import { SummaryBar } from './SummaryBar';
@@ -19,6 +20,8 @@ vi.mock('@/services/dashboard', async (importOriginal) => ({
   watchLastRun: vi.fn(),
   watchSpend: vi.fn(),
 }));
+
+vi.mock('@/services/pipeline-todo', () => ({ watchTodoCount: vi.fn() }));
 
 const run = (overrides: Partial<Run>): Run =>
   ({ trigger: 'schedule', status: 'succeeded', startedAt: new Date(), ...overrides }) as Run;
@@ -31,9 +34,14 @@ function setup(
     cents?: number;
     target?: number;
     counts?: Promise<SummaryCountResults> | SummaryCountResults;
+    todo?: TodoCount;
   } = {},
 ) {
   vi.mocked(loadSummaryCounts).mockImplementation(async () => options.counts ?? COUNTS);
+  vi.mocked(watchTodoCount).mockImplementation((callback) => {
+    callback(options.todo ?? { status: 'ready', count: 3, capped: false });
+    return () => undefined;
+  });
   vi.mocked(watchLastRun).mockImplementation((callback) => {
     callback(options.run ?? { status: 'ready', data: run({}), invalid: 0 });
     return () => undefined;
@@ -62,6 +70,7 @@ beforeEach(() => {
   vi.mocked(loadSummaryCounts).mockReset();
   vi.mocked(watchLastRun).mockReset();
   vi.mocked(watchSpend).mockReset();
+  vi.mocked(watchTodoCount).mockReset();
 });
 
 describe('SummaryBar', () => {
@@ -93,9 +102,39 @@ describe('SummaryBar', () => {
     expect(bar.getByText('3 to go')).toBeDefined();
   });
 
-  it('has no Things to do item yet', async () => {
-    const bar = await setup();
-    expect(bar.queryByText(/things to do/i)).toBeNull();
+  describe('Things to do', () => {
+    it('shows the count and links to Pipeline', async () => {
+      const bar = await setup({ todo: { status: 'ready', count: 3, capped: false } });
+      const link = bar.getByRole('link', { name: 'Things to do 3' });
+      expect(link.getAttribute('href')).toBe('/pipeline');
+      expect(link.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    });
+
+    it('says nothing is waiting at 0', async () => {
+      const bar = await setup({ todo: { status: 'ready', count: 0, capped: false } });
+      const link = bar.getByRole('link', { name: 'Things to do 0' });
+      expect(link.textContent).toContain('Nothing waiting');
+    });
+
+    it('shows "n+" for a count read at its limit', async () => {
+      const bar = await setup({ todo: { status: 'ready', count: 50, capped: true } });
+      expect(bar.getByRole('link', { name: 'Things to do 50+' })).toBeDefined();
+    });
+
+    it('has its own skeleton while loading, and the other items are unaffected', async () => {
+      const bar = await setup({ todo: { status: 'loading' } });
+      expect(bar.getByRole('link', { name: 'Things to do, loading' })).toBeDefined();
+      expect(bar.getByRole('link', { name: 'Open Apply 3' })).toBeDefined();
+    });
+
+    it('fails alone: a dash and "unavailable", the rest of the bar intact', async () => {
+      const bar = await setup({ todo: { status: 'error' } });
+      const link = bar.getByRole('link', { name: 'Things to do unavailable' });
+      expect(link.textContent).toContain('–');
+      expect(link.textContent).toContain('unavailable');
+      expect(bar.getByRole('link', { name: 'Open Apply 3' })).toBeDefined();
+      expect(bar.getByText('Last run').closest('li')?.textContent).toContain('Succeeded');
+    });
   });
 
   it('shows the last run with its status in words, and the next run', async () => {
@@ -176,7 +215,7 @@ describe('SummaryBar', () => {
     const bar = await setup();
     await bar.findByRole('link', { name: 'Open Apply 3' });
     const list = bar.getByRole('list');
-    expect(bar.getAllByRole('listitem')).toHaveLength(7);
+    expect(bar.getAllByRole('listitem')).toHaveLength(8);
     for (const item of bar.getAllByRole('listitem')) expect(item.parentElement).toBe(list);
   });
 

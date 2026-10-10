@@ -4,10 +4,14 @@ import {
   RunSchema,
   SourceHealthSchema,
   UsageSchema,
+  digestAppliedWeekSpec,
   digestJobsSpec,
   digestRunsSpec,
   digestSourcesSpec,
+  digestStageSpec,
   digestWaitingSpec,
+  CRITERIA_SEED_V1,
+  londonWeekStart,
   monthKey,
   type DigestVerdict,
   type QuerySpec,
@@ -15,10 +19,11 @@ import {
 import type { Firestore, Query } from 'firebase-admin/firestore';
 import { z } from 'zod';
 
+import { getCurrentCriteria } from '../criteria.js';
 import { DIGEST } from '../config.js';
 import { log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
-import type { DigestJobList, DigestSourceLine } from './render.js';
+import type { DigestJobList, DigestPipeline, DigestSourceLine } from './render.js';
 import type { DigestRun } from './state.js';
 
 /**
@@ -38,6 +43,12 @@ export interface DigestStore {
   usage(now: Date): Promise<{ spendPence: number; capPence: number } | null>;
   sources(): Promise<DigestSourceLine[]>;
   waitingForDescription(): Promise<number>;
+  /**
+   * The Pipeline line's numbers (M7 7D.4): applications waiting on the owner, generating or
+   * ready, and jobs applied this London week against the weekly target. Counts are read with a
+   * limit. Throws when a read fails; the caller leaves the line out.
+   */
+  pipeline(now: Date): Promise<DigestPipeline>;
 }
 
 const JOB_FIELDS = ['title', 'company', 'fitScore', 'luckScore', 'reason', 'shortfall'] as const;
@@ -179,6 +190,31 @@ export function firestoreDigestStore(db: Firestore): DigestStore {
     async waitingForDescription() {
       const count = await toQuery(db, digestWaitingSpec).count().get();
       return count.data().count;
+    },
+
+    async pipeline(now) {
+      const limit = DIGEST.pipelineCountLimit;
+      const stageCount = async (stage: 'needs_input' | 'generating' | 'ready') =>
+        (await toQuery(db, digestStageSpec(stage)).limit(limit).count().get()).data().count;
+      const [needsInput, generating, ready, appliedThisWeek, criteria] = await Promise.all([
+        stageCount('needs_input'),
+        stageCount('generating'),
+        stageCount('ready'),
+        toQuery(db, digestAppliedWeekSpec(londonWeekStart(now)))
+          .limit(limit)
+          .count()
+          .get()
+          .then((snapshot) => snapshot.data().count),
+        getCurrentCriteria(db),
+      ]);
+      return {
+        needsInput,
+        generating,
+        ready,
+        appliedThisWeek,
+        // Like the web app: no criteria yet means the seed's target.
+        weeklyTarget: (criteria ?? CRITERIA_SEED_V1).weekly_target,
+      };
     },
   };
 }

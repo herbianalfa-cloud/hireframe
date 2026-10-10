@@ -1,4 +1,5 @@
 import { AddFactForm } from './AddFactForm';
+import { CvHeaderCard } from './CvHeaderCard';
 import { DangerZone } from './DangerZone';
 import { FactList } from './FactList';
 import { useDocuments, useFacts } from './hooks';
@@ -32,6 +33,7 @@ export function ProfilePage() {
         {facts.status === 'ready' ? <ReviewSection facts={facts.data} /> : null}
         <AddFactForm />
         <WorkRightsCard />
+        <CvHeaderCard />
         <FactList state={facts} />
         <DangerZone />
       </div>

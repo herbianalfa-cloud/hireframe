@@ -6,7 +6,13 @@ import {
 } from '@hireframe/shared';
 
 import { DIGEST } from '../config.js';
-import { renderDigest, type DigestJobList, type DigestRunSummary } from './render.js';
+import { errorFields, log } from '../log.js';
+import {
+  renderDigest,
+  type DigestJobList,
+  type DigestPipeline,
+  type DigestRunSummary,
+} from './render.js';
 import { chooseDigest, pickPreviousMorningRun } from './state.js';
 import type { DigestStore, StoredDigestRun } from './store.js';
 
@@ -31,6 +37,19 @@ function summarise(run: StoredDigestRun): DigestRunSummary {
   };
 }
 
+/**
+ * The Pipeline line's numbers, or undefined when they can't be read: the digest then goes out
+ * without the line rather than not at all. Only an error class and code are logged.
+ */
+async function readPipeline(store: DigestStore, now: Date): Promise<DigestPipeline | undefined> {
+  try {
+    return await store.pipeline(now);
+  } catch (error) {
+    log.warn('digest.pipeline_failed', errorFields(error));
+    return undefined;
+  }
+}
+
 export async function buildDigest(
   store: DigestStore,
   request: DigestRequest,
@@ -52,14 +71,16 @@ export async function buildDigest(
   const list = (verdict: DigestVerdict) =>
     choice.state === 'ready' ? store.jobsSince(verdict, since) : Promise.resolve(NONE);
 
-  const [apply, nearMiss, wildcard, sources, waitingForDescription, spend] = await Promise.all([
-    list('apply'),
-    list('near_miss'),
-    list('wildcard'),
-    wantsDetail ? store.sources() : Promise.resolve([]),
-    wantsDetail ? store.waitingForDescription() : Promise.resolve(0),
-    store.usage(now),
-  ]);
+  const [apply, nearMiss, wildcard, sources, waitingForDescription, spend, pipeline] =
+    await Promise.all([
+      list('apply'),
+      list('near_miss'),
+      list('wildcard'),
+      wantsDetail ? store.sources() : Promise.resolve([]),
+      wantsDetail ? store.waitingForDescription() : Promise.resolve(0),
+      store.usage(now),
+      readPipeline(store, now),
+    ]);
 
   const rendered = renderDigest({
     state: choice.state,
@@ -72,6 +93,7 @@ export async function buildDigest(
     sources,
     waitingForDescription,
     spend,
+    ...(pipeline ? { pipeline } : {}),
   });
   return DigestResponseSchema.parse({ state: choice.state, ...rendered });
 }

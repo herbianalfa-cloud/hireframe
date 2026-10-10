@@ -1,6 +1,7 @@
 import {
   AddFactResultSchema,
   clientTimeoutMs,
+  CvHeaderSchema,
   CV_MIME_TYPES,
   DOCS,
   FactSchema,
@@ -14,6 +15,7 @@ import {
   ProfileSettingsSchema,
   STORAGE_PATHS,
   type AddFactResult,
+  type CvHeader,
   type CvKind,
   type Fact,
   type FactVersion,
@@ -40,10 +42,12 @@ import { ref, uploadBytes } from 'firebase/storage';
 
 import {
   buildAcceptReview,
+  buildCvHeaderWrite,
   buildFactWrite,
   buildKeepReview,
   buildUploadRemoval,
   buildWorkRightsWrite,
+  type CvHeaderValues,
   type FactPatch,
   type FactWrite,
 } from './fact-writes';
@@ -435,6 +439,74 @@ export async function saveWorkRights(setting: WorkRightsSetting, exists: boolean
     {
       label: 'profile.work_rights_write',
       // The same write twice is harmless, but keep to clear rejections like other writes.
+      isRetryable: (error) => errorCode(error) === 'unavailable',
+    },
+  );
+}
+
+/**
+ * The owner's CV header (`profile/cvHeader`). `null` data means no document yet. A document that
+ * fails `CvHeaderSchema` is still returned with `header: null`, so the form can offer it for
+ * repair; `raw` keeps the stored `createdAt` that an update must carry unchanged.
+ */
+export interface CvHeaderView {
+  header: CvHeader | null;
+  raw: DocumentData;
+}
+
+export function watchCvHeader(
+  callback: (state: LiveState<CvHeaderView | null>) => void,
+): Unsubscribe {
+  callback({ status: 'loading' });
+  return listen(
+    async () => {
+      const { db } = await getFirebase();
+      return onSnapshot(
+        doc(db, DOCS.cvHeader),
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            callback({ status: 'ready', data: null, invalid: 0 });
+            return;
+          }
+          // A pending local write has null server timestamps until the server answers.
+          const raw = snapshot.data({ serverTimestamps: 'estimate' });
+          const parsed = CvHeaderSchema.safeParse(timestampsToDates(raw));
+          if (!parsed.success) logError('profile.cv_header_invalid', { count: 1 });
+          callback({
+            status: 'ready',
+            data: { header: parsed.success ? parsed.data : null, raw },
+            invalid: parsed.success ? 0 : 1,
+          });
+        },
+        (error) => {
+          logError('profile.cv_header_failed', { code: error.code });
+          callback({
+            status: 'error',
+            message: "Couldn't load your CV header. Reload to try again.",
+          });
+        },
+      );
+    },
+    (message) => {
+      callback({ status: 'error', message });
+    },
+  );
+}
+
+/**
+ * Saves the header. `stored` is the view the form started from (null when none exists). The
+ * values are checked against `CvHeaderSchema` first; an invalid one throws before any write.
+ */
+export async function saveCvHeader(
+  values: CvHeaderValues,
+  stored: CvHeaderView | null,
+): Promise<void> {
+  const { db } = await getFirebase();
+  const data = buildCvHeaderWrite(values, stored?.raw.createdAt, serverTimestamp());
+  await withRetry(
+    () => withTimeout(setDoc(doc(db, DOCS.cvHeader), data), WRITE_TIMEOUT_MS, 'cv header'),
+    {
+      label: 'profile.cv_header_write',
       isRetryable: (error) => errorCode(error) === 'unavailable',
     },
   );

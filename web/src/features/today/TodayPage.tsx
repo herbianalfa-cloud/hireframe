@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
 import { Skeleton } from '@/components/ui/skeleton';
-import { markOnce } from '@/lib/perf';
+import { markOnce, signalUsable } from '@/lib/perf';
 import { useCurrentCriteria } from '@/features/criteria/hooks';
 import { JobDetail } from '@/features/jobs/JobDetail';
 import { JobList } from '@/features/jobs/JobList';
@@ -182,6 +182,8 @@ export function TodayPage() {
       // Measuring is a convenience; Today works without it.
     }
     setUsable(true);
+    // The pipeline badge in the shell starts its read only after this.
+    signalUsable();
   }, [applyReady]);
 
   const changed = useCallback(() => {

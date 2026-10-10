@@ -5,7 +5,7 @@
  * Callables run in the Functions emulator with a fake LLM unless LIVE=1 (ADR-017).
  * Stopping Vite (Ctrl+C) stops the emulators too.
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 
 import {
   alertWaitingJobDocuments,
@@ -22,6 +22,11 @@ import {
   restDocument,
   usageSeedDocument,
   morningRunSeedDocument,
+  seedWorkerEnv,
+  withEmulatorDefaults,
+  cvHeaderSeed,
+  readyApplicationSeed,
+  applicationSeeds,
 } from './dev-seed.ts';
 
 const projectId = assertDemoProject(process.env.GCLOUD_PROJECT);
@@ -100,10 +105,29 @@ await emulatorRequest('PATCH', `${documents}/usage/${usage.month}`, usage.docume
 const morningRun = morningRunSeedDocument(now);
 await emulatorRequest('PATCH', `${documents}/runs/${morningRun.id}`, morningRun.document);
 
+// M7: the CV header, then one application per pipeline stage. The Ready one is written by the
+// real worker (fake model, real renderer, Storage emulator), so its files and `cvs` doc are real.
+await emulatorRequest('PATCH', `${documents}/profile/cvHeader`, restDocument(cvHeaderSeed(now)));
+const readyApplication = readyApplicationSeed(now);
+await emulatorRequest(
+  'PATCH',
+  `${documents}/applications/${readyApplication.jobId}`,
+  restDocument(readyApplication.data),
+);
+// Always the fake model, even under LIVE=1: seeding makes no live call (seedWorkerEnv).
+execFileSync('node', ['scripts/dev-worker.ts'], {
+  stdio: 'inherit',
+  env: withEmulatorDefaults(seedWorkerEnv(process.env)),
+});
+for (const { jobId, data } of applicationSeeds(now)) {
+  await emulatorRequest('PATCH', `${documents}/applications/${jobId}`, restDocument(data));
+}
+
 console.log(
   `dev: seeded owner "${DEV_OWNER.displayName}" (${DEV_OWNER.email}), criteria v1, the fake ` +
     `CV's ${String(profile.facts.length)} facts with work rights, one fake LinkedIn-alert job and one ` +
-    'alert job waiting for a description. `node scripts/sign-test-alert.ts` posts a fake alert email. ' +
+    'alert job waiting for a description, a CV header, and one application per pipeline stage ' +
+    '(`node scripts/dev-worker.ts` writes the Generating one). `node scripts/sign-test-alert.ts` posts a fake alert email. ' +
     'In the sign-in pop-up pick that account; "Add new account" gives a non-owner. ' +
     `CV and note parsing use ${process.env.LIVE === '1' ? 'the real Anthropic API (LIVE=1)' : 'a fake model'}; ` +
     'run `node scripts/make-cv-fixtures.ts` for fake CVs to upload. ' +

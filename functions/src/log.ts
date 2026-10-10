@@ -22,6 +22,12 @@ export type LogEvent =
   | 'parse_cv.failed'
   | 'parse_cv.duplicate'
   | 'add_fact.done'
+  | 'application.answered'
+  | 'application.withdrawn'
+  | 'cv_worker.started'
+  | 'cv_worker.job'
+  | 'cv_worker.done'
+  | 'cv_worker.failed'
   | 'profile.fact_invalid'
   | 'profile.reset'
   | 'http.retry'
@@ -70,7 +76,8 @@ export type LogEvent =
   | 'lookup.pauses_not_saved'
   | 'digest.refused'
   | 'digest.done'
-  | 'digest.failed';
+  | 'digest.failed'
+  | 'digest.pipeline_failed';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';
