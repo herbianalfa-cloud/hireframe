@@ -1,4 +1,6 @@
 import {
+  ApplicationSchema,
+  CvHeaderSchema,
   dedupeKey,
   JobDescriptionSchema,
   JobSchema,
@@ -15,6 +17,13 @@ import { isCiDeploy } from './assert-ci.ts';
 import {
   alertWaitingJobDocuments,
   appConfigDocument,
+  applicationSeeds,
+  cvHeaderSeed,
+  DEV_APPLIED_JOB_ID,
+  DEV_GENERATING_JOB_ID,
+  DEV_NEEDS_INPUT_JOB_ID,
+  DEV_READY_JOB_ID,
+  readyApplicationSeed,
   assertDemoProject,
   criteriaSeedDocuments,
   devJobDocuments,
@@ -311,5 +320,42 @@ describe('seed → Firestore REST conversion', () => {
     expect(() => criteriaSeedDocuments(now)).not.toThrow();
     expect(() => profileSeedDocuments(now)).not.toThrow();
     expect(() => linkedInJobDocuments(now)).not.toThrow();
+  });
+});
+
+describe('application pipeline seed (M7 7D.2)', () => {
+  const now = new Date('2026-10-14T08:00:00Z');
+  const jobs = new Map(devJobDocuments(now).map((item) => [item.id, JobSchema.parse(item.job)]));
+
+  it('seeds a CV header the schema accepts', () => {
+    expect(CvHeaderSchema.safeParse(cvHeaderSeed(now)).success).toBe(true);
+  });
+
+  it('seeds one application per stage, each valid and on an existing job', () => {
+    const seeded = [readyApplicationSeed(now), ...applicationSeeds(now)];
+    expect(seeded.map((item) => ApplicationSchema.parse(item.data).stage).sort()).toEqual([
+      'applied',
+      'generating',
+      'generating',
+      'needs_input',
+    ]);
+    for (const { jobId, data } of seeded) {
+      const job = jobs.get(jobId);
+      expect(job, jobId).toBeDefined();
+      expect(data.job).toMatchObject({ title: job?.title, company: job?.company });
+    }
+  });
+
+  it('seeds Needs your input with two open questions and Applied on an applied job', () => {
+    const seeds = new Map(applicationSeeds(now).map((item) => [item.jobId, item.data]));
+    const needs = ApplicationSchema.parse(seeds.get(DEV_NEEDS_INPUT_JOB_ID));
+    expect(needs.questions).toHaveLength(2);
+    expect(needs.questions.every((q) => q.answer === undefined)).toBe(true);
+    expect(ApplicationSchema.parse(seeds.get(DEV_GENERATING_JOB_ID)).stage).toBe('generating');
+    expect(ApplicationSchema.parse(seeds.get(DEV_APPLIED_JOB_ID)).stage).toBe('applied');
+    expect(jobs.get(DEV_APPLIED_JOB_ID)?.status).toBe('applied');
+    // The ready one starts at generating: the worker pass writes its CV.
+    expect(readyApplicationSeed(now).jobId).toBe(DEV_READY_JOB_ID);
+    expect(jobs.get(DEV_READY_JOB_ID)?.deep).toBeDefined();
   });
 });

@@ -1,5 +1,6 @@
 import { FAKE_CV_EXTRACTION } from '../functions/src/fixtures/fake-cv-response.ts';
 import { CRITERIA_SEED_V1 } from '../packages/shared/src/criteria-seed.ts';
+import { questionId } from '../packages/shared/src/applications.ts';
 import { monthKey } from '../packages/shared/src/usage.ts';
 
 /**
@@ -704,4 +705,101 @@ export function morningRunSeedDocument(now: Date) {
 /** The REST body for a plain document. */
 export function restDocument(data: Record<string, unknown>) {
   return { fields: toRestFields(data) };
+}
+
+// ---- Application pipeline seed (M7 7D.2) ----
+
+/** `profile/cvHeader` for the fake owner: example address only, no phone or links. */
+export function cvHeaderSeed(now: Date) {
+  return {
+    name: 'Alex Example',
+    email: 'alex@example.com',
+    location: 'London, UK',
+    createdAt: now,
+    updatedAt: now,
+    schemaVersion: 1,
+  };
+}
+
+/** The job the worker writes a real CV for at seed time, so a Ready row has its four files. */
+export const DEV_READY_JOB_ID = 'dev-job-wildcard';
+/** The applications seeded as plain documents (the ready one comes from the worker). */
+export const DEV_NEEDS_INPUT_JOB_ID = 'dev-job-apply-2';
+export const DEV_GENERATING_JOB_ID = 'dev-job-apply-3';
+export const DEV_APPLIED_JOB_ID = 'dev-job-applied';
+
+function applicationBase(now: Date, jobId: string, hours: number) {
+  const spec = devJobSeeds(now).find((job) => job.id === jobId);
+  if (!spec) throw new Error(`No seed job ${jobId}`);
+  const verdict = spec.fields.verdict as string;
+  const at = hoursAgo(now, hours);
+  return {
+    jobId,
+    job: { title: spec.title, company: spec.company, verdict },
+    startedAt: at,
+    updatedAt: at,
+    attempt: 0,
+    cvIds: [] as string[],
+    schemaVersion: 1,
+  };
+}
+
+/** The application the worker pass turns into `ready` (it starts at `generating`). */
+export function readyApplicationSeed(now: Date) {
+  return {
+    jobId: DEV_READY_JOB_ID,
+    data: {
+      ...applicationBase(now, DEV_READY_JOB_ID, 2),
+      stage: 'generating',
+      stageAt: hoursAgo(now, 2),
+      questions: [],
+    },
+  };
+}
+
+/**
+ * The other three: Needs your input (two questions, each answerable or skippable), Generating
+ * (waits for `node scripts/dev-worker.ts`) and Applied (its job is already `applied`).
+ */
+export function applicationSeeds(now: Date) {
+  const question = (text: string, level: string, type: string, match: string) => ({
+    id: questionId(text),
+    requirement: text,
+    level,
+    type,
+    match,
+  });
+  return [
+    {
+      jobId: DEV_NEEDS_INPUT_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_NEEDS_INPUT_JOB_ID, 4),
+        stage: 'needs_input',
+        stageAt: hoursAgo(now, 4),
+        questions: [
+          question('Experience with dbt', 'nice', 'tool', 'missing'),
+          question('Presenting analysis to non-technical stakeholders', 'must', 'skill', 'partial'),
+        ],
+      },
+    },
+    {
+      jobId: DEV_GENERATING_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_GENERATING_JOB_ID, 1),
+        stage: 'generating',
+        stageAt: hoursAgo(now, 1),
+        questions: [],
+      },
+    },
+    {
+      jobId: DEV_APPLIED_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_APPLIED_JOB_ID, 26),
+        stage: 'applied',
+        stageBefore: 'ready',
+        stageAt: hoursAgo(now, 20),
+        questions: [],
+      },
+    },
+  ];
 }
