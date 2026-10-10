@@ -17,6 +17,7 @@ import {
 import { dashboardQuerySpecs, lastRunSpec, summarySpecs } from './dashboard';
 import { diagnosticsQuerySpecs } from './funnel-diagnostics';
 import { addedByYouSpec, jobFilterSpec } from './jobs';
+import { PIPELINE_STAGES, stageSpec } from './applications';
 import { lookupKeysSpec, lookupUrlSpec, needsDescriptionSpec } from './lookup';
 import { needsDescriptionCountSpec } from './system';
 import { indexServes, type CompositeIndex, type QuerySpec } from './query-spec';
@@ -103,6 +104,22 @@ describe('firestore.indexes.json', () => {
     });
     expect(indexServes(generatingApplicationsSpec, indexes)).toBe(true);
     expect(indexServes(generatingApplicationsSpec, [])).toBe(true);
+  });
+
+  it('serves each Pipeline stage list from the (stage, stageAt desc) composite', () => {
+    for (const stage of PIPELINE_STAGES) {
+      expect(indexServes(stageSpec(stage), indexes), stage).toBe(true);
+      // Equality plus a descending order needs the composite: it is not served by single fields.
+      expect(indexServes(stageSpec(stage), []), stage).toBe(false);
+    }
+    expect(indexes).toContainEqual({
+      collectionGroup: 'applications',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'stage', order: 'ASCENDING' },
+        { fieldPath: 'stageAt', order: 'DESCENDING' },
+      ],
+    });
   });
 
   it('serves every funnel diagnostics query', () => {
