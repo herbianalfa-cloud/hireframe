@@ -69,6 +69,7 @@ describe('deployed functions (ADR-017)', () => {
     ['scheduledScan', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['lookup', ['ANTHROPIC_API_KEY']],
+    ['application', ['ANTHROPIC_API_KEY']],
     ['ingestEmailJobs', ['ANTHROPIC_API_KEY', 'INGEST_HMAC_SECRET']],
     ['getDigest', ['INGEST_HMAC_SECRET']],
   ])('%s mounts %j', (name, secrets) => {
@@ -121,6 +122,31 @@ describe('getDigest (ADR-052)', () => {
   it('mounts the HMAC secret and nothing else, in particular no model key', () => {
     const mounted = (endpoint?.secretEnvironmentVariables ?? []).map((secret) => secret.key);
     expect(mounted).toEqual(['INGEST_HMAC_SECRET']);
+  });
+
+  it('is not scheduled and has no event trigger (no self-triggering code)', () => {
+    expect(endpoint).not.toHaveProperty('scheduleTrigger');
+    expect(endpoint).not.toHaveProperty('eventTrigger');
+  });
+});
+
+describe('application (M7, ADR-055)', () => {
+  const endpoint = endpoints.find(([name]) => name === 'application')?.[1];
+
+  it('is a callable with the shared 120 s timeout', () => {
+    expect(endpoint?.callableTrigger).toBeDefined();
+    expect(endpoint?.timeoutSeconds).toBe(CALLABLE_TIMEOUT_SECONDS.application);
+    expect(endpoint?.timeoutSeconds).toBe(120);
+  });
+
+  it('states one instance', () => {
+    expect(endpoint?.maxInstances).toBe(1);
+  });
+
+  it('enforces and consumes App Check, in the options the source states', () => {
+    const source = readFileSync(new URL('./applications/callable.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/\.\.\.ownerOptions,/);
+    expect(source).toMatch(/^\s*maxInstances: 1,$/m);
   });
 
   it('is not scheduled and has no event trigger (no self-triggering code)', () => {

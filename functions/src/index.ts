@@ -8,3 +8,4 @@ export { lookup } from './lookup/callable.js';
 export { scanNow, scheduledScan } from './scan/callables.js';
 export { ingestEmailJobs } from './ingest/endpoint.js';
 export { getDigest } from './digest/endpoint.js';
+export { application } from './applications/callable.js';

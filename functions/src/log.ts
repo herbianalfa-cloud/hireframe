@@ -22,6 +22,8 @@ export type LogEvent =
   | 'parse_cv.failed'
   | 'parse_cv.duplicate'
   | 'add_fact.done'
+  | 'application.answered'
+  | 'application.withdrawn'
   | 'profile.fact_invalid'
   | 'profile.reset'
   | 'http.retry'
