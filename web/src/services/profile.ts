@@ -468,7 +468,8 @@ export function watchCvHeader(
             callback({ status: 'ready', data: null, invalid: 0 });
             return;
           }
-          const raw = snapshot.data();
+          // A pending local write has null server timestamps until the server answers.
+          const raw = snapshot.data({ serverTimestamps: 'estimate' });
           const parsed = CvHeaderSchema.safeParse(timestampsToDates(raw));
           if (!parsed.success) logError('profile.cv_header_invalid', { count: 1 });
           callback({

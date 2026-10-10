@@ -70,14 +70,19 @@ describe('watchTodoCount', () => {
     stop();
   });
 
-  it('reports a failed read as an error without throwing, and recovers on the next snapshot', async () => {
+  it('reports a failed read as an error without throwing, and stays in it', async () => {
     const seen: TodoCount[] = [];
     const stop = watchTodoCount((value) => seen.push(value));
     await tick();
     state.onError?.({ code: 'permission-denied' });
     expect(seen.at(-1)).toEqual({ status: 'error' });
-    state.onNext?.({ size: 1 });
-    expect(seen.at(-1)).toEqual({ status: 'ready', count: 1, capped: false });
+    // A later subscriber is told the error at once, not "loading". There is no retry: a
+    // Firestore listener that errored is over (parked in ROADMAP).
+    const later: TodoCount[] = [];
+    const stopLater = watchTodoCount((value) => later.push(value));
+    expect(later).toEqual([{ status: 'error' }]);
+    expect(state.listens).toHaveBeenCalledTimes(1);
+    stopLater();
     stop();
   });
 

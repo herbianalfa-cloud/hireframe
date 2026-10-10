@@ -97,7 +97,9 @@ export function watchStage(
           const views: ApplicationView[] = [];
           let invalid = 0;
           for (const item of snapshot.docs) {
-            const parsed = ApplicationSchema.safeParse(timestampsToDates(item.data()));
+            const parsed = ApplicationSchema.safeParse(
+              timestampsToDates(item.data({ serverTimestamps: 'estimate' })),
+            );
             if (parsed.success) views.push({ id: item.id, application: parsed.data });
             else invalid++;
           }
@@ -132,7 +134,9 @@ export function watchApplication(
             callback({ status: 'ready', data: null, invalid: 0 });
             return;
           }
-          const parsed = ApplicationSchema.safeParse(timestampsToDates(snapshot.data()));
+          const parsed = ApplicationSchema.safeParse(
+            timestampsToDates(snapshot.data({ serverTimestamps: 'estimate' })),
+          );
           if (parsed.success) {
             callback({ status: 'ready', data: parsed.data, invalid: 0 });
           } else {
