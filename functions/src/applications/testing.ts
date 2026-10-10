@@ -53,10 +53,13 @@ export function memoryApplicationStore(): MemoryApplicationStore {
     hasCvHeader: () => Promise.resolve(store.header.exists),
     getCvHeader: () =>
       Promise.resolve(store.header.exists ? (store.header.value ?? TEST_HEADER) : null),
-    listGenerating: (limit) =>
+    // Like the query: at most `readLimit` documents are read (in no order), then the oldest
+    // `limit` of those are taken.
+    listGenerating: (limit, readLimit) =>
       Promise.resolve(
         [...store.applications.values()]
           .filter((application) => application.stage === 'generating')
+          .slice(0, Math.max(0, readLimit))
           .sort((a, b) => a.stageAt.getTime() - b.stageAt.getTime())
           .slice(0, limit),
       ),

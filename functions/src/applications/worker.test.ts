@@ -97,6 +97,8 @@ interface Harness {
   store: MemoryApplicationStore;
   files: Map<string, CvFileBytes>;
   removed: string[];
+  /** Storage failures to inject: `put` writes the files, then rejects (a failure part-way). */
+  faults: { put?: Error; remove?: Error };
   calls: LlmCallInput<unknown>[];
   /** What happened, in order: the attempt commit and the model call. */
   order: string[];
@@ -111,6 +113,7 @@ function harness(over: { renderer?: CvRenderer; factList?: ExistingFact[] } = {}
   const store = memoryApplicationStore();
   const files = new Map<string, CvFileBytes>();
   const removed: string[] = [];
+  const faults: Harness['faults'] = {};
   const calls: LlmCallInput<unknown>[] = [];
   const order: string[] = [];
   const clock = { now: START };
@@ -118,11 +121,12 @@ function harness(over: { renderer?: CvRenderer; factList?: ExistingFact[] } = {}
   const fileStore: CvFileStore = {
     put: (cvId, bytes) => {
       files.set(cvId, bytes);
-      return Promise.resolve();
+      return faults.put ? Promise.reject(faults.put) : Promise.resolve();
     },
     remove: (cvId) => {
-      files.delete(cvId);
       removed.push(cvId);
+      if (faults.remove) return Promise.reject(faults.remove);
+      files.delete(cvId);
       return Promise.resolve();
     },
   };
@@ -157,6 +161,7 @@ function harness(over: { renderer?: CvRenderer; factList?: ExistingFact[] } = {}
     store,
     files,
     removed,
+    faults,
     calls,
     order,
     clock,
@@ -164,6 +169,19 @@ function harness(over: { renderer?: CvRenderer; factList?: ExistingFact[] } = {}
     deps,
     run: () => runCvWorker(deps),
   };
+}
+
+/** Queues a model call that never answers; resolves once the worker has entered it. */
+function killedCall(h: Harness): Promise<void> {
+  let entered: () => void = () => undefined;
+  const seen = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  h.replies.push(() => {
+    entered();
+    return 'never';
+  });
+  return seen;
 }
 
 function add(h: Harness, jobId: string, over: Partial<Application> = {}) {
@@ -535,16 +553,16 @@ describe('runCvWorker: attempts', () => {
     add(h, 'job-1');
 
     // Run 1 is killed mid-call: the model never answers and the run is abandoned.
-    h.replies.push(() => 'never');
+    const firstEntered = killedCall(h);
     void h.run();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await firstEntered;
     expect(h.calls).toHaveLength(1);
     expect(get(h, 'job-1')).toMatchObject({ stage: 'generating', attempt: 1 });
 
     // Run 2 makes the second call and is killed too.
-    h.replies.push(() => 'never');
+    const secondEntered = killedCall(h);
     void h.run();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await secondEntered;
     expect(h.calls).toHaveLength(2);
     expect(get(h, 'job-1')).toMatchObject({ stage: 'generating', attempt: 2 });
 
@@ -558,14 +576,14 @@ describe('runCvWorker: attempts', () => {
     });
   });
 
-  it('a kill after a retry leaves one call, not two', async () => {
+  it('a kill after a retry makes two calls in total, and the next run none', async () => {
     const h = harness();
     add(h, 'job-1');
     h.replies.push((input) => withBadFigure(fakeCvWrite(input.system)));
     await h.run();
-    h.replies.push(() => 'never');
+    const entered = killedCall(h);
     void h.run();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await entered;
     await h.run();
     expect(h.calls).toHaveLength(2);
     expect(get(h, 'job-1').blocked?.code).toBe('attempts_exhausted');
@@ -600,6 +618,19 @@ describe('runCvWorker: the run', () => {
     expect(h.calls).toHaveLength(10);
     const done = h.store.events.map((e) => (e.type === 'application_stage' ? e.jobId : ''));
     expect(done[0]).toBe('job-11');
+  });
+
+  it('reads at most readLimit applications before taking the oldest', async () => {
+    const h = harness();
+    h.deps.limits.readLimit = 3;
+    for (let i = 0; i < 5; i += 1) {
+      // Inserted newest first: the last two inserted are the oldest and sit beyond the bound.
+      add(h, `job-${String(i)}`, { stageAt: new Date(START - (i + 1) * 60_000) });
+    }
+    const summary = await h.run();
+    expect(summary).toMatchObject({ read: 3, ready: 3 });
+    expect(get(h, 'job-3').stage).toBe('generating');
+    expect(get(h, 'job-4').stage).toBe('generating');
   });
 
   it('starts no call after the start deadline and leaves the rest untouched', async () => {
@@ -672,6 +703,86 @@ describe('runCvWorker: the run', () => {
     h.replies.push(() => new Error('upstream 529'));
     await h.run();
     expect(get(h, 'job-a')).toMatchObject({ stage: 'chosen', blocked: { code: 'error' } });
+  });
+
+  it('takes the files back when an upload fails part-way, and defers the job', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    h.faults.put = new Error('storage 503');
+    const summary = await h.run();
+    expect(summary).toMatchObject({ deferred: 1, stoppedBy: 'error' });
+    expect(h.removed).toEqual(['job-1-v1']);
+    expect(h.files.size).toBe(0);
+    expect(h.store.cvDocs.size).toBe(0);
+    expect(get(h, 'job-1')).toMatchObject({ stage: 'generating', attempt: 1 });
+  });
+
+  it('takes the files back when the model call succeeded and the next step rejects', async () => {
+    const h = harness();
+    add(h, 'job-1', { attempt: 1 });
+    h.faults.put = new Error('storage 503');
+    await h.run();
+    // The attempt was the last: blocked with error, and nothing is left in the bucket.
+    expect(get(h, 'job-1')).toMatchObject({ stage: 'chosen', blocked: { code: 'error' } });
+    expect(h.files.size).toBe(0);
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it('takes the files back when the ready commit throws', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    const commit = h.store.commit.bind(h.store);
+    h.store.commit = (change) =>
+      change.cvDoc ? Promise.reject(new Error('firestore 503')) : commit(change);
+    const summary = await h.run();
+    expect(summary).toMatchObject({ deferred: 1, stoppedBy: 'error' });
+    expect(h.removed).toEqual(['job-1-v1']);
+    expect(h.files.size).toBe(0);
+    expect(get(h, 'job-1')).toMatchObject({ stage: 'generating', attempt: 1 });
+  });
+
+  it('keeps the files when the ready commit landed and then threw', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    const commit = h.store.commit.bind(h.store);
+    h.store.commit = async (change) => {
+      const result = await commit(change);
+      if (change.cvDoc) throw new Error('deadline exceeded after the write');
+      return result;
+    };
+    await h.run();
+    expect(get(h, 'job-1')).toMatchObject({ stage: 'ready', cvIds: ['job-1-v1'] });
+    expect(h.removed).toEqual([]);
+    expect(h.files.has('job-1-v1')).toBe(true);
+  });
+
+  it('logs and goes on when the clean-up itself fails', async () => {
+    const h = harness();
+    add(h, 'job-1');
+    h.faults.put = new Error('storage 503: Customer Onboarding Intern');
+    h.faults.remove = new Error('storage 500: Northwind');
+    const summary = await h.run();
+    expect(summary).toMatchObject({ deferred: 1, stoppedBy: 'error' });
+    expect(h.removed).toEqual(['job-1-v1']);
+    expect(logs.some((entry) => entry.step === 'cleanup')).toBe(true);
+    const dump = JSON.stringify(logs);
+    expect(dump).not.toContain('Customer Onboarding');
+    expect(dump).not.toContain('Northwind');
+  });
+
+  it('treats a render error that is not a CvRenderError as a failure, not an output issue', async () => {
+    const renderer: CvRenderer = {
+      ...realRenderer,
+      fitOnePage: () => Promise.reject(new Error('pdf-lib exploded')),
+    };
+    const h = harness({ renderer });
+    add(h, 'job-1');
+    const summary = await h.run();
+    expect(summary).toMatchObject({ deferred: 1, stoppedBy: 'error' });
+    expect(get(h, 'job-1')).toMatchObject({ stage: 'generating', attempt: 1 });
+    expect(get(h, 'job-1').lastIssues).toBeUndefined();
+    expect(h.files.size).toBe(0);
+    expect(h.store.cvDocs.size).toBe(0);
   });
 
   it('takes the files back when the owner withdrew while the model wrote', async () => {
@@ -868,6 +979,45 @@ describe('runCvWorker: logs', () => {
       expect(dump).not.toContain(secret);
     }
     expect(logs.some((entry) => entry.event === 'cv_worker.done')).toBe(true);
+  });
+
+  it('hold no text on the ready, API error, storage error and clean-up paths', async () => {
+    const leak = 'Customer Onboarding Intern at Northwind';
+    const secrets = ['Customer Onboarding', 'Northwind', 'Example Cloud', TEST_HEADER.email];
+
+    const ready = harness();
+    add(ready, 'job-1');
+    await ready.run();
+    expect(get(ready, 'job-1').stage).toBe('ready');
+
+    const api = harness();
+    add(api, 'job-1');
+    api.replies.push(() => new Error(`upstream 529 ${leak}`));
+    await api.run();
+
+    const storage = harness();
+    add(storage, 'job-1');
+    storage.faults.put = new Error(`storage 503 ${leak}`);
+    await storage.run();
+
+    const cleanup = harness();
+    add(cleanup, 'job-1');
+    cleanup.faults.put = new Error(`storage 503 ${leak}`);
+    cleanup.faults.remove = new Error(`storage 500 ${leak}`);
+    await cleanup.run();
+
+    const commit = harness();
+    add(commit, 'job-1');
+    const real = commit.store.commit.bind(commit.store);
+    commit.store.commit = (change) =>
+      change.cvDoc ? Promise.reject(new Error(`firestore 503 ${leak}`)) : real(change);
+    await commit.run();
+
+    const events = logs.map((entry) => entry.event);
+    expect(events).toContain('cv_worker.job');
+    expect(events.filter((event) => event === 'cv_worker.failed').length).toBeGreaterThanOrEqual(4);
+    const dump = JSON.stringify(logs);
+    for (const secret of secrets) expect(dump).not.toContain(secret);
   });
 });
 

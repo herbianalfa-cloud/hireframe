@@ -32,7 +32,11 @@ import { llmCall } from '../../functions/src/llm/call.js';
 import { fakeTransport } from '../../functions/src/llm/fake-transport.js';
 import type { LlmTransport } from '../../functions/src/llm/transport.js';
 import { firestoreUsageStore } from '../../functions/src/llm/usage-store.js';
-import { bucketFileDeleter, firestoreProfileStore } from '../../functions/src/profile/store.js';
+import {
+  bucketFileDeleter,
+  bucketFileLister,
+  firestoreProfileStore,
+} from '../../functions/src/profile/store.js';
 import { timestampsToDates } from '../../functions/src/timestamps.js';
 
 const NOW = new Date('2026-10-12T08:00:00Z');
@@ -147,6 +151,7 @@ function applicationDeps() {
     facts: () => profile.listFacts(),
     llm: <T>(input: Parameters<typeof llmCall<T>>[1]) => llmCall(llm, input),
     deleteFiles: bucketFileDeleter(bucket()),
+    listFiles: bucketFileLister(bucket()),
     now: () => NOW,
   };
 }

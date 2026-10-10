@@ -52,6 +52,8 @@ export interface ApplicationDeps {
   llm: <T>(input: LlmCallInput<T>) => Promise<LlmCallResult<T>>;
   /** Deletes every object under a prefix; returns how many. */
   deleteFiles: (prefix: string) => Promise<number>;
+  /** The names of the objects under a prefix (a plain string prefix, not a folder). */
+  listFiles: (prefix: string) => Promise<string[]>;
   now: () => Date;
 }
 
@@ -200,11 +202,35 @@ async function regenerate(
   return resultOf(application);
 }
 
+/**
+ * The CV folders in Storage named exactly `{jobId}-v{digits}`. The listing is a string prefix,
+ * so `job-1-v` also matches `job-1-v10/` and another job's `job-1-v2-v1/`: only a folder whose
+ * whole name is the job's ID, `-v` and digits is returned. `jobId` is the stored document's.
+ */
+async function unrecordedVersions(deps: ApplicationDeps, jobId: string): Promise<string[]> {
+  const base = `cvs/${jobId}-v`;
+  const found = new Set<string>();
+  for (const name of await deps.listFiles(base)) {
+    if (!name.startsWith(base)) continue;
+    const rest = name.slice(base.length);
+    const slash = rest.indexOf('/');
+    if (slash <= 0) continue;
+    const digits = rest.slice(0, slash);
+    if (/^\d+$/.test(digits)) found.add(`${jobId}-v${digits}`);
+  }
+  return [...found];
+}
+
 /** Deletes a withdrawn application's files and `cvs` docs, then forgets them. */
 async function deleteCvs(deps: ApplicationDeps, jobId: string): Promise<Application> {
   const current = await required(deps, jobId);
   if (current.stage !== 'withdrawn') return current;
   for (const cvId of current.cvIds) await deps.deleteFiles(`cvs/${cvId}/`);
+  // Versions the document never recorded (a worker that died between the upload and the commit).
+  const recorded = new Set<string>(current.cvIds);
+  for (const cvId of await unrecordedVersions(deps, current.jobId)) {
+    if (!recorded.has(cvId)) await deps.deleteFiles(`cvs/${cvId}/`);
+  }
   await deps.store.deleteCvDocs(current.cvIds);
   const now = deps.now();
   const { application } = await commit(deps, {

@@ -1,9 +1,10 @@
 import { ApplicationSchema, type FactDraft } from '@hireframe/shared';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { llmCall, type LlmCallInput } from '../llm/call.js';
 import { fakeTransport } from '../llm/fake-transport.js';
 import { DailyCapExceededError, LlmOutputError } from '../llm/errors.js';
+import { setLogSink, type LogFields } from '../log.js';
 import { memoryUsage } from '../lookup/testing.js';
 import { applicationLlmDeps } from './llm.js';
 import { ApplicationRefusal, runApplication, type ApplicationDeps } from './run.js';
@@ -34,6 +35,8 @@ interface Harness {
   deps: ApplicationDeps;
   calls: LlmCallInput<unknown>[];
   deleted: string[];
+  /** Object names in the fake bucket; `deleteFiles` and `listFiles` use string-prefix matching. */
+  objects: Set<string>;
   facts: ReturnType<typeof existingFact>[];
   answers: { facts: FactDraft[] };
 }
@@ -51,6 +54,7 @@ function harness(): Harness {
   const calls: LlmCallInput<unknown>[] = [];
   const answers = { facts: [draft('Built weekly SQL reports for a sales team')] };
   const deleted: string[] = [];
+  const objects = new Set<string>();
   const facts: ReturnType<typeof existingFact>[] = [];
   const deps: ApplicationDeps = {
     store,
@@ -65,11 +69,14 @@ function harness(): Harness {
     },
     deleteFiles: (prefix) => {
       deleted.push(prefix);
-      return Promise.resolve(1);
+      const gone = [...objects].filter((name) => name.startsWith(prefix));
+      for (const name of gone) objects.delete(name);
+      return Promise.resolve(gone.length);
     },
+    listFiles: (prefix) => Promise.resolve([...objects].filter((name) => name.startsWith(prefix))),
     now: () => NOW,
   };
-  return { store, deps, calls, deleted, facts, answers };
+  return { store, deps, calls, deleted, objects, facts, answers };
 }
 
 const run = (h: Harness, input: Parameters<typeof runApplication>[1]) =>
@@ -307,6 +314,46 @@ describe('answer', () => {
     expect(result.factIds).toEqual(['old-1']);
   });
 
+  describe('logs', () => {
+    let logs: LogFields[] = [];
+    beforeEach(() => {
+      logs = [];
+      setLogSink((_level, event, fields) => logs.push({ event, ...fields }));
+    });
+    afterEach(() => {
+      setLogSink();
+    });
+
+    it('hold no answer text on the answered, dropped and refused paths', async () => {
+      const marker = 'Zebra-Quartz-77 pipeline';
+      const [first, second] = questionIds();
+      h.answers.facts = [
+        draft(`Ran the ${marker} for finance`),
+        { ...draft('Led a team of ten'), evidence: `Led ten analysts on the ${marker}` },
+      ];
+      await run(h, {
+        action: 'answer',
+        jobId: TEST_JOB_ID,
+        questionId: first ?? '',
+        text: `I ran the ${marker} for finance.`,
+      });
+      h.answers.facts = [{ ...draft(`Ran the ${marker}`), evidence: `ran the ${marker} twice` }];
+      await refusal(
+        run(h, {
+          action: 'answer',
+          jobId: TEST_JOB_ID,
+          questionId: second ?? '',
+          text: `Something about the ${marker}.`,
+        }),
+      );
+      const answered = logs.filter((entry) => entry.event === 'application.answered');
+      expect(answered).toHaveLength(2);
+      expect(answered[0]).toMatchObject({ added: 1, known: 0, dropped: 1 });
+      expect(answered[1]).toMatchObject({ added: 0, known: 0, dropped: 1 });
+      expect(JSON.stringify(logs)).not.toContain('Zebra');
+    });
+  });
+
   it('drops a fact whose evidence is not in the answer, and keeps the verified ones', async () => {
     h.answers.facts = [
       draft('Built weekly SQL reports for a sales team'),
@@ -540,6 +587,52 @@ describe('withdraw', () => {
     expect(h.deleted).toEqual([`cvs/${TEST_JOB_ID}-v1/`]);
     expect(h.store.applications.get(TEST_JOB_ID)?.cvIds).toEqual([]);
     expect(h.store.events).toHaveLength(eventsBefore);
+  });
+
+  it('deletes one version by its folder, so v1 never reaches v10', async () => {
+    await h.deps.deleteFiles(`cvs/${TEST_JOB_ID}-v1/`);
+    expect(h.deleted).toEqual([`cvs/${TEST_JOB_ID}-v1/`]);
+    h.objects.add(`cvs/${TEST_JOB_ID}-v1/cv.pdf`);
+    h.objects.add(`cvs/${TEST_JOB_ID}-v10/cv.pdf`);
+    await h.deps.deleteFiles(`cvs/${TEST_JOB_ID}-v1/`);
+    expect([...h.objects]).toEqual([`cvs/${TEST_JOB_ID}-v10/cv.pdf`]);
+  });
+
+  it('also deletes a version the document never recorded, and only this job’s', async () => {
+    seedApplication(h, { cvIds: [`${TEST_JOB_ID}-v1`], currentCvId: `${TEST_JOB_ID}-v1` });
+    for (const name of [
+      `cvs/${TEST_JOB_ID}-v1/cv.pdf`, // recorded
+      `cvs/${TEST_JOB_ID}-v2/cv.pdf`, // uploaded, never committed
+      `cvs/${TEST_JOB_ID}-v10/cover-note.docx`, // a second unrecorded one
+      `cvs/${TEST_JOB_ID}-v1-v1/cv.pdf`, // another job whose ID is this one plus -v1
+      `cvs/${TEST_JOB_ID}-vx/cv.pdf`, // not digits
+      `cvs/${TEST_JOB_ID}0-v1/cv.pdf`, // another job whose ID starts the same
+      `cvs/${TEST_JOB_ID}-v3`, // a file, not a folder
+    ]) {
+      h.objects.add(name);
+    }
+    await run(h, { action: 'withdraw', jobId: TEST_JOB_ID, deleteFiles: true });
+    expect([...h.objects].sort()).toEqual(
+      [
+        `cvs/${TEST_JOB_ID}-v1-v1/cv.pdf`,
+        `cvs/${TEST_JOB_ID}-vx/cv.pdf`,
+        `cvs/${TEST_JOB_ID}0-v1/cv.pdf`,
+        `cvs/${TEST_JOB_ID}-v3`,
+      ].sort(),
+    );
+    expect(h.deleted).toEqual([
+      `cvs/${TEST_JOB_ID}-v1/`,
+      `cvs/${TEST_JOB_ID}-v2/`,
+      `cvs/${TEST_JOB_ID}-v10/`,
+    ]);
+  });
+
+  it('keeps unrecorded versions when files are kept', async () => {
+    seedApplication(h, { cvIds: [] });
+    h.objects.add(`cvs/${TEST_JOB_ID}-v1/cv.pdf`);
+    await run(h, { action: 'withdraw', jobId: TEST_JOB_ID, deleteFiles: false });
+    expect(h.deleted).toEqual([]);
+    expect(h.objects.size).toBe(1);
   });
 
   it('writes nothing for a job with no application', async () => {

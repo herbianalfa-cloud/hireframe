@@ -319,6 +319,10 @@ async function generateOne(deps: CvWorkerDeps, application: Application): Promis
   const { toAlias, toId } = factAliases(shown.map((fact) => fact.id));
   const version = counted.cvIds.length + 1;
   const id = cvId(jobId, version);
+  // Which step the files are at: an upload that failed part-way, or a commit that threw, leaves
+  // files nothing records. `none` has written nothing; `unrecorded` is safe to delete outright;
+  // `committing` may have committed, so it is checked before anything is removed.
+  let files: 'none' | 'unrecorded' | 'committing' = 'none';
 
   try {
     const result = await deps.llm({
@@ -352,6 +356,7 @@ async function generateOne(deps: CvWorkerDeps, application: Application): Promis
     if (!rendered.ok) return await invalid(deps, counted, [rendered.code]);
     const { fit } = rendered;
     // Files first: a lost transaction leaves files the next attempt overwrites.
+    files = 'unrecorded';
     await deps.files.put(id, rendered.bytes);
 
     const doc = CvDocSchema.parse({
@@ -368,6 +373,7 @@ async function generateOne(deps: CvWorkerDeps, application: Application): Promis
       createdAt: deps.now(),
       schemaVersion: 1,
     });
+    files = 'committing';
     const written = await store.commit({
       jobId,
       expect: { stage: 'generating', attempt: counted.attempt },
@@ -377,9 +383,7 @@ async function generateOne(deps: CvWorkerDeps, application: Application): Promis
     });
     if (!written.ok) {
       // The owner withdrew (or restarted) while the model wrote: take the files back.
-      await deps.files.remove(id).catch((error: unknown) => {
-        log.warn('cv_worker.failed', { step: 'cleanup', ...errorFields(error) });
-      });
+      await removeFiles(deps, id);
       log.info('cv_worker.job', { outcome: 'lost', attempt: counted.attempt });
       return 'lost';
     }
@@ -392,6 +396,33 @@ async function generateOne(deps: CvWorkerDeps, application: Application): Promis
     return 'ready';
   } catch (error) {
     if (error instanceof StopRun) throw error;
+    if (files === 'unrecorded') await removeFiles(deps, id);
+    if (files === 'committing') await removeIfUnrecorded(deps, jobId, id);
     return fail(deps, counted, error);
   }
+}
+
+/** Best-effort delete of a CV's files; a failure is logged with codes only, never CV text. */
+async function removeFiles(deps: CvWorkerDeps, id: string): Promise<void> {
+  try {
+    await deps.files.remove(id);
+  } catch (error) {
+    log.warn('cv_worker.failed', { step: 'cleanup', ...errorFields(error) });
+  }
+}
+
+/**
+ * After a ready commit that threw: the write may have landed before the error did, and files the
+ * document points at must stay. Remove them only when the application doesn't list this version;
+ * if that can't be read, leave them (an orphan is overwritten by the next attempt).
+ */
+async function removeIfUnrecorded(deps: CvWorkerDeps, jobId: string, id: string): Promise<void> {
+  try {
+    const current = await deps.store.getApplication(jobId);
+    if (current?.cvIds.includes(id)) return;
+  } catch (error) {
+    log.warn('cv_worker.failed', { step: 'cleanup_check', ...errorFields(error) });
+    return;
+  }
+  await removeFiles(deps, id);
 }

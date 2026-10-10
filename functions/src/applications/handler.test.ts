@@ -13,6 +13,7 @@ function deps(): ApplicationDeps {
     facts: () => Promise.resolve([]),
     llm: () => Promise.reject(new DailyCapExceededError()),
     deleteFiles: () => Promise.resolve(0),
+    listFiles: () => Promise.resolve([]),
     now: () => new Date('2026-10-05T08:00:00Z'),
   };
 }

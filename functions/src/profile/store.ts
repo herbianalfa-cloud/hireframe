@@ -279,3 +279,11 @@ export function bucketFileDeleter(bucket: ReturnType<Storage['bucket']>) {
     return files.length;
   };
 }
+
+/** The names of the objects under a string prefix (withdraw's sweep for unrecorded CV versions). */
+export function bucketFileLister(bucket: ReturnType<Storage['bucket']>) {
+  return async (prefix: string): Promise<string[]> => {
+    const [files] = await bucket.getFiles({ prefix });
+    return files.map((file) => file.name);
+  };
+}

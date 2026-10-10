@@ -18,7 +18,7 @@ import { safeHandler } from '../errors.js';
 import { llmCall, type LlmCallInput } from '../llm/call.js';
 import { anthropicTransport } from '../llm/transport.js';
 import { firestoreUsageStore } from '../llm/usage-store.js';
-import { bucketFileDeleter, firestoreProfileStore } from '../profile/store.js';
+import { bucketFileDeleter, bucketFileLister, firestoreProfileStore } from '../profile/store.js';
 import { applicationHandler } from './handler.js';
 import { applicationLlmDeps } from './llm.js';
 import { firestoreApplicationStore } from './store.js';
@@ -62,6 +62,7 @@ export const application = onCall(
         facts: () => profile.listFacts(),
         llm: <T>(input: LlmCallInput<T>) => llmCall(deps, input),
         deleteFiles: bucketFileDeleter(bucket()),
+        listFiles: bucketFileLister(bucket()),
         now: () => new Date(),
       };
     });
