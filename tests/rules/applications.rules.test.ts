@@ -158,7 +158,7 @@ describe('the Applied mirror on applications/{jobId}', () => {
     expect(await readApplication()).toMatchObject({ stage: 'applied', stageBefore: 'ready' });
   });
 
-  it.each(['chosen', 'needs_input', 'generating', 'ready'] as const)(
+  it.each(['chosen', 'needs_input', 'ready'] as const)(
     'allows applied from %s',
     async (stage) => {
       await seed(seededJob(), seededApplication({ stage }));
@@ -169,17 +169,41 @@ describe('the Applied mirror on applications/{jobId}', () => {
   );
 
   it('lets the owner undo, back to exactly the stage it came from', async () => {
-    await seed(APPLIED_JOB, seededApplication({ stage: 'applied', stageBefore: 'generating' }));
+    await seed(APPLIED_JOB, seededApplication({ stage: 'applied', stageBefore: 'needs_input' }));
     await assertSucceeds(
+      undoApplied(dbFor('owner'), {
+        stage: 'needs_input',
+        stageBefore: deleteField(),
+        updatedAt: NOW,
+      }),
+    );
+    const application = await readApplication();
+    expect(application?.stage).toBe('needs_input');
+    expect('stageBefore' in (application ?? {})).toBe(false);
+  });
+
+  it('refuses Mark applied while the stage is generating', async () => {
+    await seed(seededJob(), seededApplication({ stage: 'generating' }));
+    await assertFails(
+      markApplied(dbFor('owner'), {
+        stage: 'applied',
+        stageBefore: 'generating',
+        updatedAt: NOW,
+      }),
+    );
+    expect((await readApplication())?.stage).toBe('generating');
+  });
+
+  it('refuses Undo back into generating, so a client never writes that stage', async () => {
+    await seed(APPLIED_JOB, seededApplication({ stage: 'applied', stageBefore: 'generating' }));
+    await assertFails(
       undoApplied(dbFor('owner'), {
         stage: 'generating',
         stageBefore: deleteField(),
         updatedAt: NOW,
       }),
     );
-    const application = await readApplication();
-    expect(application?.stage).toBe('generating');
-    expect('stageBefore' in (application ?? {})).toBe(false);
+    expect((await readApplication())?.stage).toBe('applied');
   });
 
   it('denies the mirror without the job’s own change', async () => {

@@ -387,7 +387,8 @@ service cloud.firestore {
     // makes is Mark applied and its undo, in the same batch as the job's status change. Only
     // `stage`, `stageBefore` and `updatedAt` may change. Applied needs the job to become applied
     // in this batch and remembers where it came from; leaving it goes back to exactly that stage,
-    // with the job no longer applied.
+    // with the job no longer applied. A client never writes stage `generating` (that is the
+    // worker's): Mark applied is refused from it, and Undo is refused back into it.
     function validApplicationMirror(jobId) {
       let before = resource.data;
       let after = request.resource.data;
@@ -398,12 +399,13 @@ service cloud.firestore {
         && changed.hasAll(['stage', 'updatedAt'])
         && after.updatedAt == request.time
         && (after.stage == 'applied'
-            ? before.stage in ['chosen', 'needs_input', 'generating', 'ready']
+            ? before.stage in ['chosen', 'needs_input', 'ready']
               && after.get('stageBefore', null) == before.stage
               && jobBefore.status != 'applied'
               && jobAfter.status == 'applied'
             : before.stage == 'applied'
               && after.stage == before.get('stageBefore', null)
+              && after.stage != 'generating'
               && !('stageBefore' in after)
               && jobBefore.status == 'applied'
               && jobAfter.status != 'applied');
