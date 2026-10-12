@@ -34,6 +34,13 @@ export interface FirebaseServices {
 export const DEMO_PROJECT_ID = 'demo-hireframe';
 const EMULATOR_HOST = '127.0.0.1';
 
+/**
+ * A CV download, the `cvs` read and the file together. Without it a blocked or stalled download
+ * kept the Storage SDK retrying for minutes with the button spinning (the live bucket had no CORS
+ * setting on 12 Oct 2026). The Storage client's own retry window is set to the same value.
+ */
+export const DOWNLOAD_TIME_LIMIT_MS = 30_000;
+
 const HostingConfigSchema = z.object({
   apiKey: z.string().min(1),
   appId: z.string().min(1),
@@ -91,15 +98,24 @@ export function getFunctionsClient(): Promise<Functions> {
   return functionsClient;
 }
 
+/**
+ * Downloads and deletes retry for 2 minutes by default, which made a blocked download spin for
+ * minutes. Uploads have their own, longer window (`maxUploadRetryTime`).
+ */
+function withDownloadLimit(storage: FirebaseStorage): FirebaseStorage {
+  storage.maxOperationRetryTime = DOWNLOAD_TIME_LIMIT_MS;
+  return storage;
+}
+
 /** Storage client, loaded on first use. */
 export function getStorageClient(): Promise<FirebaseStorage> {
   storageClient ??= Promise.all([getFirebase(), import('firebase/storage')])
     .then(([{ app }, sdk]) => {
-      if (!import.meta.env.DEV) return sdk.getStorage(app);
+      if (!import.meta.env.DEV) return withDownloadLimit(sdk.getStorage(app));
       // Without a bucket name the Storage SDK has nothing to address; the emulator accepts any.
       const storage = sdk.getStorage(app, `gs://${DEMO_PROJECT_ID}.appspot.com`);
       sdk.connectStorageEmulator(storage, EMULATOR_HOST, 9199);
-      return storage;
+      return withDownloadLimit(storage);
     })
     .catch((error: unknown) => {
       storageClient = undefined;

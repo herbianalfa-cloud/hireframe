@@ -22,6 +22,8 @@ import type { LiveState } from '@/services/profile';
 
 import { makeApplication, QUESTION_A, QUESTION_B } from './fixtures';
 import { BLOCKED_TEXT } from './labels';
+import { TimeoutError } from '@/services/resilience';
+
 import { PipelinePage } from './PipelinePage';
 
 vi.mock('@/services/applications', async (importOriginal) => ({
@@ -444,6 +446,20 @@ describe('Ready to send', () => {
     open();
     await user.click(screen.getByRole('button', { name: 'Download CV as PDF' }));
     expect((await screen.findByRole('alert')).textContent).toMatch(/Couldn't download/);
+    expect(saveBlob).not.toHaveBeenCalled();
+  });
+
+  it('stops a download that hit the time limit and lets the owner press again', async () => {
+    const user = userEvent.setup();
+    given({ ready: ready(readyView) });
+    vi.mocked(downloadCvFile).mockRejectedValue(new TimeoutError('cv download timed out'));
+    open();
+    const button = screen.getByRole('button', { name: 'Download CV as PDF' });
+    await user.click(button);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      "Couldn't download this file. Try again later.",
+    );
+    expect(button.hasAttribute('disabled')).toBe(false);
     expect(saveBlob).not.toHaveBeenCalled();
   });
 
