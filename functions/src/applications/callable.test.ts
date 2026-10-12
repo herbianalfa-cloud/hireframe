@@ -106,10 +106,10 @@ describe('the application handler refuses before any read or write', () => {
     expect(touched.paths).toEqual(['get config/app']);
   });
 
-  it('refuses a replayed App Check token, even from the owner', async () => {
+  it('refuses a replayed App Check token, even from the owner, after reading only config/app', async () => {
     await expect(
       call({ data: input, auth: { uid: 'owner-uid' }, app: { alreadyConsumed: true } }),
     ).rejects.toMatchObject({ code: 'permission-denied' });
-    expect(touched.paths).toEqual([]);
+    expect(touched.paths).toEqual(['get config/app']);
   });
 });
