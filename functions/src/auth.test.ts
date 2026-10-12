@@ -43,11 +43,25 @@ describe('requireOwner', () => {
     );
   });
 
-  it('rejects a replayed App Check token', async () => {
-    await expectCode(
-      requireOwner({ auth: { uid: OWNER }, app: { alreadyConsumed: true } }, read(config)),
-      'permission-denied',
-    );
+  it('rejects a replayed App Check token, in words the owner can act on, without logging text', async () => {
+    const lines: string[] = [];
+    setLogSink((level, event, fields) => {
+      lines.push(JSON.stringify({ level, event, fields }));
+    });
+    const error: unknown = await requireOwner(
+      { auth: { uid: OWNER }, app: { alreadyConsumed: true } },
+      read(config),
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HttpsError);
+    expect((error as HttpsError).code).toBe('permission-denied');
+    expect((error as HttpsError).message).toBe('That request was already sent. Try again.');
+    expect(lines).toEqual([
+      JSON.stringify({
+        level: 'warn',
+        event: 'owner.denied',
+        fields: { reason: 'app_check_replay' },
+      }),
+    ]);
   });
 
   it.each([

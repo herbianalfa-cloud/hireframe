@@ -1,9 +1,9 @@
 import {
+  APP_CHECK_REPLAY_MESSAGE,
   ApplicationInputSchema,
   ApplicationResultSchema,
   ApplicationSchema,
   appliedApplicationsSpec,
-  clientTimeoutMs,
   COLLECTIONS,
   CvDocSchema,
   PATHS,
@@ -25,10 +25,10 @@ import {
   onSnapshot,
   query,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 
 import { summarySpecs } from './dashboard';
-import { getFirebase, getFunctionsClient, getStorageClient } from './firebase';
+import { callOwnerCallable, isAppCheckReplay } from './callable';
+import { getFirebase, getStorageClient } from './firebase';
 import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints } from './query-spec';
@@ -183,13 +183,7 @@ export async function loadAppliedThisWeek(now: Date): Promise<number> {
  */
 async function callApplication(input: ApplicationInput): Promise<ApplicationResult> {
   const parsed = ApplicationInputSchema.parse(input);
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'application', {
-    timeout: clientTimeoutMs('application'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call(parsed);
-  return ApplicationResultSchema.parse(result.data);
+  return ApplicationResultSchema.parse(await callOwnerCallable('application', parsed));
 }
 
 export function startApplication(jobId: string): Promise<ApplicationResult> {
@@ -235,6 +229,7 @@ export function withdrawApplication(
 
 /** A user-facing message for a failed `application` call. */
 export function applicationErrorMessage(error: unknown): string {
+  if (isAppCheckReplay(error)) return APP_CHECK_REPLAY_MESSAGE;
   const code = errorCode(error);
   switch (code) {
     case 'functions/not-found':

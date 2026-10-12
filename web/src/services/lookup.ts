@@ -1,5 +1,4 @@
 import {
-  clientTimeoutMs,
   COLLECTIONS,
   dedupeKey,
   LookupAddResultSchema,
@@ -19,9 +18,9 @@ import {
   type PasteLink,
 } from '@hireframe/shared';
 import { collection, getDocs, limit, onSnapshot, query, type Firestore } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 
-import { getFirebase, getFunctionsClient } from './firebase';
+import { callOwnerCallable } from './callable';
+import { getFirebase } from './firebase';
 import { parseJobs, type JobView } from './jobs';
 import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
@@ -187,13 +186,7 @@ export function watchWaitingJobs(
  */
 async function callLookup(input: LookupInput): Promise<unknown> {
   const parsed = LookupInputSchema.parse(input);
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'lookup', {
-    timeout: clientTimeoutMs('lookup'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call(parsed);
-  return result.data;
+  return callOwnerCallable('lookup', parsed);
 }
 
 /** Create and judge jobs read from a results page, or fetched from a job board's own API. */

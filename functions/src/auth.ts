@@ -1,4 +1,4 @@
-import { AppConfigSchema, DOCS, type AppConfig } from '@hireframe/shared';
+import { APP_CHECK_REPLAY_MESSAGE, AppConfigSchema, DOCS, type AppConfig } from '@hireframe/shared';
 import { HttpsError } from 'firebase-functions/https';
 
 import { db } from './admin.js';
@@ -31,7 +31,7 @@ export async function requireOwner(
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.');
   if (request.app?.alreadyConsumed) {
     log.warn('owner.denied', { reason: 'app_check_replay' });
-    throw new HttpsError('permission-denied', 'Not allowed.');
+    throw new HttpsError('permission-denied', APP_CHECK_REPLAY_MESSAGE);
   }
   const parsed = AppConfigSchema.safeParse(await readAppConfig());
   if (!parsed.success) {

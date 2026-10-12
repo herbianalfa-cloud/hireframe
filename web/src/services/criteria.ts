@@ -1,5 +1,4 @@
 import {
-  clientTimeoutMs,
   COLLECTIONS,
   CriteriaPointerSchema,
   CriteriaVersionSchema,
@@ -20,10 +19,10 @@ import {
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 
 import { buildCriteriaWrite } from './fact-writes';
-import { getFirebase, getFunctionsClient } from './firebase';
+import { callOwnerCallable } from './callable';
+import { getFirebase } from './firebase';
 import { errorCode, logError } from './log';
 import { listen, type Unsubscribe } from './profile';
 import { withTimeout } from './resilience';
@@ -185,13 +184,7 @@ export function criteriaErrorMessage(error: unknown): string {
  * run budget, so it's never retried automatically.
  */
 export async function rescore(): Promise<RescoreResult> {
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'rescore', {
-    timeout: clientTimeoutMs('rescore'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call({});
-  return RescoreResultSchema.parse(result.data);
+  return RescoreResultSchema.parse(await callOwnerCallable('rescore', {}));
 }
 
 /** A user-facing message for a failed re-score (HttpsError messages are written for users). */

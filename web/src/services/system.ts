@@ -1,5 +1,4 @@
 import {
-  clientTimeoutMs,
   COLLECTIONS,
   CompanySchema,
   RunSchema,
@@ -22,9 +21,9 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 
-import { getFirebase, getFunctionsClient } from './firebase';
+import { callOwnerCallable } from './callable';
+import { getFirebase } from './firebase';
 import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints, type QuerySpec } from './query-spec';
@@ -222,13 +221,7 @@ export async function countJobs(): Promise<number> {
 }
 
 export async function scanNow(): Promise<ScanNowResult> {
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'scanNow', {
-    timeout: clientTimeoutMs('scanNow'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call({});
-  return ScanNowResultSchema.parse(result.data);
+  return ScanNowResultSchema.parse(await callOwnerCallable('scanNow', {}));
 }
 
 /** A user-facing message for a failed scan (HttpsError messages are written for users). */
