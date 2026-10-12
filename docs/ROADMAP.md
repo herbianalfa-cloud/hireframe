@@ -17,6 +17,9 @@ Each milestone = one PR, demoable, docs + CHANGELOG updated.
 
 **Usable at M6** — start relying on it daily from there.
 
+## Next
+- **CV quality plan (Opus · High), before M8:** layout and styling (one page filled top to bottom, formal monochrome), writing rules (no em dashes, no "not X, it's Y", reads like a recent graduate wrote it), a self-score with revision to 8/10 or more, and a CV eval on the fake candidate. Input: Beeb's list of what is wrong with the v0.7.3 CV.
+
 ## Wave 2 (weeks 2–3) — sharper decisions
 Gmail auto-status (confirmations/rejections/interviews), follow-up reminders, company intel card (Companies House API, funding/headcount/news), UK sponsor licence flag (gov.uk register), ghost-job detector, ATS keyword match, lane-specific base CVs, CV version tracking, answer bank, dream-company alerts, push notifications (PWA), learning from feedback (score adjustments), AI assistant panel, full analytics.
 
@@ -57,3 +60,6 @@ Run `node scripts/detect-ats.ts --recheck tmp/watchlist-review.csv` on the Worka
 - Dedupe: the same job with a town in one source and a postcode in another is not merged.
 - Video walkthrough of the system after Wave 1 is done.
 - S3 does not see a hydrated postedAt in the same pass.
+- CV preview in the app before download (small; first after M8).
+- Evidence documents (reports, portfolio, internship report) parsed into cited facts like the CV upload; needs an Opus plan for cost and privacy.
+- The system asks for evidence or detail on a CV item; the owner answers with text or a document (same plan as evidence documents).
