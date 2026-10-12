@@ -126,7 +126,7 @@ describe('applicationErrorMessage', () => {
   it('words a replayed App Check token for the owner', () => {
     expect(
       applicationErrorMessage(failure('functions/permission-denied', APP_CHECK_REPLAY_MESSAGE)),
-    ).toBe('That request was already sent. Try again.');
+    ).toBe('This request may already have gone through. Check the page before you try again.');
   });
 
   it('words each code the callable uses', () => {

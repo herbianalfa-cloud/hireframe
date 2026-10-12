@@ -33,6 +33,8 @@ export function clientTimeoutMs(name: CallableName): number {
 
 /**
  * What the owner reads when the server refuses an App Check token it has already consumed. The
+ * first delivery may have run, so the words say to check the page, not to send it again. The
  * code stays `permission-denied`; only the words change, so the replay check is as strict as before.
  */
-export const APP_CHECK_REPLAY_MESSAGE = 'That request was already sent. Try again.';
+export const APP_CHECK_REPLAY_MESSAGE =
+  'This request may already have gone through. Check the page before you try again.';
