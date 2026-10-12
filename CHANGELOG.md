@@ -10,7 +10,6 @@ All notable changes. Format: Keep a Changelog, SemVer.
 - **CV downloads hung.** The live bucket had no CORS setting (applied by hand on 12 Oct 2026); `storage.cors.json` now holds it and RUNBOOK Part I step 96 applies and checks it, with a Recovery entry. A download is one attempt inside 30 s (`DOWNLOAD_TIME_LIMIT_MS`, also the Storage client's retry window) and then says "Couldn't download this file. Try again later."
 - `node scripts/dev-worker.ts` run by hand next to `npm run dev` no longer refuses "(unset)": unset project and emulator variables default to the ones the seed-time worker gets (`DEV_EMULATOR_ENV`); set ones are never overridden and the `demo-*` guard stays.
 
-
 ### Changed
 - Docs: ROADMAP gets a **Next** section (CV quality plan before M8) and three parking-lot items.
 - Docs: billing-guards plan for M8 (`docs/plans/m8-billing-guards.md`) and a new hard rule against self-triggering code in `CLAUDE.md`.
