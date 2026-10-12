@@ -1,4 +1,4 @@
-import { AppConfigSchema, DOCS, type AppConfig } from '@hireframe/shared';
+import { APP_CHECK_REPLAY_MESSAGE, AppConfigSchema, DOCS, type AppConfig } from '@hireframe/shared';
 import { HttpsError } from 'firebase-functions/https';
 
 import { db } from './admin.js';
@@ -20,8 +20,9 @@ export const readAppConfigFromFirestore: ReadAppConfig = async () => {
 
 /**
  * Owner-only guard for callables (ADR-011). App Check is enforced by the callable options; this
- * also rejects replayed (already consumed) App Check tokens, then compares the caller's UID with
- * `config/app.ownerUid`. Any doubt means `permission-denied`, never access.
+ * compares the caller's UID with `config/app.ownerUid`, then rejects a replayed (already
+ * consumed) App Check token, so only the owner reads the replay wording. Any doubt means
+ * `permission-denied`, never access.
  */
 export async function requireOwner(
   request: OwnerCheckRequest,
@@ -29,10 +30,6 @@ export async function requireOwner(
 ): Promise<AppConfig> {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.');
-  if (request.app?.alreadyConsumed) {
-    log.warn('owner.denied', { reason: 'app_check_replay' });
-    throw new HttpsError('permission-denied', 'Not allowed.');
-  }
   const parsed = AppConfigSchema.safeParse(await readAppConfig());
   if (!parsed.success) {
     log.error('owner.config_invalid', { issues: parsed.error.issues.length });
@@ -41,6 +38,11 @@ export async function requireOwner(
   if (parsed.data.ownerUid !== uid) {
     log.warn('owner.denied', { reason: 'not_owner' });
     throw new HttpsError('permission-denied', 'Not allowed.');
+  }
+  // Only the owner gets the replay wording; every other refusal stays "Not allowed.".
+  if (request.app?.alreadyConsumed) {
+    log.warn('owner.denied', { reason: 'app_check_replay' });
+    throw new HttpsError('permission-denied', APP_CHECK_REPLAY_MESSAGE);
   }
   return parsed.data;
 }

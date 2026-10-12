@@ -1,3 +1,4 @@
+import { APP_CHECK_REPLAY_MESSAGE } from '@hireframe/shared';
 import { httpsCallable } from 'firebase/functions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -102,6 +103,12 @@ describe('the application callable', () => {
     await expect(startApplication('job1')).rejects.toThrow();
   });
 
+  it('sends one call for a double click', async () => {
+    invoke.mockResolvedValue({ data: { jobId: 'job1', stage: 'generating', unanswered: 0 } });
+    await Promise.all([retryApplication('job1'), retryApplication('job1')]);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['functions/unavailable', 'functions/deadline-exceeded', 'functions/internal'])(
     'is invoked once and rethrown on %s (an answer can cost a model call)',
     async (code) => {
@@ -115,6 +122,12 @@ describe('the application callable', () => {
 describe('applicationErrorMessage', () => {
   const failure = (code: string, message = 'server words') =>
     Object.assign(new Error(message), { code });
+
+  it('words a replayed App Check token for the owner', () => {
+    expect(
+      applicationErrorMessage(failure('functions/permission-denied', APP_CHECK_REPLAY_MESSAGE)),
+    ).toBe('This request may already have gone through. Check the page before you try again.');
+  });
 
   it('words each code the callable uses', () => {
     expect(applicationErrorMessage(failure('functions/not-found'))).toMatch(/no longer exists/);

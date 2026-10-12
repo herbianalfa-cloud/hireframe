@@ -1,9 +1,9 @@
 import {
+  APP_CHECK_REPLAY_MESSAGE,
   ApplicationInputSchema,
   ApplicationResultSchema,
   ApplicationSchema,
   appliedApplicationsSpec,
-  clientTimeoutMs,
   COLLECTIONS,
   CvDocSchema,
   PATHS,
@@ -25,14 +25,14 @@ import {
   onSnapshot,
   query,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 
 import { summarySpecs } from './dashboard';
-import { getFirebase, getFunctionsClient, getStorageClient } from './firebase';
+import { callOwnerCallable, isAppCheckReplay } from './callable';
+import { DOWNLOAD_TIME_LIMIT_MS, getFirebase, getStorageClient } from './firebase';
 import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints } from './query-spec';
-import { isTransient, withRetry, withTimeout } from './resilience';
+import { isTransient, TimeoutError, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
 
 /**
@@ -183,13 +183,7 @@ export async function loadAppliedThisWeek(now: Date): Promise<number> {
  */
 async function callApplication(input: ApplicationInput): Promise<ApplicationResult> {
   const parsed = ApplicationInputSchema.parse(input);
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'application', {
-    timeout: clientTimeoutMs('application'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call(parsed);
-  return ApplicationResultSchema.parse(result.data);
+  return ApplicationResultSchema.parse(await callOwnerCallable('application', parsed));
 }
 
 export function startApplication(jobId: string): Promise<ApplicationResult> {
@@ -235,6 +229,7 @@ export function withdrawApplication(
 
 /** A user-facing message for a failed `application` call. */
 export function applicationErrorMessage(error: unknown): string {
+  if (isAppCheckReplay(error)) return APP_CHECK_REPLAY_MESSAGE;
   const code = errorCode(error);
   switch (code) {
     case 'functions/not-found':
@@ -319,17 +314,17 @@ export async function downloadCvFile(request: {
   headerName: string | undefined;
   company: string;
 }): Promise<CvFile> {
+  return withTimeout(readCvFile(request), DOWNLOAD_TIME_LIMIT_MS, 'cv download');
+}
+
+async function readCvFile(request: Parameters<typeof downloadCvFile>[0]): Promise<CvFile> {
   const cv = await loadCvDoc(request.cvId);
   if (!cv) throw Object.assign(new Error('CV version not found'), { code: 'not-found' });
   const [storage, sdk] = await Promise.all([getStorageClient(), import('firebase/storage')]);
-  const blob = await withRetry(
-    () =>
-      withTimeout(
-        sdk.getBlob(sdk.ref(storage, storagePathFor(cv, request.kind, request.format))),
-        60_000,
-        'cv download',
-      ),
-    { label: 'applications.download', isRetryable: isTransient },
+  // One attempt: the owner presses the button again, and the Storage client's retry window
+  // (`DOWNLOAD_TIME_LIMIT_MS`) ends a blocked request instead of retrying it for minutes.
+  const blob = await sdk.getBlob(
+    sdk.ref(storage, storagePathFor(cv, request.kind, request.format)),
   );
   return {
     blob,
@@ -339,7 +334,12 @@ export async function downloadCvFile(request: {
 
 /** A user-facing message for a failed download. */
 export function downloadErrorMessage(error: unknown): string {
-  return errorCode(error) === 'not-found' || errorCode(error) === 'storage/object-not-found'
-    ? "That file isn't there any more. Regenerate the CV to make a new one."
-    : "Couldn't download the file. Check your connection and try again.";
+  const code = errorCode(error);
+  if (code === 'not-found' || code === 'storage/object-not-found') {
+    return "That file isn't there any more. Regenerate the CV to make a new one.";
+  }
+  if (error instanceof TimeoutError || code === 'storage/retry-limit-exceeded') {
+    return "Couldn't download this file. Try again later.";
+  }
+  return "Couldn't download the file. Check your connection and try again.";
 }

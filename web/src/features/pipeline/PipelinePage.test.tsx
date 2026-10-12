@@ -1,4 +1,4 @@
-import type { BlockedCode } from '@hireframe/shared';
+import { APP_CHECK_REPLAY_MESSAGE, type BlockedCode } from '@hireframe/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
@@ -22,6 +22,8 @@ import type { LiveState } from '@/services/profile';
 
 import { makeApplication, QUESTION_A, QUESTION_B } from './fixtures';
 import { BLOCKED_TEXT } from './labels';
+import { TimeoutError } from '@/services/resilience';
+
 import { PipelinePage } from './PipelinePage';
 
 vi.mock('@/services/applications', async (importOriginal) => ({
@@ -276,6 +278,23 @@ describe('Needs your input', () => {
     expect((box as HTMLTextAreaElement).value).toBe('stuff');
   });
 
+  it('after a replay refusal keeps the answer, does not resend, and says to check the page', async () => {
+    const user = userEvent.setup();
+    given({ needs_input: ready(view) });
+    vi.mocked(answerQuestion).mockRejectedValue(
+      Object.assign(new Error(APP_CHECK_REPLAY_MESSAGE), { code: 'functions/permission-denied' }),
+    );
+    open();
+    const box = nth(screen.getAllByRole('textbox'), 0);
+    await user.type(box, 'Built dbt models for the finance team');
+    await user.click(nth(screen.getAllByRole('button', { name: 'Answer' }), 0));
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'This request may already have gone through. Check the page before you try again.',
+    );
+    expect((box as HTMLTextAreaElement).value).toBe('Built dbt models for the finance team');
+    expect(answerQuestion).toHaveBeenCalledTimes(1);
+  });
+
   it('skips one question, or all of them', async () => {
     const user = userEvent.setup();
     given({ needs_input: ready(view) });
@@ -444,6 +463,20 @@ describe('Ready to send', () => {
     open();
     await user.click(screen.getByRole('button', { name: 'Download CV as PDF' }));
     expect((await screen.findByRole('alert')).textContent).toMatch(/Couldn't download/);
+    expect(saveBlob).not.toHaveBeenCalled();
+  });
+
+  it('stops a download that hit the time limit and lets the owner press again', async () => {
+    const user = userEvent.setup();
+    given({ ready: ready(readyView) });
+    vi.mocked(downloadCvFile).mockRejectedValue(new TimeoutError('cv download timed out'));
+    open();
+    const button = screen.getByRole('button', { name: 'Download CV as PDF' });
+    await user.click(button);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      "Couldn't download this file. Try again later.",
+    );
+    expect(button.hasAttribute('disabled')).toBe(false);
     expect(saveBlob).not.toHaveBeenCalled();
   });
 

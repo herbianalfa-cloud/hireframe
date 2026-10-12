@@ -1,7 +1,8 @@
 import { CV_LIMITS, type CvFileFormat, type CvFileKind } from '@hireframe/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { downloadCvFile } from './applications';
+import { downloadCvFile, downloadErrorMessage } from './applications';
+import { DOWNLOAD_TIME_LIMIT_MS } from './firebase';
 
 // The path a download reads comes from the `cvs` document, not from the cvId or a file-name
 // pattern. Firestore and Storage are faked; the document is parsed by the real schema.
@@ -9,6 +10,7 @@ const state = vi.hoisted(() => ({
   data: undefined as Record<string, unknown> | undefined,
   refs: [] as string[],
   docPaths: [] as string[],
+  hang: false,
 }));
 
 vi.mock('firebase/firestore', async (importOriginal) => ({
@@ -28,11 +30,13 @@ vi.mock('firebase/storage', () => ({
     state.refs.push(path);
     return { path };
   },
-  getBlob: (reference: { path: string }) => Promise.resolve(new Blob([reference.path])),
+  getBlob: (reference: { path: string }) =>
+    state.hang ? new Promise<Blob>(() => undefined) : Promise.resolve(new Blob([reference.path])),
 }));
 vi.mock('./firebase', () => ({
   getFirebase: () => Promise.resolve({ db: {} }),
   getStorageClient: () => Promise.resolve({}),
+  DOWNLOAD_TIME_LIMIT_MS: 30_000,
 }));
 
 const cited = { text: 'Built weekly SQL reports for a sales team', factRefs: ['F1'] };
@@ -72,6 +76,11 @@ beforeEach(() => {
   state.data = cvDoc(PATHS);
   state.refs = [];
   state.docPaths = [];
+  state.hang = false;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('downloadCvFile', () => {
@@ -121,5 +130,40 @@ describe('downloadCvFile', () => {
       }),
     ).rejects.toMatchObject({ code: 'not-found' });
     expect(state.refs).toEqual([]);
+  });
+});
+
+describe('a download that never settles', () => {
+  const request = {
+    cvId: 'job1-v1',
+    kind: 'cv',
+    format: 'pdf',
+    headerName: undefined,
+    company: 'Acme',
+  } as const;
+
+  it('stops at the time limit and says to try later', async () => {
+    vi.useFakeTimers();
+    state.hang = true;
+    let outcome: unknown;
+    void downloadCvFile(request).catch((error: unknown) => {
+      outcome = error;
+    });
+    await vi.advanceTimersByTimeAsync(DOWNLOAD_TIME_LIMIT_MS - 1);
+    expect(outcome).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toBeInstanceOf(Error);
+    expect(downloadErrorMessage(outcome)).toBe("Couldn't download this file. Try again later.");
+  });
+
+  it('clears its timer when the read settles first', async () => {
+    vi.useFakeTimers();
+    await downloadCvFile(request);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('words the Storage client giving up the same way', () => {
+    const error = Object.assign(new Error('retry limit'), { code: 'storage/retry-limit-exceeded' });
+    expect(downloadErrorMessage(error)).toBe("Couldn't download this file. Try again later.");
   });
 });

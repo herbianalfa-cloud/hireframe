@@ -3,10 +3,15 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+
+## [0.7.4] - 2026-10-12
 ### Fixed
+- **App Check replay on the `application` callable.** Every owner callable now goes through one web helper (`web/src/services/callable.ts`): a fresh `httpsCallable` and a limited-use App Check token per call, and one request for a double click (a second call with the same name and input while one is running gets that call's result). The server's replay check is unchanged; a replayed token now reads "This request may already have gone through. Check the page before you try again." (still `permission-denied`, logged as `owner.denied` with `app_check_replay` and no user text). The owner check now runs before the replay check, so a non-owner, a missing token or an invalid config always gets "Not allowed."; only the owner reads the replay wording. After a replay refusal Pipeline keeps the answer in the box and does not resend; the live card shows whether it was saved. `parseCv`, `addFact`, `resetProfile`, `scanNow`, `rescore` and `lookup` use the same helper.
+- **CV downloads hung.** The live bucket had no CORS setting (applied by hand on 12 Oct 2026); `storage.cors.json` now holds it and RUNBOOK Part I step 96 applies and checks it, with a Recovery entry. A download is one attempt inside 30 s (`DOWNLOAD_TIME_LIMIT_MS`, also the Storage client's retry window) and then says "Couldn't download this file. Try again later." `withDownloadLimit` is tested directly (download retry window set, upload window untouched) and the download timer is shown to clear when the read settles first.
 - `node scripts/dev-worker.ts` run by hand next to `npm run dev` no longer refuses "(unset)": unset project and emulator variables default to the ones the seed-time worker gets (`DEV_EMULATOR_ENV`); set ones are never overridden and the `demo-*` guard stays.
 
 ### Changed
+- Docs: ROADMAP gets a **Next** section (CV quality plan before M8) and three parking-lot items.
 - Docs: billing-guards plan for M8 (`docs/plans/m8-billing-guards.md`) and a new hard rule against self-triggering code in `CLAUDE.md`.
 
 ## [0.7.3] - 2026-10-10

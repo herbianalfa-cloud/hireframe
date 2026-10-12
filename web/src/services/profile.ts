@@ -1,6 +1,5 @@
 import {
   AddFactResultSchema,
-  clientTimeoutMs,
   CvHeaderSchema,
   CV_MIME_TYPES,
   DOCS,
@@ -37,7 +36,6 @@ import {
   writeBatch,
   type DocumentData,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes } from 'firebase/storage';
 
 import {
@@ -51,7 +49,8 @@ import {
   type FactPatch,
   type FactWrite,
 } from './fact-writes';
-import { getFirebase, getFunctionsClient, getStorageClient } from './firebase';
+import { callOwnerCallable } from './callable';
+import { getFirebase, getStorageClient } from './firebase';
 import { errorCode, logError } from './log';
 import { withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
@@ -250,23 +249,11 @@ export async function uploadCv(file: File): Promise<string> {
 }
 
 export async function parseCv(docId: string, fileName: string): Promise<ParseCvResult> {
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'parseCv', {
-    timeout: clientTimeoutMs('parseCv'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call({ docId, fileName });
-  return ParseCvResultSchema.parse(result.data);
+  return ParseCvResultSchema.parse(await callOwnerCallable('parseCv', { docId, fileName }));
 }
 
 export async function addFact(text: string): Promise<AddFactResult> {
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'addFact', {
-    timeout: clientTimeoutMs('addFact'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call({ text });
-  return AddFactResultSchema.parse(result.data);
+  return AddFactResultSchema.parse(await callOwnerCallable('addFact', { text }));
 }
 
 /**
@@ -274,13 +261,7 @@ export async function addFact(text: string): Promise<AddFactResult> {
  * retried; the caller passes what the owner typed and the server checks it again.
  */
 export async function resetProfile(confirm: string): Promise<ResetProfileResult> {
-  const functions = await getFunctionsClient();
-  const call = httpsCallable(functions, 'resetProfile', {
-    timeout: clientTimeoutMs('resetProfile'),
-    limitedUseAppCheckTokens: true,
-  });
-  const result = await call({ confirm });
-  return ResetProfileResultSchema.parse(result.data);
+  return ResetProfileResultSchema.parse(await callOwnerCallable('resetProfile', { confirm }));
 }
 
 /** A user-facing message for a failed callable (HttpsError messages are written for users). */

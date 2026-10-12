@@ -431,6 +431,13 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
     7. The next weekday's digest shows a **Pipeline** section ("n need your input · n generating · n ready to send · n applied this week of 10"). If the section is missing but the rest of the digest arrived, check the logs for `digest.pipeline_failed` (an index or criteria read failed); the digest is not held back for it.
     8. Measure the Today load again (step 89, three repeat visits): the badge and the bar's new item come after `hf:usable`, so the median should not move.
 
+96. **Apply the Storage CORS setting** (`v0.7.4`). The browser reads CV files straight from the bucket, so the bucket must allow `GET` and `HEAD` from the two app origins. Without it every download is blocked and spins. In Cloud Shell, from the repo folder:
+    ```bash
+    gcloud storage buckets update gs://hireframe-f6b03.firebasestorage.app --cors-file=storage.cors.json
+    gcloud storage buckets describe gs://hireframe-f6b03.firebasestorage.app --format='value(cors_config)'
+    ```
+    The second command must print one entry with the origins `https://hireframe-f6b03.web.app` and `https://hireframe-f6b03.firebaseapp.com`, the methods `GET` and `HEAD` and `maxAgeSeconds` 3600. The file is `storage.cors.json` at the repo root; change it there and re-apply, never only in the console. *Done:* applied by hand on 12 Oct 2026 (the same file), after the first live downloads hung. A bucket recreated or restored from a backup needs this step again.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -443,6 +450,7 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
 - **Functions deploy fails because an API is disabled** (eventarc, firebaseextensions, cloudbilling): enable it with Part C step 18.
 - **A callable fails in the browser with a CORS error or 403:** it isn't publicly invocable yet. Do Part C step 28 for it.
 - **Reset profile fails, and the logs show 403 on `storage.objects.delete`:** the runtime account still has `storage.objectViewer` instead of `storage.objectUser`. See "Upgrading a v0.2.1 project" in Part C.
+- **CV downloads spin or fail with a CORS error:** the bucket has no CORS setting, or it doesn't list the origin you opened the app from. Do Part I step 96 (apply and check `storage.cors.json`). A download stops by itself after 30 seconds with "Couldn't download this file. Try again later."; if the check in step 96 is right and it still happens, look at the browser console for the blocked origin, and at **Storage** for the file the `cvs/{cvId}` document points to.
 - **The Storage rules deploy asks to grant `firebaserules.firestoreServiceAgent`, or the owner gets "permission denied" on uploads:** do the Part C step 25 check.
 - **A source card shows Failing or Degraded:** its "Why" line names the cause. `a board no longer exists`: fix that company's `ats.token` in `companies/{id}` or set `watch` to false (boards missing 3 scans in a row are listed under **Broken job boards**). `the site asked us to slow down`: wait for the next scan; Adzuna's daily quota resets at midnight UK time. `robots.txt does not allow it` or a changed response shape: switch the source off with `disabledSources` and open an issue.
 - **A source card says "Paused until <time>":** that site sent a long Retry-After (a rate limit), so scans skip it until then and it resumes on its own. If it keeps happening, switch the source off with `disabledSources` for a while.
