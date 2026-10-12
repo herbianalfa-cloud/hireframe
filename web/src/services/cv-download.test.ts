@@ -156,6 +156,12 @@ describe('a download that never settles', () => {
     expect(downloadErrorMessage(outcome)).toBe("Couldn't download this file. Try again later.");
   });
 
+  it('clears its timer when the read settles first', async () => {
+    vi.useFakeTimers();
+    await downloadCvFile(request);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('words the Storage client giving up the same way', () => {
     const error = Object.assign(new Error('retry limit'), { code: 'storage/retry-limit-exceeded' });
     expect(downloadErrorMessage(error)).toBe("Couldn't download this file. Try again later.");

@@ -102,7 +102,7 @@ export function getFunctionsClient(): Promise<Functions> {
  * Downloads and deletes retry for 2 minutes by default, which made a blocked download spin for
  * minutes. Uploads have their own, longer window (`maxUploadRetryTime`).
  */
-function withDownloadLimit(storage: FirebaseStorage): FirebaseStorage {
+export function withDownloadLimit(storage: FirebaseStorage): FirebaseStorage {
   storage.maxOperationRetryTime = DOWNLOAD_TIME_LIMIT_MS;
   return storage;
 }
