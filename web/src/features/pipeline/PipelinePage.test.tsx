@@ -1,4 +1,4 @@
-import type { BlockedCode } from '@hireframe/shared';
+import { APP_CHECK_REPLAY_MESSAGE, type BlockedCode } from '@hireframe/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
@@ -276,6 +276,23 @@ describe('Needs your input', () => {
       "Couldn't turn that into a fact: rephrase it or skip",
     );
     expect((box as HTMLTextAreaElement).value).toBe('stuff');
+  });
+
+  it('after a replay refusal keeps the answer, does not resend, and says to check the page', async () => {
+    const user = userEvent.setup();
+    given({ needs_input: ready(view) });
+    vi.mocked(answerQuestion).mockRejectedValue(
+      Object.assign(new Error(APP_CHECK_REPLAY_MESSAGE), { code: 'functions/permission-denied' }),
+    );
+    open();
+    const box = nth(screen.getAllByRole('textbox'), 0);
+    await user.type(box, 'Built dbt models for the finance team');
+    await user.click(nth(screen.getAllByRole('button', { name: 'Answer' }), 0));
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'This request may already have gone through. Check the page before you try again.',
+    );
+    expect((box as HTMLTextAreaElement).value).toBe('Built dbt models for the finance team');
+    expect(answerQuestion).toHaveBeenCalledTimes(1);
   });
 
   it('skips one question, or all of them', async () => {
