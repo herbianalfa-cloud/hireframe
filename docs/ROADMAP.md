@@ -63,3 +63,6 @@ Run `node scripts/detect-ats.ts --recheck tmp/watchlist-review.csv` on the Worka
 - CV preview in the app before download (small; first after M8).
 - Evidence documents (reports, portfolio, internship report) parsed into cited facts like the CV upload; needs an Opus plan for cost and privacy.
 - The system asks for evidence or detail on a CV item; the owner answers with text or a document (same plan as evidence documents).
+- App Check replay from a transport-level resend (12 Oct, 49 s after a successful application call): the browser or the Google front end can resend a POST with a consumed token. Not fixable in the client. If it recurs, read the request logs for both deliveries.
+- `callable.ts` coalesces a second click by name + input instead of refusing it.
+- `PipelinePage.test.tsx:452` passes without the 30 s limit (wording only).
