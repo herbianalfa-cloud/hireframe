@@ -1,7 +1,7 @@
 import { APP_CHECK_REPLAY_MESSAGE } from '@hireframe/shared';
 import { CustomProvider, initializeAppCheck } from 'firebase/app-check';
 import { initializeApp } from 'firebase/app';
-import { getFunctions } from 'firebase/functions';
+import { getFunctions, type Functions } from 'firebase/functions';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { callOwnerCallable, isAppCheckReplay } from './callable';
@@ -10,7 +10,9 @@ import { callOwnerCallable, isAppCheckReplay } from './callable';
  * These run the real Functions SDK with a real App Check instance whose custom provider mints a
  * new token on every request, and a fetch stub that records the token each request carried.
  */
-const { functionsRef } = vi.hoisted(() => ({ functionsRef: { current: undefined as unknown } }));
+const { functionsRef } = vi.hoisted(() => ({
+  functionsRef: { current: undefined as Functions | undefined },
+}));
 vi.mock('./firebase', () => ({
   getFunctionsClient: () => Promise.resolve(functionsRef.current),
 }));
