@@ -1,5 +1,6 @@
 import {
   CriteriaContentSchema,
+  CvHeaderSchema,
   criteriaVersionId,
   ProfileSettingsSchema,
   type CriteriaContent,
@@ -190,6 +191,108 @@ export function buildWorkRightsWrite(
     workRights: parsed.workRights,
     validUntil: parsed.validUntil ?? deleteField(),
     ...(exists ? {} : { createdAt: serverNow }),
+    updatedAt: serverNow,
+    schemaVersion: 1,
+  };
+}
+
+// ---- The CV header (M7, `profile/cvHeader`) ----
+
+/** What the form holds: every field as typed, with the three link slots always present. */
+export interface CvHeaderValues {
+  name: string;
+  email: string;
+  phone: string;
+  location: string;
+  links: readonly [string, string, string];
+}
+
+/** A checked header, with a blank optional field left out (the rules refuse `''`). */
+export interface CvHeaderInput {
+  name: string;
+  email: string;
+  phone?: string;
+  location?: string;
+  links?: string[];
+}
+
+/** Field keys an error can attach to: the four fields and the link slots `link0`..`link2`. */
+export type CvHeaderErrors = Partial<
+  Record<'name' | 'email' | 'phone' | 'location' | 'link0' | 'link1' | 'link2', string>
+>;
+
+const CV_HEADER_MESSAGES = {
+  name: 'Enter your name (up to 80 characters).',
+  email: 'Enter a valid email address (up to 120 characters).',
+  phone: 'Up to 40 characters.',
+  location: 'Up to 80 characters.',
+  link: 'Use a full https:// link with no spaces (up to 200 characters).',
+} as const;
+
+// The schema needs dates; the server's time replaces both when the write is built.
+const PLACEHOLDER_DATE = new Date(0);
+
+/**
+ * Checks the form against `CvHeaderSchema` before anything is written: the rules' email pattern
+ * is looser than zod's, and the worker's `hasCvHeader` parses with the schema, so a header the
+ * rules accept but the schema refuses would block every application.
+ */
+export function checkCvHeader(
+  values: CvHeaderValues,
+): { ok: true; input: CvHeaderInput } | { ok: false; errors: CvHeaderErrors } {
+  const trimmed = (text: string) => text.trim();
+  const links = values.links.map(trimmed).filter((link) => link !== '');
+  const candidate = {
+    name: trimmed(values.name),
+    email: trimmed(values.email),
+    ...(trimmed(values.phone) ? { phone: trimmed(values.phone) } : {}),
+    ...(trimmed(values.location) ? { location: trimmed(values.location) } : {}),
+    ...(links.length > 0 ? { links } : {}),
+  };
+  const parsed = CvHeaderSchema.safeParse({
+    ...candidate,
+    createdAt: PLACEHOLDER_DATE,
+    updatedAt: PLACEHOLDER_DATE,
+    schemaVersion: 1,
+  });
+  if (parsed.success) return { ok: true, input: candidate };
+
+  const errors: CvHeaderErrors = {};
+  const slots = values.links.flatMap((link, slot) => (trimmed(link) === '' ? [] : [slot]));
+  for (const issue of parsed.error.issues) {
+    const [field, index] = issue.path;
+    if (field === 'name' || field === 'email' || field === 'phone' || field === 'location') {
+      errors[field] ??= CV_HEADER_MESSAGES[field];
+    } else if (field === 'links') {
+      // An index points into the filtered list; map it back to the slot the owner typed in.
+      const slot = typeof index === 'number' ? slots[index] : undefined;
+      const key = slot === 0 ? 'link0' : slot === 1 ? 'link1' : 'link2';
+      errors[key] ??= CV_HEADER_MESSAGES.link;
+    }
+  }
+  return { ok: false, errors };
+}
+
+/**
+ * The whole `profile/cvHeader` document, written with `setDoc` (no merge), so a field left
+ * empty is absent. On create `createdAt` is the server time; on update it is the stored value
+ * exactly (the rules require it unchanged), which is why the caller passes it back as read.
+ */
+export function buildCvHeaderWrite(
+  values: CvHeaderValues,
+  storedCreatedAt: unknown,
+  serverNow: FieldValue,
+): DocumentData {
+  const checked = checkCvHeader(values);
+  if (!checked.ok) throw new Error('CV header failed validation');
+  const { input } = checked;
+  return {
+    name: input.name,
+    email: input.email,
+    ...(input.phone ? { phone: input.phone } : {}),
+    ...(input.location ? { location: input.location } : {}),
+    ...(input.links ? { links: input.links } : {}),
+    createdAt: storedCreatedAt ?? serverNow,
     updatedAt: serverNow,
     schemaVersion: 1,
   };

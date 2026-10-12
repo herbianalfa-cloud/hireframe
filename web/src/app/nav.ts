@@ -5,6 +5,7 @@ import {
   Search,
   SlidersHorizontal,
   UserRound,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -37,6 +38,16 @@ export const NAV_ITEMS: readonly NavItem[] = [
     empty: {
       title: 'No jobs yet',
       body: 'Every scanned job appears here with its verdict, scores and the stage that decided it.',
+    },
+  },
+  {
+    path: '/pipeline',
+    label: 'Pipeline',
+    Icon: Workflow,
+    inTabBar: true,
+    empty: {
+      title: 'No applications yet',
+      body: 'Start an application from a job and its CV, questions and downloads appear here.',
     },
   },
   {

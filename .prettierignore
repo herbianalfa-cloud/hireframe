@@ -5,3 +5,4 @@ dist/
 coverage/
 functions/deploy/
 apps-script/build/
+.vitest/

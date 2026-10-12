@@ -42,7 +42,7 @@ function allowedWrites(rules: string): Record<string, string[]> {
 }
 
 describe('client-writable paths', () => {
-  it('firestore.rules opens only the M2, M2.1, M4 and M5 writes (M6 adds none: nonces and alertMessages are server-only)', () => {
+  it('firestore.rules opens only the M2, M2.1, M4, M5 and M7 writes (M6 adds none: nonces and alertMessages are server-only)', () => {
     expect(allowedWrites(readFileSync('firestore.rules', 'utf8'))).toEqual({
       '/criteria/current': ['create', 'update'],
       '/criteria/{versionId}': ['create'],
@@ -54,6 +54,9 @@ describe('client-writable paths', () => {
       // M5: job status, applied stamps and 👍/👎, plus create-only events (ADR-038).
       '/jobs/{jobId}': ['update'],
       '/events/{eventId}': ['create'],
+      // M7: the Applied mirror, beside the job's status change (ADR-055). `profile/cvHeader`
+      // is a `/profile/{profileId}` write above, told apart in the rule by its ID.
+      '/applications/{jobId}': ['update'],
     });
   });
 

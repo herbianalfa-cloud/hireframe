@@ -66,18 +66,51 @@ function factDocument(
   source: 'cv' | 'manual',
   sourceDocId: string | undefined,
   now: Date,
+  answerFor?: { jobId: string },
 ) {
   return {
     ...fact.draft,
     status: 'active' as const,
     source,
     ...(sourceDocId ? { sourceDocId } : {}),
+    ...(answerFor ? { answerFor } : {}),
     version: 1,
     evidenceVerified: fact.evidenceVerified,
     createdAt: now,
     updatedAt: now,
     schemaVersion: 1 as const,
   };
+}
+
+/** One document to create: a fact, or the v1 snapshot beside it. */
+export interface FactWrite {
+  path: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * A manual fact and its v1 snapshot, ready to create in a batch or a transaction. `answerFor`
+ * marks a fact that came from an application answer (M7). Returns the new IDs in order.
+ */
+export function manualFactWrites(
+  firestore: Firestore,
+  facts: readonly NewFact[],
+  now: Date,
+  answerFor?: { jobId: string },
+): { ids: string[]; writes: FactWrite[] } {
+  const ids: string[] = [];
+  const writes: FactWrite[] = [];
+  for (const fact of facts) {
+    const ref = firestore.collection(PATHS.facts).doc();
+    const data = factDocument(fact, 'manual', undefined, now, answerFor);
+    ids.push(ref.id);
+    writes.push({ path: ref.path, data });
+    writes.push({
+      path: PATHS.factVersion(ref.id, 1),
+      data: { snapshot: data, change: 'created', at: now },
+    });
+  }
+  return { ids, writes };
 }
 
 export function firestoreProfileStore(firestore: Firestore): ProfileStore {
@@ -230,8 +263,9 @@ export function firestoreResetStore(firestore: Firestore): ResetStore {
       // recursiveDelete also removes each fact's versions subcollection.
       await firestore.recursiveDelete(facts);
       await firestore.recursiveDelete(documents);
-      // The work-rights setting (M4) is profile data too.
+      // The work-rights setting (M4) and the CV header (M7) are profile data too.
       await firestore.doc(DOCS.profileMain).delete();
+      await firestore.doc(DOCS.cvHeader).delete();
       return { facts: factCount.data().count, documents: documentCount.data().count };
     },
   };
@@ -243,5 +277,20 @@ export function bucketFileDeleter(bucket: ReturnType<Storage['bucket']>) {
     const [files] = await bucket.getFiles({ prefix });
     await bucket.deleteFiles({ prefix });
     return files.length;
+  };
+}
+
+/**
+ * The names of at most `limit` objects under a string prefix, one page and never auto-paginated
+ * (withdraw's sweep for unrecorded CV versions). `more` is true when the listing was cut short.
+ */
+export function bucketFileLister(bucket: ReturnType<Storage['bucket']>) {
+  return async (prefix: string, limit: number): Promise<{ names: string[]; more: boolean }> => {
+    const [files, nextQuery] = await bucket.getFiles({
+      prefix,
+      maxResults: limit,
+      autoPaginate: false,
+    });
+    return { names: files.map((file) => file.name), more: Boolean(nextQuery) };
   };
 }

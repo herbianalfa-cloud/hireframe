@@ -1,8 +1,11 @@
 import {
+  ApplicationSchema,
+  CvHeaderSchema,
   dedupeKey,
   JobDescriptionSchema,
   JobSchema,
   normaliseRawJob,
+  questionId,
   RunSchema,
   UsageSchema,
   verdictAgreement,
@@ -15,6 +18,14 @@ import { isCiDeploy } from './assert-ci.ts';
 import {
   alertWaitingJobDocuments,
   appConfigDocument,
+  applicationSeeds,
+  cvHeaderSeed,
+  DEV_APPLIED_JOB_ID,
+  DEV_BLOCKED_JOB_ID,
+  DEV_GENERATING_JOB_ID,
+  DEV_NEEDS_INPUT_JOB_ID,
+  DEV_READY_JOB_ID,
+  readyApplicationSeed,
   assertDemoProject,
   criteriaSeedDocuments,
   devJobDocuments,
@@ -28,6 +39,9 @@ import {
   toRestValue,
   usageSeedDocument,
   morningRunSeedDocument,
+  seedWorkerEnv,
+  DEV_EMULATOR_ENV,
+  withEmulatorDefaults,
 } from './dev-seed.ts';
 
 describe('isCiDeploy', () => {
@@ -311,5 +325,94 @@ describe('seed → Firestore REST conversion', () => {
     expect(() => criteriaSeedDocuments(now)).not.toThrow();
     expect(() => profileSeedDocuments(now)).not.toThrow();
     expect(() => linkedInJobDocuments(now)).not.toThrow();
+  });
+});
+
+describe('the seed-time worker environment', () => {
+  it('drops LIVE and the API key, so LIVE=1 seeds with the fake model and needs no key', () => {
+    const env = seedWorkerEnv({
+      LIVE: '1',
+      ANTHROPIC_API_KEY: 'sk-fake-key',
+      GCLOUD_PROJECT: 'demo-hireframe',
+      FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+    });
+    expect(env).toEqual({
+      GCLOUD_PROJECT: 'demo-hireframe',
+      FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+    });
+  });
+});
+
+describe('the emulator defaults for a hand-run dev-worker', () => {
+  it('fills unset variables with the demo project and emulator hosts', () => {
+    const env = withEmulatorDefaults({ PATH: '/bin' });
+    expect(env).toMatchObject(DEV_EMULATOR_ENV);
+    expect(env.GCLOUD_PROJECT).toMatch(/^demo-/);
+    expect(env.PATH).toBe('/bin');
+  });
+
+  it('never overrides a variable that is set, so a non-demo project is still refused downstream', () => {
+    const env = withEmulatorDefaults({
+      GCLOUD_PROJECT: 'hireframe-f6b03',
+      FIRESTORE_EMULATOR_HOST: 'localhost:9000',
+    });
+    expect(env.GCLOUD_PROJECT).toBe('hireframe-f6b03');
+    expect(env.FIRESTORE_EMULATOR_HOST).toBe('localhost:9000');
+    expect(env.FIREBASE_STORAGE_EMULATOR_HOST).toBe(
+      DEV_EMULATOR_ENV.FIREBASE_STORAGE_EMULATOR_HOST,
+    );
+    expect(() => assertDemoProject(env.GCLOUD_PROJECT)).toThrow(/demo-\*/);
+  });
+});
+
+describe('application pipeline seed (M7 7D.2)', () => {
+  const now = new Date('2026-10-14T08:00:00Z');
+  const jobs = new Map(devJobDocuments(now).map((item) => [item.id, JobSchema.parse(item.job)]));
+
+  it('seeds a CV header the schema accepts', () => {
+    expect(CvHeaderSchema.safeParse(cvHeaderSeed(now)).success).toBe(true);
+  });
+
+  it('seeds one application per stage, each valid and on an existing job', () => {
+    const seeded = [readyApplicationSeed(now), ...applicationSeeds(now)];
+    expect(seeded.map((item) => ApplicationSchema.parse(item.data).stage).sort()).toEqual([
+      'applied',
+      'chosen',
+      'generating',
+      'generating',
+      'needs_input',
+    ]);
+    for (const { jobId, data } of seeded) {
+      const job = jobs.get(jobId);
+      expect(job, jobId).toBeDefined();
+      expect(data.job).toMatchObject({ title: job?.title, company: job?.company });
+    }
+  });
+
+  it('seeds one Chosen application, blocked after two invalid drafts, on a job with a deep read', () => {
+    const seeds = new Map(applicationSeeds(now).map((item) => [item.jobId, item.data]));
+    const blocked = ApplicationSchema.parse(seeds.get(DEV_BLOCKED_JOB_ID));
+    expect(blocked.stage).toBe('chosen');
+    expect(blocked.blocked?.code).toBe('invalid_output');
+    expect(blocked.attempt).toBe(2);
+    expect(blocked.lastIssues).toEqual(['unsupported_number', 'too_long']);
+    // Retry needs a verdict and a deep read to put it back at generating.
+    expect(jobs.get(DEV_BLOCKED_JOB_ID)?.deep).toBeDefined();
+    expect(jobs.get(DEV_BLOCKED_JOB_ID)?.status).not.toBe('applied');
+  });
+
+  it('seeds Needs your input with two open questions and Applied on an applied job', () => {
+    const seeds = new Map(applicationSeeds(now).map((item) => [item.jobId, item.data]));
+    const needs = ApplicationSchema.parse(seeds.get(DEV_NEEDS_INPUT_JOB_ID));
+    expect(needs.questions).toHaveLength(2);
+    expect(needs.questions.every((q) => q.answer === undefined)).toBe(true);
+    // The seed carries literal IDs (it can't import shared's applications.ts under Node).
+    for (const q of needs.questions) expect(q.id).toBe(questionId(q.requirement));
+    expect(ApplicationSchema.parse(seeds.get(DEV_GENERATING_JOB_ID)).stage).toBe('generating');
+    expect(ApplicationSchema.parse(seeds.get(DEV_APPLIED_JOB_ID)).stage).toBe('applied');
+    expect(jobs.get(DEV_APPLIED_JOB_ID)?.status).toBe('applied');
+    // The ready one starts at generating: the worker pass writes its CV.
+    expect(readyApplicationSeed(now).jobId).toBe(DEV_READY_JOB_ID);
+    expect(jobs.get(DEV_READY_JOB_ID)?.deep).toBeDefined();
   });
 });

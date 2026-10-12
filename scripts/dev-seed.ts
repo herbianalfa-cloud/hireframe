@@ -705,3 +705,157 @@ export function morningRunSeedDocument(now: Date) {
 export function restDocument(data: Record<string, unknown>) {
   return { fields: toRestFields(data) };
 }
+
+// ---- Application pipeline seed (M7 7D.2) ----
+
+/** `profile/cvHeader` for the fake owner: example address only, no phone or links. */
+export function cvHeaderSeed(now: Date) {
+  return {
+    name: 'Alex Example',
+    email: 'alex@example.com',
+    location: 'London, UK',
+    createdAt: now,
+    updatedAt: now,
+    schemaVersion: 1,
+  };
+}
+
+/** The job the worker writes a real CV for at seed time, so a Ready row has its four files. */
+export const DEV_READY_JOB_ID = 'dev-job-wildcard';
+/** The applications seeded as plain documents (the ready one comes from the worker). */
+export const DEV_NEEDS_INPUT_JOB_ID = 'dev-job-apply-2';
+export const DEV_GENERATING_JOB_ID = 'dev-job-apply-3';
+export const DEV_APPLIED_JOB_ID = 'dev-job-applied';
+/** Chosen and blocked (two invalid drafts): Retry puts it back at generating (M7 7D.4). */
+export const DEV_BLOCKED_JOB_ID = 'dev-job-near-miss-2';
+
+function applicationBase(now: Date, jobId: string, hours: number) {
+  const spec = devJobSeeds(now).find((job) => job.id === jobId);
+  if (!spec) throw new Error(`No seed job ${jobId}`);
+  const verdict = spec.fields.verdict as string;
+  const at = hoursAgo(now, hours);
+  return {
+    jobId,
+    job: { title: spec.title, company: spec.company, verdict },
+    startedAt: at,
+    updatedAt: at,
+    attempt: 0,
+    cvIds: [] as string[],
+    schemaVersion: 1,
+  };
+}
+
+/** The application the worker pass turns into `ready` (it starts at `generating`). */
+export function readyApplicationSeed(now: Date) {
+  return {
+    jobId: DEV_READY_JOB_ID,
+    data: {
+      ...applicationBase(now, DEV_READY_JOB_ID, 2),
+      stage: 'generating',
+      stageAt: hoursAgo(now, 2),
+      questions: [],
+    },
+  };
+}
+
+/**
+ * The emulator project and hosts `npm run dev` runs under (ports from firebase.json). The seed-time
+ * worker gets these from `emulators:exec`; `node scripts/dev-worker.ts` run by hand in a second
+ * terminal falls back to them, so both use the same values.
+ */
+export const DEV_EMULATOR_ENV = {
+  GCLOUD_PROJECT: 'demo-hireframe',
+  FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+  FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:9199',
+} as const;
+
+/** Fills only the unset variables from `DEV_EMULATOR_ENV`; a variable that is set is never overridden. */
+export function withEmulatorDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const [key, value] of Object.entries(DEV_EMULATOR_ENV)) {
+    if (out[key] === undefined || out[key] === '') out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * The environment for the seed-time worker pass. LIVE and the API key are removed, so the pass
+ * always uses the fake model: `LIVE=1 npm run dev` must neither stop while seeding (a missing
+ * key) nor make a paid call before the owner has done anything.
+ */
+export function seedWorkerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const rest = { ...env };
+  delete rest.LIVE;
+  delete rest.ANTHROPIC_API_KEY;
+  return rest;
+}
+
+/**
+ * The other four: Needs your input (two questions, each answerable or skippable), Generating
+ * (waits for `node scripts/dev-worker.ts`), Applied (its job is already `applied`) and Chosen,
+ * blocked after two invalid drafts (Retry makes it generating again). Fake candidate only.
+ */
+export function applicationSeeds(now: Date) {
+  // IDs are `questionId(text)`: this file can't import shared's applications.ts under Node's
+  // type stripping, so dev-tools.test.ts pins them to the real function.
+  const question = (id: string, text: string, level: string, type: string, match: string) => ({
+    id,
+    requirement: text,
+    level,
+    type,
+    match,
+  });
+  return [
+    {
+      jobId: DEV_NEEDS_INPUT_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_NEEDS_INPUT_JOB_ID, 4),
+        stage: 'needs_input',
+        stageAt: hoursAgo(now, 4),
+        questions: [
+          question('q-02a7bdc3c99a', 'Experience with dbt', 'nice', 'tool', 'missing'),
+          question(
+            'q-18d1be1df09b',
+            'Presenting analysis to non-technical stakeholders',
+            'must',
+            'skill',
+            'partial',
+          ),
+        ],
+      },
+    },
+    {
+      jobId: DEV_GENERATING_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_GENERATING_JOB_ID, 1),
+        stage: 'generating',
+        stageAt: hoursAgo(now, 1),
+        questions: [],
+      },
+    },
+    {
+      jobId: DEV_APPLIED_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_APPLIED_JOB_ID, 26),
+        stage: 'applied',
+        stageBefore: 'ready',
+        stageAt: hoursAgo(now, 20),
+        // The mirror writes updatedAt when the job is marked applied; the Applied list orders by it.
+        updatedAt: hoursAgo(now, 20),
+        questions: [],
+      },
+    },
+    {
+      jobId: DEV_BLOCKED_JOB_ID,
+      data: {
+        ...applicationBase(now, DEV_BLOCKED_JOB_ID, 5),
+        stage: 'chosen',
+        stageAt: hoursAgo(now, 3),
+        blocked: { code: 'invalid_output', at: hoursAgo(now, 3) },
+        attempt: 2,
+        lastIssues: ['unsupported_number', 'too_long'],
+        questions: [],
+      },
+    },
+  ];
+}

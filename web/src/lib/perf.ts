@@ -39,9 +39,61 @@ export function hfMarks(): [string, number][] {
   }
 }
 
+// ---- When the app is usable (M7 7D.4) ----
+
+/** On a route that isn't Today, the first idle moment counts; this is its fallback. */
+const IDLE_FALLBACK_MS = 1_500;
+/** If Today never becomes usable (its list failed), later reads still start after this. */
+const USABLE_GIVE_UP_MS = 10_000;
+
+let usableSignalled = false;
+const usableWaiters = new Set<() => void>();
+
+/** Today calls this when it marks `hf:usable`; whatever was waiting on it may now start. */
+export function signalUsable(): void {
+  usableSignalled = true;
+  for (const wake of [...usableWaiters]) wake();
+}
+
+/** True once Today has signalled `hf:usable`: a sheet opened later reads at once. */
+export function isUsable(): boolean {
+  return usableSignalled;
+}
+
+/**
+ * Resolves when reads that aren't on the critical path may start (the pipeline badge). On Today
+ * (`onToday`) that is when `signalUsable` is called; anywhere else, at the first idle moment
+ * (`requestIdleCallback`, else 1.5 s). Both fall back to a time limit, so a failed Apply list can't
+ * hold them back for good.
+ */
+export function whenUsable(onToday: boolean): Promise<void> {
+  if (usableSignalled) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let idle: number | undefined;
+    const done = () => {
+      usableWaiters.delete(done);
+      timers.forEach(clearTimeout);
+      if (idle !== undefined && typeof cancelIdleCallback === 'function') cancelIdleCallback(idle);
+      resolve();
+    };
+    usableWaiters.add(done);
+    timers.push(setTimeout(done, USABLE_GIVE_UP_MS));
+    if (!onToday) {
+      if (typeof requestIdleCallback === 'function') {
+        idle = requestIdleCallback(done, { timeout: IDLE_FALLBACK_MS });
+      } else {
+        timers.push(setTimeout(done, IDLE_FALLBACK_MS));
+      }
+    }
+  });
+}
+
 /** Forgets what was marked, for tests that reload the page's state. */
 export function resetMarksForTest(): void {
   marked.clear();
+  usableSignalled = false;
+  usableWaiters.clear();
   try {
     performance.clearMarks();
   } catch {

@@ -3,9 +3,11 @@ import { fileURLToPath } from 'node:url';
 
 import {
   DIGEST_VERDICTS,
+  digestAppliedWeekSpec,
   digestJobsSpec,
   digestRunsSpec,
   digestSourcesSpec,
+  digestStageSpec,
   digestWaitingSpec,
   indexServes,
   type CompositeIndex,
@@ -43,5 +45,19 @@ describe('digest query specs', () => {
       expect(indexServes(spec, [])).toBe(true);
     }
     expect(digestRunsSpec.orderBy).toEqual([{ field: 'startedAt', direction: 'desc' }]);
+  });
+
+  it('serves the Pipeline line’s stage counts without a composite index', () => {
+    for (const stage of ['needs_input', 'generating', 'ready'] as const) {
+      const spec = digestStageSpec(stage);
+      expect(spec.orderBy).toEqual([]);
+      expect(indexServes(spec, [])).toBe(true);
+    }
+  });
+
+  it('serves the applied-this-week count from the (status, appliedAt desc) composite', () => {
+    const spec = digestAppliedWeekSpec(SINCE);
+    expect(indexServes(spec, indexes)).toBe(true);
+    expect(indexServes(spec, [])).toBe(false);
   });
 });

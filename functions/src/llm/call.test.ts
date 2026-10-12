@@ -318,3 +318,18 @@ describe('llmCall', () => {
     expect(t.sent[0]).not.toHaveProperty('tools');
   });
 });
+
+describe('llmCall maxSends', () => {
+  it('makes one send only when maxSends is 1, leaving the retry to the caller', async () => {
+    const t = transport([response('not json'), response('{"answer":"ok"}')]);
+    const error: unknown = await llmCall(deps({ transport: t }), {
+      purpose: 'addFact',
+      system: 'Return JSON.',
+      user: 'x',
+      schema: Schema,
+      maxSends: 1,
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ failure: 'invalid_json' });
+    expect(t.sent).toHaveLength(1);
+  });
+});

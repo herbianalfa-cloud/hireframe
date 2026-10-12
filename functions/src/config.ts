@@ -503,6 +503,8 @@ export const DIGEST = {
   jobsPerVerdict: 10,
   /** Fallback look-back when there is no earlier morning run to measure from. */
   defaultLookbackMs: 24 * 3_600_000,
+  /** The most documents each Pipeline count reads; a count at the limit reads as "n+". */
+  pipelineCountLimit: 100,
 } as const;
 
 // ---- Applications and CV writing (M7, ADR-053) ----
@@ -515,11 +517,31 @@ export const APPLICATIONS = {
   maxAttempts: APPLICATION_LIMITS.maxAttempts,
   workerMaxPerRun: 10,
   /**
+   * Applications read per run before the oldest `workerMaxPerRun` are taken (the query has no
+   * ordering, so the oldest are picked in code from this many).
+   */
+  workerReadLimit: 50,
+  /**
    * No new CV call starts after this much of the worker's run. A call started at the deadline
    * still ends within its budget plus the margin, inside the worker's timeout (config.test.ts):
    * 540 s - 300 s budget - 30 s margin.
    */
   workerStartDeadlineMs: 210_000,
+  /**
+   * One `withdraw` with `deleteFiles` is bounded: it lists at most `withdrawListLimit` objects
+   * (one page, never auto-paginated), deletes at most `withdrawMaxVersions` versions, and starts no
+   * new delete after `withdrawDeadlineMs`, well inside the callable's 120 s timeout. Repeating the
+   * withdraw finishes the job (the result says `cleanupRemaining`).
+   */
+  withdrawListLimit: 200,
+  withdrawMaxVersions: 20,
+  withdrawDeadlineMs: 60_000,
+} as const;
+
+/** The CV worker's schedule: every 10 minutes, 07:00 to 23:50, UK time (ADR-053). */
+export const CV_WORKER_SCHEDULE = {
+  cron: '*/10 7-23 * * *',
+  timeZone: 'Europe/London',
 } as const;
 
 /**

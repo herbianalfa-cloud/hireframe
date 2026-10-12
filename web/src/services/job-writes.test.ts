@@ -6,6 +6,7 @@ import {
   buildJobFeedbackRemovalWrite,
   buildJobFeedbackWrite,
   buildJobStatusWrite,
+  GENERATING_APPLIED_REASON,
 } from './job-writes';
 
 const NOW = serverTimestamp();
@@ -50,6 +51,75 @@ describe('buildJobStatusWrite', () => {
     expect(() =>
       buildJobStatusWrite('job-1', { ...job, status: 'interview' }, 'saved', NOW),
     ).toThrow('can’t be changed');
+  });
+});
+
+describe('buildJobStatusWrite: the Applied mirror', () => {
+  const application = (extra: DocumentData = {}): DocumentData => ({
+    jobId: 'job-1',
+    stage: 'ready',
+    stageAt: 'untouched',
+    ...extra,
+  });
+
+  it('writes stage, stageBefore and updatedAt only, keeping the stage it was in', () => {
+    for (const stage of ['chosen', 'needs_input', 'ready']) {
+      const write = buildJobStatusWrite('job-1', job, 'applied', NOW, application({ stage }));
+      expect(write.application).toEqual({ stage: 'applied', stageBefore: stage, updatedAt: NOW });
+    }
+  });
+
+  it('restores stageBefore on undo and deletes it', () => {
+    const applied = { ...job, status: 'applied' };
+    const write = buildJobStatusWrite(
+      'job-1',
+      applied,
+      'new',
+      NOW,
+      application({ stage: 'applied', stageBefore: 'needs_input' }),
+    );
+    expect(write.application).toEqual({
+      stage: 'needs_input',
+      stageBefore: deleteField(),
+      updatedAt: NOW,
+    });
+  });
+
+  it('leaves the job write exactly as it was', () => {
+    const plain = buildJobStatusWrite('job-1', job, 'applied', NOW);
+    const mirrored = buildJobStatusWrite('job-1', job, 'applied', NOW, application());
+    expect(mirrored.update).toEqual(plain.update);
+    expect(mirrored.event).toEqual(plain.event);
+    expect(plain).not.toHaveProperty('application');
+  });
+
+  it('has no application part without an application, or for one the mirror does not move', () => {
+    expect(buildJobStatusWrite('job-1', job, 'applied', NOW, undefined)).not.toHaveProperty(
+      'application',
+    );
+    expect(
+      buildJobStatusWrite('job-1', job, 'applied', NOW, application({ stage: 'withdrawn' })),
+    ).not.toHaveProperty('application');
+    expect(
+      buildJobStatusWrite('job-1', job, 'saved', NOW, application({ stage: 'ready' })),
+    ).not.toHaveProperty('application');
+    // Undo with a stageBefore the rules would refuse: the job still goes back, the mirror waits.
+    const applied = { ...job, status: 'applied' };
+    expect(
+      buildJobStatusWrite(
+        'job-1',
+        applied,
+        'new',
+        NOW,
+        application({ stage: 'applied', stageBefore: 'generating' }),
+      ),
+    ).not.toHaveProperty('application');
+  });
+
+  it('refuses Mark applied while the CV is being written, with the reason', () => {
+    expect(() =>
+      buildJobStatusWrite('job-1', job, 'applied', NOW, application({ stage: 'generating' })),
+    ).toThrow(GENERATING_APPLIED_REASON);
   });
 });
 

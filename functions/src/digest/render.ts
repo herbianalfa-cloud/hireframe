@@ -1,6 +1,6 @@
 import { spendMeter, type DigestState } from '@hireframe/shared';
 
-import { APP_ORIGIN, FUNNEL } from '../config.js';
+import { APP_ORIGIN, DIGEST, FUNNEL } from '../config.js';
 import { londonParts } from './state.js';
 
 /**
@@ -48,7 +48,7 @@ export interface DigestSourceLine {
   errorCode?: string;
 }
 
-/** Filled in by M7D; absent in 7B. */
+/** The Pipeline line's numbers (M7 7D.4); absent when the applications read failed. */
 export interface DigestPipeline {
   needsInput: number;
   generating: number;
@@ -259,12 +259,23 @@ function errorsSection(run: DigestRunSummary | undefined): Section {
   return { title: 'Errors', lines, empty: 'None today' };
 }
 
+/** The largest number the Pipeline line prints; a count read at its limit shows as "n+". */
+const PIPELINE_SHOW_MAX = 999;
+
+/** A whole number from 0 to `PIPELINE_SHOW_MAX`, so nothing but digits (and a +) reaches the line. */
+function countText(value: number, limit = PIPELINE_SHOW_MAX): string {
+  const whole = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+  const shown = Math.min(whole, PIPELINE_SHOW_MAX);
+  return whole >= limit || whole > PIPELINE_SHOW_MAX ? `${String(shown)}+` : String(shown);
+}
+
 function pipelineSection(pipeline: DigestPipeline): Section {
+  const limit = DIGEST.pipelineCountLimit;
   return {
     title: 'Pipeline',
     lines: [
       {
-        text: `${String(pipeline.needsInput)} need your input · ${String(pipeline.generating)} generating · ${String(pipeline.ready)} ready to send · ${String(pipeline.appliedThisWeek)} applied this week of ${String(pipeline.weeklyTarget)}`,
+        text: `${countText(pipeline.needsInput, limit)} need your input · ${countText(pipeline.generating, limit)} generating · ${countText(pipeline.ready, limit)} ready to send · ${countText(pipeline.appliedThisWeek, limit)} applied this week of ${countText(pipeline.weeklyTarget)}`,
         href: `${APP_ORIGIN}/pipeline`,
       },
     ],

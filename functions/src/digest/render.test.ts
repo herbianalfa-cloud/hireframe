@@ -111,6 +111,44 @@ describe('renderDigest: ready', () => {
     );
     expect(hrefs(withPipeline.html)).toContain(`${APP_ORIGIN}/pipeline`);
   });
+
+  it('prints only whole numbers in the pipeline line, with "n+" for a count read at its limit', () => {
+    const out = renderDigest(
+      input({
+        pipeline: {
+          needsInput: Number.NaN,
+          generating: -4,
+          ready: 100,
+          appliedThisWeek: 2.9,
+          weeklyTarget: 5_000_000,
+        },
+      }),
+    );
+    expect(out.text).toContain(
+      '0 need your input · 0 generating · 100+ ready to send · 2 applied this week of 999+',
+    );
+  });
+
+  it('keeps hostile values out of the pipeline line and links only to the app', () => {
+    const hostile = '<img src=x onerror=alert(1)>https://evil.example/x' as unknown as number;
+    const out = renderDigest(
+      input({
+        pipeline: {
+          needsInput: hostile,
+          generating: 1,
+          ready: 1,
+          appliedThisWeek: 1,
+          weeklyTarget: 10,
+        },
+      }),
+    );
+    const section = out.html.slice(out.html.indexOf('Pipeline</h2>'));
+    expect(section).not.toContain('<img');
+    expect(section).not.toContain('evil.example');
+    expect(out.text).not.toContain('evil.example');
+    const pipelineLinks = hrefs(section).filter((href) => href.endsWith('/pipeline'));
+    expect(pipelineLinks).toEqual([`${APP_ORIGIN}/pipeline`]);
+  });
 });
 
 describe('renderDigest: empty sections', () => {
@@ -350,8 +388,17 @@ describe('renderDigest: the worst case fits the response limit', () => {
           errors: Array.from({ length: 50 }, () => ({ sourceId: worst(200), code: worst(200) })),
         },
         spend: { spendPence: 1499, capPence: 1500 },
+        // The widest the Pipeline line gets: every number past the print limit.
+        pipeline: {
+          needsInput: Number.MAX_SAFE_INTEGER,
+          generating: Number.MAX_SAFE_INTEGER,
+          ready: Number.MAX_SAFE_INTEGER,
+          appliedThisWeek: Number.MAX_SAFE_INTEGER,
+          weeklyTarget: Number.MAX_SAFE_INTEGER,
+        },
       }),
     );
+    expect(out.text).toContain('999+ need your input · 999+ generating · 999+ ready to send');
     expect(out.html.length).toBeLessThanOrEqual(100_000);
     expect(out.text.length).toBeLessThanOrEqual(100_000);
     expect(out.html.length).toBeGreaterThan(50_000); // the fixture really is large

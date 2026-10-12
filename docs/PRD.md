@@ -57,10 +57,11 @@ Out (later waves): see `ROADMAP.md`.
 - AC: eval set agreement ≥ 80% at launch; every verdict shows evidence; skipped jobs show the rule or stage that skipped them.
 
 ### R7 Dashboard
-- Screens: Today, Jobs, Job detail, Lookup, Profile, Criteria, System. Dark default, light toggle, responsive (phone + laptop).
+- Screens: Today, Jobs, Job detail, Pipeline, Lookup, Profile, Criteria, System. Dark default, light toggle, responsive (phone + laptop).
 - Today: Apply / Near miss / Wildcard lists under a summary bar (open Apply, near miss and wildcard counts, applied this week vs target 10, last run, next run, spend this month vs cap as a chip), which loads after the Apply list (ADR-051). The lists are each sortable (Best overall, Fit, Luck, Newest); Jobs adds Lane and, for near misses, Gap filters (ADR-044).
-- Job actions: Open posting, Apply, Skip, 👍/👎 on verdict (with optional reason), Generate CV.
-- AC: Lighthouse accessibility ≥ 95; all actions keyboard-accessible; loads usable in < 2 s on 4G, where usable means the Apply list is filled (the summary bar's counts load after it, ADR-051).
+- Job actions: Open posting, Apply, Skip, 👍/👎 on verdict (with optional reason), Start application (a separate control from Apply; disabled with its reason when the job has no verdict or deep read). Apply on a job that has an application also moves it to Applied, and undoing it restores the stage; Apply waits, with the reason, while the CV is being written.
+- Pipeline: Chosen, Needs your input, Generating, Ready to send and Applied, with a to-do count (needs your input + ready to send) on the navigation item and in Today's summary bar, both read after the Apply list.
+- AC: Lighthouse accessibility ≥ 95 (including Pipeline); all actions keyboard-accessible; loads usable in < 2 s on 4G, where usable means the Apply list is filled (the summary bar's counts load after it, ADR-051).
 
 ### R8 Lookup
 - Paste any job URL (incl. LinkedIn). Returns: seen or not, verdict, stage, when.
@@ -68,12 +69,13 @@ Out (later waves): see `ROADMAP.md`.
 - AC: LinkedIn `/jobs/view/{id}` URLs match jobs ingested from LinkedIn alert emails by job ID.
 
 ### R9 Digest
-- Email after each morning run, weekdays: Apply (with luck score + reason), Near misses (+ what fell short), Wildcards, run health, spend, errors. Apps Script sends it at about 07:50, and a fallback at about 08:20 sends whatever the server says if the first didn't (ADR-052). Links point into the app only.
+- Email after each morning run, weekdays: Apply (with luck score + reason), Near misses (+ what fell short), Wildcards, run health, spend, errors. Apps Script sends it at about 07:50, and a fallback at about 08:20 sends whatever the server says if the first didn't (ADR-052). Links point into the app only. A Pipeline line counts the applications that need your input, are generating or are ready to send, and the jobs applied this week against the target; it is left out, never the whole digest, if those counts can't be read (M7 7D, ADR-055).
 - AC: sent only if the run succeeded or with an explicit failure or in-progress notice; never silently absent. If the digest itself can't be fetched, the script sends a plain "Hireframe digest unavailable (code)" email.
 
 ### R10 CV tailoring (on demand)
-- For a chosen job: one-page tailored CV + short cover note, built only from profile facts, ATS-safe .docx + PDF, stored with version and linked to the job.
-- AC: validator rejects any bullet without a `factId`; output fits one page; user can regenerate with notes.
+- For a chosen job: one-page tailored CV + short cover note, built only from profile facts, ATS-safe .docx + PDF, stored with version and linked to the job. The owner starts it with **Start application**; it moves through Chosen (only while blocked), **Needs your input**, Generating, **Ready to send** and Applied, and each job moves on its own. Contact details come from a CV header the owner sets on Profile, never from the model.
+- **Needs your input:** up to five questions from the job's requirements that the profile doesn't fully meet (in code, no model call). Each can be answered (the answer becomes a versioned profile fact that shows where it came from) or skipped, and **Skip all** skips the rest. An answer that can't become a verified fact is refused, not guessed.
+- AC: validator rejects any bullet without a `factId`; output fits one page; user can regenerate with notes; an answered question appears on Profile as a fact with its source.
 
 ### R11 Cost control
 - Monthly spend cap (default £15) and per-run cap. Live meter on dashboard.

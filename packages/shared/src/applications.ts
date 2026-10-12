@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { fnv1a64 } from './dedupe.js';
+import { COLLECTIONS } from './firestore.js';
 import {
   FUNNEL_LIMITS,
   MATCHES,
@@ -10,6 +11,7 @@ import {
   type JobRequirement,
 } from './funnel.js';
 import { foldText } from './normalise.js';
+import type { QuerySpec } from './query-spec.js';
 
 /**
  * The application pipeline's data (M7, docs/plans/m7-plan.md): `applications/{jobId}`, one per job
@@ -178,3 +180,71 @@ export function questionsFromRequirements(
     .slice(0, max)
     .map(({ question }) => question);
 }
+
+// ---- The `application` callable (M7 7D.1) ----
+
+const JobId = z.string().min(1).max(200);
+const QuestionId = z.string().regex(/^q-[0-9a-f]{12}$/);
+
+/** What the owner can ask of an application. Every move but Mark applied goes through here. */
+export const ApplicationInputSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('start'), jobId: JobId }),
+  z.strictObject({
+    action: z.literal('answer'),
+    jobId: JobId,
+    questionId: QuestionId,
+    text: z.string().trim().min(1).max(APPLICATION_LIMITS.answer),
+  }),
+  z.strictObject({ action: z.literal('skip'), jobId: JobId, questionId: QuestionId }),
+  z.strictObject({ action: z.literal('skipAll'), jobId: JobId }),
+  z.strictObject({ action: z.literal('retry'), jobId: JobId }),
+  z.strictObject({
+    action: z.literal('regenerate'),
+    jobId: JobId,
+    notes: z.string().trim().min(1).max(APPLICATION_LIMITS.notes).exactOptional(),
+  }),
+  z.strictObject({ action: z.literal('withdraw'), jobId: JobId, deleteFiles: z.boolean() }),
+]);
+export type ApplicationInput = z.infer<typeof ApplicationInputSchema>;
+
+export const ApplicationResultSchema = z.strictObject({
+  jobId: z.string().min(1),
+  stage: z.enum(APPLICATION_STAGES),
+  blocked: z.enum(BLOCKED_CODES).exactOptional(),
+  /** `answer` only: the facts the answer became (new and already-known ones). */
+  factIds: z.array(z.string().min(1)).max(5).exactOptional(),
+  /** Questions still waiting for an answer or a skip. */
+  unanswered: z.int().min(0).max(APPLICATION_LIMITS.maxQuestions),
+  /**
+   * `withdraw` with `deleteFiles` only: some CV versions are still in Storage (the clean-up is
+   * bounded per call). Repeat the withdraw with `deleteFiles` to finish.
+   */
+  cleanupRemaining: z.literal(true).exactOptional(),
+});
+export type ApplicationResult = z.infer<typeof ApplicationResultSchema>;
+
+// ---- The CV worker's query (M7 7D.2) ----
+
+/**
+ * The applications waiting for the worker: equality only, so the single-field index serves it and
+ * no composite is needed. The worker sorts by `stageAt` in code (oldest first).
+ */
+export const generatingApplicationsSpec: QuerySpec = {
+  collection: COLLECTIONS.applications,
+  filters: [{ field: 'stage', op: '==', value: 'generating' }],
+  orderBy: [],
+};
+
+// ---- Pipeline queries added in 7D.4 ----
+
+/**
+ * Applied applications, newest first by `updatedAt`. The Applied mirror writes `updatedAt` and
+ * leaves `stageAt` alone (the rules allow only `stage`, `stageBefore` and `updatedAt`), so this is
+ * the order that means "marked applied most recently". It needs the `(stage, updatedAt desc)`
+ * composite.
+ */
+export const appliedApplicationsSpec: QuerySpec = {
+  collection: COLLECTIONS.applications,
+  filters: [{ field: 'stage', op: '==', value: 'applied' }],
+  orderBy: [{ field: 'updatedAt', direction: 'desc' }],
+};

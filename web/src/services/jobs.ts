@@ -18,6 +18,7 @@ import {
   serverTimestamp,
   startAfter,
   writeBatch,
+  type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 
@@ -227,6 +228,7 @@ async function commitAction(jobId: string, write: JobActionWrite): Promise<void>
   const batch = writeBatch(db);
   batch.update(doc(db, PATHS.job(jobId)), write.update);
   batch.set(doc(collection(db, COLLECTIONS.events)), write.event);
+  if (write.application) batch.update(doc(db, PATHS.application(jobId)), write.application);
   await withRetry(() => withTimeout(batch.commit(), WRITE_TIMEOUT_MS, 'job action'), {
     label: 'jobs.action',
     // A committed-but-timed-out batch must not be sent twice: only retry clear rejections.
@@ -234,9 +236,31 @@ async function commitAction(jobId: string, write: JobActionWrite): Promise<void>
   });
 }
 
-/** Save, skip, mark applied, or put back to new. */
+/**
+ * The job's application data, read once before the batch so Mark applied and Undo can mirror it
+ * (M7 7D.4). Undefined when there is none. Not retried on a clear refusal: a failure here fails
+ * the action, because writing the job alone would leave the two out of step.
+ */
+async function loadApplicationRaw(jobId: string): Promise<DocumentData | undefined> {
+  const { db } = await getFirebase();
+  const snapshot = await withRetry(
+    () => withTimeout(getDoc(doc(db, PATHS.application(jobId))), READ_TIMEOUT_MS, 'application'),
+    { label: 'jobs.application', isRetryable: isTransient },
+  );
+  return snapshot.exists() ? snapshot.data() : undefined;
+}
+
+/**
+ * Save, skip, mark applied, or put back to new. Marking applied (or undoing it) on a job that
+ * has an application writes that too, in the same batch.
+ */
 export async function setJobStatus(view: JobView, to: ClientJobStatus): Promise<void> {
-  await commitAction(view.id, buildJobStatusWrite(view.id, view.raw, to, serverTimestamp()));
+  const touchesApplied = to === 'applied' || view.raw.status === 'applied';
+  const application = touchesApplied ? await loadApplicationRaw(view.id) : undefined;
+  await commitAction(
+    view.id,
+    buildJobStatusWrite(view.id, view.raw, to, serverTimestamp(), application),
+  );
 }
 
 /** 👍/👎 on the verdict. The rules reject it if a re-score changed the verdict meanwhile. */

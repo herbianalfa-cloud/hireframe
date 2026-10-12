@@ -12,6 +12,9 @@ vi.mock('@/features/criteria/CriteriaPage', () => ({
 }));
 vi.mock('@/features/today/TodayPage', () => ({ TodayPage: () => <h1>Today screen</h1> }));
 vi.mock('@/features/jobs/JobsPage', () => ({ JobsPage: () => <h1>Jobs screen</h1> }));
+vi.mock('@/features/pipeline/PipelinePage', () => ({
+  PipelinePage: () => <h1>Pipeline screen</h1>,
+}));
 vi.mock('@/features/lookup/LookupPage', () => ({ LookupPage: () => <h1>Lookup screen</h1> }));
 vi.mock('@/features/system/SystemPage', () => ({ SystemPage: () => <h1>System screen</h1> }));
 
@@ -31,6 +34,7 @@ describe('AppRoutes', () => {
   it.each([
     ['/', 'Today screen'],
     ['/jobs', 'Jobs screen'],
+    ['/pipeline', 'Pipeline screen'],
     ['/lookup', 'Lookup screen'],
     ['/profile', 'Profile screen'],
     ['/criteria', 'Criteria screen'],
@@ -38,6 +42,13 @@ describe('AppRoutes', () => {
   ])('routes %s to the built screen, not the placeholder', async (path, heading) => {
     renderAt(path);
     expect(await screen.findByRole('heading', { name: heading })).toBeTruthy();
+  });
+
+  it('loads the Pipeline screen lazily, so none of its code is in the initial bundle', () => {
+    expect(appSource).toMatch(
+      /const PipelinePage = lazy\(\(\) =>\s+import\('@\/features\/pipeline\/PipelinePage'\)/,
+    );
+    expect(appSource).not.toMatch(/^import .* from '@\/features\/pipeline/m);
   });
 
   it('loads the Lookup screen lazily, so none of its code is in the initial bundle', () => {

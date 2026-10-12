@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { setLogSink } from '../log.js';
 import { buildDigest } from './build.js';
 import type { DigestJobList } from './render.js';
 import { readRunDoc, type DigestStore, type StoredDigestRun } from './store.js';
@@ -53,14 +54,24 @@ function fakeStore(runs: StoredDigestRun[]) {
   const waitingForDescription = vi.fn<DigestStore['waitingForDescription']>(() =>
     Promise.resolve(2),
   );
+  const pipeline = vi.fn<DigestStore['pipeline']>(() =>
+    Promise.resolve({
+      needsInput: 2,
+      generating: 1,
+      ready: 3,
+      appliedThisWeek: 4,
+      weeklyTarget: 10,
+    }),
+  );
   const store: DigestStore = {
     recentRuns: () => Promise.resolve(runs),
     jobsSince,
     usage: () => Promise.resolve({ spendPence: 100, capPence: 1500 }),
     sources,
     waitingForDescription,
+    pipeline,
   };
-  return { store, jobsSince, sources, waitingForDescription };
+  return { store, jobsSince, sources, waitingForDescription, pipeline };
 }
 
 const request = { kind: 'morning', day: DAY } as const;
@@ -116,6 +127,51 @@ describe('buildDigest', () => {
     expect(jobsSince.mock.calls[0]?.[1]).toEqual(new Date('2026-10-06T06:30:00Z'));
   });
 
+  it('adds the Pipeline line from one pipeline read', async () => {
+    const { store, pipeline } = fakeStore(runs);
+    const out = await buildDigest(store, request, NOW);
+    expect(pipeline).toHaveBeenCalledTimes(1);
+    expect(out.text).toContain(
+      '2 need your input · 1 generating · 3 ready to send · 4 applied this week of 10',
+    );
+  });
+
+  it('still sends, without the Pipeline line, when the applications read fails', async () => {
+    const { store } = fakeStore(runs);
+    const failing: DigestStore = {
+      ...store,
+      pipeline: () => Promise.reject(Object.assign(new Error('boom: Acme secret'), { code: 14 })),
+    };
+    const out = await buildDigest(failing, request, NOW);
+    expect(out.state).toBe('ready');
+    expect(out.text).toContain('Analyst · Acme');
+    expect(out.text).not.toContain('PIPELINE');
+    expect(out.html).not.toContain('Pipeline</h2>');
+  });
+
+  it('logs a failed applications read by error class and code only', async () => {
+    const lines: { event: string; fields: Record<string, unknown> }[] = [];
+    setLogSink((_level, event, fields) => lines.push({ event, fields }));
+    try {
+      const { store } = fakeStore(runs);
+      await buildDigest(
+        {
+          ...store,
+          pipeline: () =>
+            Promise.reject(Object.assign(new Error('Acme Analytics secret'), { code: 14 })),
+        },
+        request,
+        NOW,
+      );
+    } finally {
+      setLogSink();
+    }
+    expect(lines).toEqual([
+      { event: 'digest.pipeline_failed', fields: { errorName: 'Error', errorCode: 14 } },
+    ]);
+    expect(JSON.stringify(lines)).not.toContain('Acme');
+  });
+
   it('is in_progress with no job, source or description reads while the run is running', async () => {
     const { store, jobsSince, sources, waitingForDescription } = fakeStore([
       run('today', '2026-10-07T06:45:00Z', { status: 'running' }),
@@ -161,6 +217,7 @@ describe('buildDigest', () => {
     const { store } = fakeStore([]);
     expect(Object.keys(store).sort()).toEqual([
       'jobsSince',
+      'pipeline',
       'recentRuns',
       'sources',
       'usage',

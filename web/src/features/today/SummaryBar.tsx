@@ -1,12 +1,23 @@
 import { isRunStalled, nextScheduledRun, summaryCounts, type Run } from '@hireframe/shared';
-import { CalendarClock, CircleCheck, Clock, Loader2, Send, TriangleAlert } from 'lucide-react';
+import {
+  CalendarClock,
+  CircleCheck,
+  Clock,
+  ListChecks,
+  Loader2,
+  Send,
+  TriangleAlert,
+} from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { VERDICT_CLASSES, VERDICT_ICONS, VERDICT_LABELS } from '@/features/jobs/labels';
 import { RUN_STATUS_LABELS } from '@/features/system/labels';
+import { useTodoCount } from '@/features/pipeline/useTodoCount';
+import { todoText } from '@/features/pipeline/PipelineBadge';
 import type { TodayListId } from '@/services/dashboard';
+import type { TodoCount } from '@/services/pipeline-todo';
 
 import { useLastRun, useSummaryCounts } from './hooks';
 import { SpendMeter } from './SpendMeter';
@@ -113,6 +124,46 @@ function CountLink({
   );
 }
 
+/**
+ * Things to do (M7 7D.4): applications waiting on the owner, linking to Pipeline. Reads its own
+ * count, so it settles and fails alone: "–" and "unavailable" when the read failed.
+ */
+function ThingsToDo({ state }: { state: TodoCount }) {
+  const text = todoText(state);
+  const name =
+    state.status === 'loading'
+      ? 'Things to do, loading'
+      : state.status === 'error'
+        ? 'Things to do unavailable'
+        : `Things to do ${text || '0'}`;
+  return (
+    <li className="min-w-0">
+      <Link
+        to="/pipeline"
+        aria-label={name}
+        className="flex h-full flex-col gap-1 px-4 py-3 hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
+      >
+        <span className="text-xs text-muted-foreground">Things to do</span>
+        {state.status === 'loading' ? (
+          <CountSkeleton />
+        ) : state.status === 'error' ? (
+          <Unavailable />
+        ) : (
+          <>
+            <span className="flex items-center gap-1.5 font-mono text-2xl tabular-nums">
+              <ListChecks aria-hidden="true" className="size-5" />
+              {text || '0'}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {state.count === 0 ? 'Nothing waiting' : 'questions to answer or CVs to send'}
+            </span>
+          </>
+        )}
+      </Link>
+    </li>
+  );
+}
+
 function LastRun({ run, now }: { run: Run | null; now: Date }) {
   if (!run) return <span className="text-sm text-muted-foreground">No runs yet</span>;
   const stalled = isRunStalled(run, now);
@@ -147,7 +198,8 @@ function LastRun({ run, now }: { run: Run | null; now: Date }) {
  * Today's summary bar (ADR-051): open Apply, near miss and wildcard counts, applied this week,
  * the last and next scan, and the month's spend. It replaces the four tiles and mounts only after
  * `hf:usable`, so none of its reads is on the critical path. Every item has a label and a
- * number or icon, never colour alone. "Things to do" arrives with the pipeline (M7D).
+ * number or icon, never colour alone. "Things to do" counts the applications waiting on the owner
+ * and reads on its own (M7 7D.4).
  */
 export function SummaryBar({
   weeklyTarget,
@@ -157,6 +209,7 @@ export function SummaryBar({
   refreshKey: number;
 }) {
   const state = useSummaryCounts(refreshKey);
+  const todo = useTodoCount(true);
   const lastRun = useLastRun();
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -181,6 +234,7 @@ export function SummaryBar({
         {OPEN_LINKS.map(({ list, label }) => (
           <CountLink key={list} list={list} label={label} value={values[list]} />
         ))}
+        <ThingsToDo state={todo} />
         <Item label="Applied this week">
           {summary === null ? (
             <CountSkeleton label="applied this week" />

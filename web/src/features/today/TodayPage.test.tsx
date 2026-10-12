@@ -15,7 +15,9 @@ import {
   watchTodayList,
   type SummaryCountResults,
 } from '@/services/dashboard';
+import { watchApplication } from '@/services/applications';
 import { setJobStatus, watchJob, type JobView } from '@/services/jobs';
+import { watchTodoCount } from '@/services/pipeline-todo';
 import type { LiveState } from '@/services/profile';
 
 import { TodayPage } from './TodayPage';
@@ -28,6 +30,11 @@ vi.mock('@/services/dashboard', async (importOriginal) => ({
   watchLastRun: vi.fn(),
   watchSpend: vi.fn(),
   loadAgreement: vi.fn(),
+}));
+vi.mock('@/services/pipeline-todo', () => ({ watchTodoCount: vi.fn() }));
+vi.mock('@/services/applications', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  watchApplication: vi.fn(),
 }));
 vi.mock('@/services/jobs', () => ({
   watchJob: vi.fn(),
@@ -103,6 +110,10 @@ function setup(
       (options.kpis === 'one-fails' ? { ...COUNTS, nearMiss: null } : COUNTS);
     markOnce('hf:counts');
     return counts;
+  });
+  vi.mocked(watchTodoCount).mockImplementation((callback) => {
+    callback({ status: 'ready', count: 2, capped: false });
+    return () => undefined;
   });
   vi.mocked(watchLastRun).mockImplementation((callback) => {
     callback({ status: 'ready', data: options.run === undefined ? RUN : options.run, invalid: 0 });
@@ -243,6 +254,37 @@ describe('TodayPage', () => {
     expect((await screen.findByRole('dialog')).textContent).toContain('Linked role');
   });
 
+  it('starts no application read for a /?job= link before hf:usable, then only one', async () => {
+    const view = makeView('a1', { title: 'Linked role' });
+    vi.mocked(watchJob).mockImplementation((_id, callback) => {
+      callback({ status: 'ready', data: view, invalid: 0 });
+      return () => undefined;
+    });
+    vi.mocked(watchApplication).mockImplementation((_id, callback) => {
+      callback({ status: 'ready', data: null, invalid: 0 });
+      return () => undefined;
+    });
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    setup({ apply: ready(makeView('a2')) }, { search: '?job=a1', applyGate: gate });
+    // The sheet is up and Actions and StartApplication are mounted; neither has read yet.
+    expect((await screen.findByRole('dialog')).textContent).toContain('Linked role');
+    expect(watchApplication).not.toHaveBeenCalled();
+    open();
+    await waitFor(() => {
+      expect(performance.getEntriesByName('hf:usable')).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(watchApplication).toHaveBeenCalledTimes(1);
+    });
+    // One listener for the sheet, shared by Actions and StartApplication.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(watchApplication).toHaveBeenCalledTimes(1);
+    expect(watchApplication).toHaveBeenCalledWith('a1', expect.any(Function));
+  });
+
   it('refreshes the numbers after a keyboard action', async () => {
     setup({ apply: ready(makeView('a1')) });
     await screen.findByRole('region', { name: 'Summary' });
@@ -305,6 +347,20 @@ describe('TodayPage', () => {
     });
     expect(watchLastRun).toHaveBeenCalledTimes(1);
     expect(watchSpend).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts no Things to do read until the Apply snapshot arrives, then shows it', async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    setup({ apply: ready(makeView('a1')) }, { applyGate: gate });
+    await Promise.resolve();
+    expect(watchTodoCount).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: /things to do/i })).toBeNull();
+    open();
+    expect(await screen.findByRole('link', { name: 'Things to do 2' })).toBeDefined();
+    expect(watchTodoCount).toHaveBeenCalledTimes(1);
   });
 
   it('shows no count query or last run while the Apply list is loading', () => {

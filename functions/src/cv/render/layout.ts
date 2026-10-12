@@ -54,9 +54,12 @@ export type RenderErrorCode = 'unsupported_char';
 
 /** A render that can't proceed. The validator catches model text; this catches the header. */
 export class CvRenderError extends Error {
-  constructor(readonly code: RenderErrorCode) {
+  readonly code: RenderErrorCode;
+
+  constructor(code: RenderErrorCode) {
     super(`cv render refused: ${code}`);
     this.name = 'CvRenderError';
+    this.code = code;
   }
 }
 

@@ -1,8 +1,12 @@
 import type { Job } from '@hireframe/shared';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Application } from '@hireframe/shared';
+import { resetMarksForTest, signalUsable } from '@/lib/perf';
+import { startApplication, watchApplication } from '@/services/applications';
 import { lookupDescribe } from '@/services/lookup';
 import {
   loadJobDescription,
@@ -23,6 +27,11 @@ vi.mock('@/services/jobs', () => ({
   rateJob: vi.fn(),
   unrateJob: vi.fn(),
   jobActionErrorMessage: (error: unknown) => (error instanceof Error ? error.message : 'failed'),
+}));
+vi.mock('@/services/applications', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  watchApplication: vi.fn(),
+  startApplication: vi.fn(),
 }));
 vi.mock('@/services/lookup', () => ({
   lookupDescribe: vi.fn(),
@@ -59,11 +68,22 @@ function showUnjudged(overrides: Partial<Job> = {}): JobView {
   return view;
 }
 
+function givenApplication(application: Application | null) {
+  vi.mocked(watchApplication).mockImplementation((_id, callback) => {
+    callback({ status: 'ready', data: application, invalid: 0 });
+    return () => undefined;
+  });
+}
+
 function open() {
   const onClose = vi.fn();
   const onCommitted = vi.fn();
   const onPatch = vi.fn<(view: JobView) => void>();
-  render(<JobDetail jobId="job1" onClose={onClose} onPatch={onPatch} onCommitted={onCommitted} />);
+  render(
+    <MemoryRouter>
+      <JobDetail jobId="job1" onClose={onClose} onPatch={onPatch} onCommitted={onCommitted} />
+    </MemoryRouter>,
+  );
   return { onClose, onCommitted, onPatch };
 }
 
@@ -112,6 +132,13 @@ const FULL: Partial<Job> = {
 };
 
 beforeEach(() => {
+  // Today has long been usable by the time a sheet is opened in these tests.
+  resetMarksForTest();
+  signalUsable();
+  vi.mocked(watchApplication).mockImplementation((_id, callback) => {
+    callback({ status: 'ready', data: null, invalid: 0 });
+    return () => undefined;
+  });
   vi.mocked(watchJob).mockReset();
   vi.mocked(loadJobDescription).mockReset();
   vi.mocked(setJobStatus).mockReset().mockResolvedValue();
@@ -389,6 +416,50 @@ describe('JobDetail', () => {
     expect(setJobStatus).toHaveBeenCalledWith(view, 'applied');
   });
 
+  describe('Mark applied and the application (M7 7D.4)', () => {
+    const at = new Date('2026-10-07T09:00:00Z');
+    const application = (stage: Application['stage']): Application => ({
+      jobId: 'job1',
+      job: { title: 'Data Analyst', company: 'Acme Analytics', verdict: 'apply' },
+      stage,
+      stageAt: at,
+      startedAt: at,
+      updatedAt: at,
+      questions: [],
+      attempt: 0,
+      cvIds: [],
+      schemaVersion: 1,
+    });
+
+    it('disables Apply while the CV is being written, and says why', () => {
+      show();
+      givenApplication(application('generating'));
+      open();
+      const button = screen.getByRole('button', { name: 'Apply' });
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      const reason = screen.getByText(/still being written/);
+      expect(button.getAttribute('aria-describedby')).toBe(reason.id);
+    });
+
+    it('leaves Apply enabled in every other stage, and with no application', () => {
+      for (const stage of ['chosen', 'needs_input', 'ready', 'withdrawn'] as const) {
+        cleanup();
+        show();
+        givenApplication(application(stage));
+        open();
+        expect(screen.getByRole('button', { name: 'Apply' })).toHaveProperty('disabled', false);
+        expect(screen.queryByText(/still being written/)).toBeNull();
+      }
+    });
+
+    it('keeps Undo available on an applied job whatever the application says', () => {
+      show({ status: 'applied', appliedAt: new Date('2026-10-08T09:00:00Z') });
+      givenApplication(application('applied'));
+      open();
+      expect(screen.getByRole('button', { name: 'Applied' })).toHaveProperty('disabled', false);
+    });
+  });
+
   it('rolls the job back in the page and shows the error when an action is refused', async () => {
     const view = show();
     vi.mocked(setJobStatus).mockRejectedValue(new Error('This job changed since you opened it.'));
@@ -507,15 +578,119 @@ describe('JobDetail', () => {
     },
   );
 
-  it('opens the posting in a new tab and keeps Generate CV off until M7', () => {
+  it('opens the posting in a new tab', () => {
     show();
     open();
     const link = screen.getByRole('link', { name: /open posting/i });
     expect(link.getAttribute('href')).toBe('https://jobs.example.test/acme/1');
     expect(link.getAttribute('rel')).toContain('noopener');
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Generate CV' }).disabled).toBe(
-      true,
-    );
+    expect(screen.queryByRole('button', { name: 'Generate CV' })).toBeNull();
+  });
+
+  describe('Start application', () => {
+    const APPLICATION: Application = {
+      jobId: 'job1',
+      job: { title: 'Data Analyst', company: 'Acme', verdict: 'apply' },
+      stage: 'needs_input',
+      stageAt: new Date('2026-10-12T09:00:00Z'),
+      startedAt: new Date('2026-10-12T09:00:00Z'),
+      updatedAt: new Date('2026-10-12T09:00:00Z'),
+      questions: [],
+      attempt: 0,
+      cvIds: [],
+      schemaVersion: 1,
+    };
+
+    it('is disabled with a reason when the job has no deep read', () => {
+      show();
+      givenApplication(null);
+      open();
+      const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Start application' });
+      expect(button.disabled).toBe(true);
+      expect(button.getAttribute('aria-describedby')).toBeTruthy();
+      expect(screen.getByText(/needs a full read of the posting first/i)).toBeDefined();
+    });
+
+    it('is disabled for a job not judged yet, and for one already applied', () => {
+      showUnjudged();
+      givenApplication(null);
+      open();
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'Start application' }).disabled,
+      ).toBe(true);
+      cleanup();
+      show({ deep: DEEP, status: 'applied' });
+      open();
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'Start application' }).disabled,
+      ).toBe(true);
+      expect(screen.getByText('This job is already marked applied.')).toBeDefined();
+    });
+
+    it('starts an application and says what happens next', async () => {
+      show({ deep: DEEP });
+      givenApplication(null);
+      vi.mocked(startApplication).mockResolvedValue({
+        jobId: 'job1',
+        stage: 'needs_input',
+        unanswered: 2,
+      });
+      open();
+      await userEvent.click(screen.getByRole('button', { name: 'Start application' }));
+      expect(startApplication).toHaveBeenCalledWith('job1');
+      expect(await screen.findByText(/questions are waiting for you in Pipeline/)).toBeDefined();
+    });
+
+    it('says when the start is blocked, and when it fails', async () => {
+      show({ deep: DEEP });
+      givenApplication(null);
+      vi.mocked(startApplication).mockResolvedValueOnce({
+        jobId: 'job1',
+        stage: 'chosen',
+        blocked: 'cv_header_missing',
+        unanswered: 0,
+      });
+      open();
+      await userEvent.click(screen.getByRole('button', { name: 'Start application' }));
+      expect(
+        await screen.findByText(/Started, but blocked: Your CV header is missing/),
+      ).toBeDefined();
+
+      vi.mocked(startApplication).mockRejectedValueOnce(
+        Object.assign(new Error('x'), { code: 'functions/aborted' }),
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Start application' }));
+      expect((await screen.findByRole('alert')).textContent).toMatch(/changed while you were/);
+    });
+
+    it('shows the stage with a link to Pipeline once started', () => {
+      show({ deep: DEEP });
+      givenApplication(APPLICATION);
+      open();
+      expect(screen.queryByRole('button', { name: 'Start application' })).toBeNull();
+      expect(screen.getByText('Needs your input')).toBeDefined();
+      expect(screen.getByRole('link', { name: /Open in Pipeline/ }).getAttribute('href')).toBe(
+        '/pipeline',
+      );
+    });
+
+    it('offers a fresh start after a withdraw', () => {
+      show({ deep: DEEP });
+      givenApplication({ ...APPLICATION, stage: 'withdrawn' });
+      open();
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'Start application' }).disabled,
+      ).toBe(false);
+    });
+
+    it('is a separate control from Apply (Mark applied)', () => {
+      show({ deep: DEEP });
+      givenApplication(null);
+      open();
+      expect(screen.getByRole('button', { name: 'Apply' })).not.toBe(
+        screen.getByRole('button', { name: 'Start application' }),
+      );
+    });
   });
 
   it('records 👍 at once', async () => {

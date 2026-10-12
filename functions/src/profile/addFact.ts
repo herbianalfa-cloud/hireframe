@@ -5,6 +5,7 @@ import {
   verifyEvidence,
   type AddFactExtraction,
   type AddFactResult,
+  type ExistingFact,
 } from '@hireframe/shared';
 import { HttpsError } from 'firebase-functions/https';
 
@@ -24,16 +25,32 @@ export interface AddFactDeps {
   now: () => Date;
 }
 
-export async function addFactHandler(data: unknown, deps: AddFactDeps): Promise<AddFactResult> {
-  const input = AddFactInputSchema.safeParse(data);
-  if (!input.success)
-    throw new HttpsError('invalid-argument', 'Write between 1 and 2,000 characters.');
-  const { text } = input.data;
+/** What a note became: facts to write, and the active facts it repeated. */
+export interface NotePlan {
+  fresh: NewFact[];
+  /** Active facts the note repeated: an answer links to them instead of adding a copy. */
+  knownIds: string[];
+  /** The subset of `knownIds` whose draft's evidence is a verbatim quote of the note. */
+  verifiedKnownIds: string[];
+  skippedDuplicates: number;
+  costPence: number;
+}
 
+/**
+ * The model call and de-duplication shared by `addFact` and an application answer (M7): the text
+ * goes in a `<note>` tag it can't close, evidence is verified against it, and a fact whose type
+ * and text already exist (active or archived) is skipped rather than written again. `purpose`
+ * only picks the cost line; the prompt and the output schema are the same.
+ */
+export async function planNoteFacts(
+  deps: Pick<AddFactDeps, 'llm'> & { existing: () => Promise<ExistingFact[]> },
+  purpose: 'addFact' | 'answerFact',
+  text: string,
+): Promise<NotePlan> {
   let result: LlmCallResult<AddFactExtraction>;
   try {
     result = await deps.llm({
-      purpose: 'addFact',
+      purpose,
       system: ADD_FACT_SYSTEM,
       user: wrapUntrusted('note', text),
       schema: AddFactExtractionSchema,
@@ -48,24 +65,49 @@ export async function addFactHandler(data: unknown, deps: AddFactDeps): Promise<
     throw error;
   }
 
-  const known = new Set((await deps.store.listFacts()).map((fact) => factKey(fact.content)));
-  const facts: NewFact[] = [];
+  const known = new Map<string, ExistingFact | null>();
+  for (const fact of await deps.existing()) known.set(factKey(fact.content), fact);
+  const fresh: NewFact[] = [];
+  const knownIds: string[] = [];
+  const verifiedKnownIds: string[] = [];
   let skippedDuplicates = 0;
   for (const draft of result.data.facts) {
     const key = factKey(draft);
+    const evidenceVerified = verifyEvidence(draft.evidence, text);
     if (known.has(key)) {
       skippedDuplicates++;
+      const existing = known.get(key);
+      if (existing?.status === 'active') {
+        if (!knownIds.includes(existing.id)) knownIds.push(existing.id);
+        if (evidenceVerified && !verifiedKnownIds.includes(existing.id)) {
+          verifiedKnownIds.push(existing.id);
+        }
+      }
       continue;
     }
-    known.add(key);
-    facts.push({ draft, evidenceVerified: verifyEvidence(draft.evidence, text) });
+    known.set(key, null);
+    fresh.push({ draft, evidenceVerified });
   }
+  return { fresh, knownIds, verifiedKnownIds, skippedDuplicates, costPence: result.costPence };
+}
 
-  const added = facts.length > 0 ? await deps.store.addManualFacts(facts, deps.now()) : [];
+export async function addFactHandler(data: unknown, deps: AddFactDeps): Promise<AddFactResult> {
+  const input = AddFactInputSchema.safeParse(data);
+  if (!input.success)
+    throw new HttpsError('invalid-argument', 'Write between 1 and 2,000 characters.');
+  const { text } = input.data;
+
+  const plan = await planNoteFacts(
+    { llm: deps.llm, existing: () => deps.store.listFacts() },
+    'addFact',
+    text,
+  );
+  const added =
+    plan.fresh.length > 0 ? await deps.store.addManualFacts(plan.fresh, deps.now()) : [];
   log.info('add_fact.done', {
     added: added.length,
-    skippedDuplicates,
-    costPence: result.costPence,
+    skippedDuplicates: plan.skippedDuplicates,
+    costPence: plan.costPence,
   });
-  return { added, skippedDuplicates };
+  return { added, skippedDuplicates: plan.skippedDuplicates };
 }
