@@ -451,6 +451,37 @@ describe('companyScanUpdate', () => {
   });
 });
 
+describe('companyScanUpdate streaks of one kind', () => {
+  const outage = {
+    companyId: 'x',
+    status: 'error',
+    jobs: 0,
+    errorCode: 'host_not_found',
+  } as const;
+  const gone = { companyId: 'x', status: 'not_found', jobs: 0 } as const;
+
+  it('does not count outage runs toward broken', () => {
+    let lastScan = companyScanUpdate(undefined, outage);
+    lastScan = companyScanUpdate(lastScan, outage);
+    expect(lastScan).toMatchObject({ consecutiveFailures: 2, broken: false });
+    lastScan = companyScanUpdate(lastScan, gone);
+    expect(lastScan).toMatchObject({ consecutiveFailures: 1, broken: false });
+    lastScan = companyScanUpdate(lastScan, gone);
+    expect(lastScan).toMatchObject({ consecutiveFailures: 2, broken: false });
+    lastScan = companyScanUpdate(lastScan, gone);
+    expect(lastScan).toMatchObject({ consecutiveFailures: 3, broken: true });
+  });
+
+  it('restarts the count when not_found changes to error', () => {
+    let lastScan = companyScanUpdate(undefined, gone);
+    lastScan = companyScanUpdate(lastScan, gone);
+    lastScan = companyScanUpdate(lastScan, outage);
+    expect(lastScan).toMatchObject({ status: 'error', consecutiveFailures: 1, broken: false });
+    lastScan = companyScanUpdate(lastScan, gone);
+    expect(lastScan).toMatchObject({ consecutiveFailures: 1, broken: false });
+  });
+});
+
 describe('nextSourceHealth and runStatus', () => {
   const counts = {
     status: 'ok',

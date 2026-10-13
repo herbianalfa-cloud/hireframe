@@ -132,7 +132,14 @@ export function companyScanUpdate(
   board: BoardResult,
   boardId?: string,
 ): NonNullable<Company['lastScan']> {
-  const failures = board.status === 'ok' ? 0 : (previous?.consecutiveFailures ?? 0) + 1;
+  // A streak is of one kind: an outage (error) followed by 404s (not_found), or the reverse,
+  // restarts at 1, so `broken` needs 3 consecutive not_found runs.
+  const failures =
+    board.status === 'ok'
+      ? 0
+      : previous && previous.status === board.status
+        ? previous.consecutiveFailures + 1
+        : 1;
   return {
     status: board.status,
     jobs: board.jobs,
