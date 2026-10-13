@@ -22,12 +22,21 @@ export interface AllowlistEntry {
   reviewBy: string;
 }
 
+/** `YYYY-MM-DD` that is a real day (2027-02-30 is not: Date would roll it into March). */
+function isCalendarDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 const AllowlistSchema = z.array(
   z.strictObject({
     id: z.string().regex(/^(GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|npm-[\w.@/-]+)$/),
     roots: z.array(z.string().min(1)).min(1),
     reason: z.string().trim().min(1),
-    reviewBy: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    reviewBy: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .refine(isCalendarDate, 'not a real calendar date'),
   }),
 );
 
@@ -48,6 +57,20 @@ export function parseAllowlist(
     return { ok: false, message: `audit-allowlist.json is invalid at ${where}` };
   }
   return { ok: true, entries: parsed.data };
+}
+
+/** Reads and parses the allowlist file; a missing or unreadable file fails closed, no stack. */
+export function loadAllowlist(
+  path: string,
+  read: (path: string) => string = (p) => readFileSync(p, 'utf8'),
+): { ok: true; entries: AllowlistEntry[] } | { ok: false; message: string } {
+  let text: string;
+  try {
+    text = read(path);
+  } catch {
+    return { ok: false, message: `audit_parse_error: ${path} could not be read` };
+  }
+  return parseAllowlist(text);
 }
 
 export interface Advisory {
@@ -210,7 +233,7 @@ function npmAuditJson(): string {
 }
 
 function main(): void {
-  const loaded = parseAllowlist(readFileSync('audit-allowlist.json', 'utf8'));
+  const loaded = loadAllowlist('audit-allowlist.json');
   if (!loaded.ok) {
     console.error(`audit: ${loaded.message}`);
     process.exit(1);

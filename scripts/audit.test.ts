@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateAudit, parseAllowlist, runAudit, type AllowlistEntry } from './audit.ts';
+import { evaluateAudit, loadAllowlist, parseAllowlist, runAudit, type AllowlistEntry } from './audit.ts';
 
 const TODAY = '2026-10-13';
 const BRACES = 'GHSA-vfj7-8cjw-p6xm';
@@ -140,6 +140,8 @@ describe('parseAllowlist', () => {
       [{ ...entry, roots: [] }],
       [{ ...entry, reviewBy: '13/01/2027' }],
       [{ ...entry, reviewBy: '2027-1-13' }],
+      [{ ...entry, reviewBy: '2027-02-30' }],
+      [{ ...entry, reviewBy: '2027-13-01' }],
       [{ ...entry, reason: '   ' }],
       [{ ...entry, extra: true }],
       [{ id: BRACES }],
@@ -147,6 +149,20 @@ describe('parseAllowlist', () => {
     for (const value of bad) expect(parseAllowlist(text(value)).ok).toBe(false);
     expect(parseAllowlist('{not json').ok).toBe(false);
     expect(parseAllowlist('').ok).toBe(false);
+  });
+});
+
+describe('loadAllowlist', () => {
+  it('fails with audit_parse_error, not a stack trace, when the file is missing', () => {
+    const result = loadAllowlist('no-such-allowlist.json');
+    expect(result).toEqual({
+      ok: false,
+      message: 'audit_parse_error: no-such-allowlist.json could not be read',
+    });
+  });
+
+  it('parses the text the reader gives', () => {
+    expect(loadAllowlist('x.json', () => '[]')).toEqual({ ok: true, entries: [] });
   });
 });
 
