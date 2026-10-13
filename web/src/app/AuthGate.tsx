@@ -30,15 +30,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   // Landing on Today: start its list and its chunk now, in parallel with the owner check
   // (ADR-050). Nothing renders before the check; a non-owner's listener is refused by the
-  // rules. The cleanup runs on sign-out (uid goes null) and on unmount.
+  // rules. The cleanup runs on sign-out (uid goes null) and on unmount, and the listener is
+  // also stopped when the path leaves `/` before the app is usable: the owner went elsewhere,
+  // so the Today list is no longer wanted.
   const { pathname } = useLocation();
   const pathRef = useRef(pathname);
+  const stopPrefetch = useRef<(() => void) | null>(null);
   useEffect(() => {
     pathRef.current = pathname;
+    if (pathname !== '/') stopPrefetch.current?.();
   }, [pathname]);
   useEffect(() => {
     if (uid === null || pathRef.current !== '/') return undefined;
-    return startTodayPrefetch();
+    const stop = startTodayPrefetch();
+    stopPrefetch.current = stop;
+    return () => {
+      stop();
+      stopPrefetch.current = null;
+    };
   }, [uid]);
 
   const handleSignOut = useCallback(() => {

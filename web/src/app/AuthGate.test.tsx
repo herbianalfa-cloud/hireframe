@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkAccess, type Access } from '@/services/access';
@@ -112,6 +112,38 @@ describe('AuthGate Today prefetch (ADR-050)', () => {
       emit({ status: 'signed-out' });
     });
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the prefetch when the path leaves / before the owner check resolves', async () => {
+    const stop = vi.fn();
+    vi.mocked(prefetchToday).mockReturnValue(stop);
+    vi.mocked(checkAccess).mockReturnValue(new Promise<Access>(() => undefined));
+    givenAuth({ status: 'signed-in', user });
+    let navigate: (to: string) => void = () => undefined;
+    function Navigator() {
+      const go = useNavigate();
+      navigate = (to) => void go(to);
+      return null;
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/']}>
+          <Navigator />
+          <AuthGate>
+            <AppRoutes />
+          </AuthGate>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => {
+      expect(prefetchToday).toHaveBeenCalledTimes(1);
+    });
+    expect(stop).not.toHaveBeenCalled();
+    act(() => {
+      navigate('/jobs');
+    });
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(prefetchToday).toHaveBeenCalledTimes(1);
   });
 
   it('shows a non-owner No access and no data, though the prefetch started', async () => {
