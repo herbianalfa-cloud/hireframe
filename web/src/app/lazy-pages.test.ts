@@ -32,7 +32,7 @@ describe('startTodayPrefetch', () => {
   it('never starts the listener when stopped before the import finishes', async () => {
     vi.mocked(prefetchToday).mockClear();
     startTodayPrefetch()();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.dynamicImportSettled();
     expect(prefetchToday).not.toHaveBeenCalled();
   });
 });

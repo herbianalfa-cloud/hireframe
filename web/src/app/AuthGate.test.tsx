@@ -71,7 +71,7 @@ describe('AuthGate Today prefetch (ADR-050)', () => {
     givenAuth({ status: 'signed-out' });
     renderGate();
     await screen.findByRole('button', { name: /sign in/i });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.dynamicImportSettled();
     expect(prefetchToday).not.toHaveBeenCalled();
   });
 
@@ -80,7 +80,7 @@ describe('AuthGate Today prefetch (ADR-050)', () => {
     givenAccess({ status: 'owner' });
     renderGate('/jobs');
     await screen.findAllByRole('navigation');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.dynamicImportSettled();
     expect(prefetchToday).not.toHaveBeenCalled();
   });
 
