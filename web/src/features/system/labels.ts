@@ -138,6 +138,35 @@ export function errorText(code: string | undefined): string | null {
   return ERROR_TEXT[code] ?? code.replace(/_/g, ' ');
 }
 
+/**
+ * Why a run is Partial (R12), built from `perSource` and `errors`: each degraded or failing
+ * source with its code, then any run-level error codes. Null for a run that isn't partial.
+ */
+export function partialBecause(run: Run): string | null {
+  if (run.status !== 'partial') return null;
+  const parts: string[] = [];
+  for (const id of Object.keys(SOURCE_LABELS) as ScanSourceId[]) {
+    const counts = run.perSource[id];
+    if (counts?.status !== 'degraded' && counts?.status !== 'failing') continue;
+    const code = errorText(counts.errorCode);
+    parts.push(
+      `${SOURCE_LABELS[id]} ${SOURCE_STATUS_LABELS[counts.status].toLowerCase()}${code ? ` (${code})` : ''}`,
+    );
+  }
+  for (const error of run.errors) {
+    // A failing source is already named above.
+    if (error.sourceId) continue;
+    parts.push(errorText(error.code) ?? error.code);
+  }
+  return parts.length > 0 ? parts.join('; ') : 'no reason was recorded';
+}
+
+/** Boards that no longer exist in a source's latest run: neutral, not a warning (ADR-056). */
+export function goneText(gone: number | undefined): string | null {
+  if (!gone) return null;
+  return gone === 1 ? '1 board no longer exists' : `${String(gone)} boards no longer exist`;
+}
+
 function plural(n: number, one: string, many: string): string {
   return `${String(n)} ${n === 1 ? one : many}`;
 }
