@@ -17,6 +17,7 @@ import { SCAN } from '../config.js';
 import type { FunnelOutcome } from '../funnel/run.js';
 import { setLogSink, type LogEvent, type LogFields } from '../log.js';
 import { fakeFetch } from '../sources/fake-fetch.js';
+import { boardKey, dominantCode } from '../sources/ats.js';
 import { FAKE_SEED, GREENHOUSE_BOARD } from '../sources/fixtures.js';
 import { createSources } from '../sources/index.js';
 import { testHttpClient } from '../sources/testing.js';
@@ -163,7 +164,8 @@ describe('runScan', () => {
     const result = await runScan(deps(memory.store));
     if (result.status !== 'completed') throw new Error(result.status);
 
-    expect(result.runStatus).toBe('partial'); // the fake watchlist has one missing board
+    // The fake watchlist has one board that no longer exists: a watchlist fact, not a failure.
+    expect(result.runStatus).toBe('succeeded');
     // Acme's Product Analyst arrives from Greenhouse, Adzuna and HN: one job, three sources.
     const acme = [...memory.jobs.values()].find(
       (job) => job.title === 'Product Analyst' && job.company === 'Acme Analytics',
@@ -181,18 +183,19 @@ describe('runScan', () => {
     expect(cobalt?.sources.map((s) => s.id).sort()).toEqual(['ashby', 'reed']);
     for (const job of memory.jobs.values()) expect(JobSchema.safeParse(job).success).toBe(true);
 
-    expect(result.perSource.greenhouse).toMatchObject({
-      status: 'degraded',
+    expect(memory.runs.get(result.runId)?.perSource.greenhouse).toMatchObject({
+      status: 'ok',
       fetched: 3,
       new: 2,
-      errors: 1,
+      errors: 0,
+      gone: 1,
     });
     expect(result.perSource.adzuna).toMatchObject({ status: 'ok', merged: 1, new: 0 });
     expect(result.s0.new).toBe(memory.jobs.size);
     expect(result.s0.in).toBe(result.s0.new + result.s0.merged + result.s0.duplicate);
 
     const run = memory.runs.get(result.runId);
-    expect(run).toMatchObject({ status: 'partial', costPence: 0, perStage: { s0: result.s0 } });
+    expect(run).toMatchObject({ status: 'succeeded', costPence: 0, perStage: { s0: result.s0 } });
     expect(run?.finishedAt).toEqual(NOW);
     expect(memory.calls.releases).toBe(1);
   });
@@ -685,5 +688,176 @@ describe('the scheduled scan and short lock holders (ADR-048)', () => {
   it('a manual scan never waits: it reports busy and names the holder', async () => {
     const { store } = scripted([email]);
     expect(await runScan(deps(store))).toEqual({ status: 'busy', holder: 'email' });
+  });
+});
+
+describe('boards that no longer exist (ADR-056, R4, R12)', () => {
+  const DAY = 24 * 60 * 60_000;
+  const START = NOW.getTime();
+  const dead: CompanySeed = {
+    id: 'echo-gone',
+    name: 'Echo Gone',
+    domain: 'echo-gone.example.com',
+    ats: { type: 'greenhouse', token: 'echogone' },
+    hq: 'London',
+  };
+
+  /** A scan at `START + day`, counting the requests that reached the dead board. */
+  function scanner(memory: ReturnType<typeof memoryStore>, seed: CompanySeed[] = [dead]) {
+    const requests = { dead: 0 };
+    const httpFor: ScanDeps['httpFor'] = () =>
+      testHttpClient({
+        fetch: ((input: URL) => {
+          if (input.toString().includes('/boards/echogone/')) requests.dead += 1;
+          return fakeFetch(input);
+        }) as typeof fetch,
+      });
+    return {
+      requests,
+      async at(day: number) {
+        const result = await runScan(
+          deps(memory.store, { seed, httpFor, now: () => new Date(START + day * DAY) }),
+        );
+        if (result.status !== 'completed') throw new Error(result.status);
+        return result;
+      },
+    };
+  }
+
+  it('is succeeded with only a dead board, and records gone and the board key', async () => {
+    const memory = memoryStore();
+    const result = await scanner(memory).at(0);
+    expect(result.runStatus).toBe('succeeded');
+    const counts = memory.runs.get(result.runId)?.perSource.greenhouse;
+    expect(counts).toMatchObject({ status: 'ok', errors: 0, gone: 1 });
+    expect(counts?.errorCode).toBeUndefined();
+    expect(memory.companies.get('echo-gone')?.lastScan).toMatchObject({
+      status: 'not_found',
+      consecutiveFailures: 1,
+      board: 'greenhouse:echogone:default',
+    });
+  });
+
+  it('is partial when a board returns a 5xx', async () => {
+    const memory = memoryStore();
+    const httpFor: ScanDeps['httpFor'] = () =>
+      testHttpClient({
+        fetch: ((input: URL) =>
+          input.toString().includes('/boards/echogone/')
+            ? Promise.resolve(new Response('boom', { status: 500 }))
+            : fakeFetch(input)) as typeof fetch,
+      });
+    const result = await runScan(deps(memory.store, { seed: [dead], httpFor }));
+    if (result.status !== 'completed') throw new Error(result.status);
+    expect(result.runStatus).toBe('partial');
+    expect(result.perSource.greenhouse).toMatchObject({ status: 'failing', errors: 1 });
+    expect(memory.runs.get(result.runId)?.perSource.greenhouse?.gone).toBeUndefined();
+  });
+
+  it('keeps a skipped broken board untouched for 6 daily runs, then re-probes on day 7', async () => {
+    const memory = memoryStore();
+    const scan = scanner(memory);
+    await scan.at(0);
+    await scan.at(1);
+    const third = await scan.at(2); // third not_found in a row: broken
+    expect(memory.companies.get('echo-gone')?.lastScan).toMatchObject({ broken: true });
+    expect(memory.runs.get(third.runId)?.perSource.greenhouse).toMatchObject({
+      status: 'ok',
+      gone: 1,
+    });
+    const probed = new Date(START + 2 * DAY);
+    expect(memory.companies.get('echo-gone')?.company.lastScannedAt).toEqual(probed);
+    expect(scan.requests.dead).toBe(3);
+    const lastScanBefore = memory.companies.get('echo-gone')?.lastScan;
+
+    for (let day = 3; day <= 8; day++) {
+      const skipped = await scan.at(day);
+      expect(memory.runs.get(skipped.runId)?.perSource.greenhouse).toMatchObject({
+        status: 'ok',
+        errors: 0,
+        gone: 1,
+      });
+      expect(scan.requests.dead).toBe(3);
+      expect(memory.companies.get('echo-gone')?.company.lastScannedAt).toEqual(probed);
+      expect(memory.companies.get('echo-gone')?.lastScan).toEqual(lastScanBefore);
+    }
+
+    await scan.at(9); // 7 days after the last probe
+    expect(scan.requests.dead).toBe(4);
+    expect(memory.companies.get('echo-gone')?.company.lastScannedAt).toEqual(
+      new Date(START + 9 * DAY),
+    );
+  });
+
+  it('re-probes at once after the token changes', async () => {
+    const memory = memoryStore();
+    const scan = scanner(memory);
+    await scan.at(0);
+    await scan.at(1);
+    await scan.at(2);
+    expect(scan.requests.dead).toBe(3);
+    const entry = memory.companies.get('echo-gone');
+    if (!entry) throw new Error('no company');
+    entry.company.ats = { type: 'greenhouse', token: 'echogone2' };
+    const httpSeen: string[] = [];
+    const httpFor: ScanDeps['httpFor'] = () =>
+      testHttpClient({
+        fetch: ((input: URL) => {
+          httpSeen.push(input.toString());
+          return fakeFetch(input);
+        }) as typeof fetch,
+      });
+    await runScan(
+      deps(memory.store, { seed: [dead], httpFor, now: () => new Date(START + 3 * DAY) }),
+    );
+    expect(httpSeen.some((url) => url.includes('/boards/echogone2/'))).toBe(true);
+    expect(memory.companies.get('echo-gone')?.lastScan?.board).toBe('greenhouse:echogone2:default');
+  });
+
+  it('builds the board key from the ATS default host when ats.host is missing', () => {
+    const noHost = {
+      id: 'fresha',
+      name: 'Fresha',
+      ats: { type: 'lever', token: 'fresha' },
+    } as const;
+    expect(boardKey(noHost)).toBe('lever:fresha:default');
+    expect(boardKey({ ...noHost, ats: { type: 'lever', token: 'fresha', host: 'eu' } })).toBe(
+      'lever:fresha:eu',
+    );
+  });
+
+  it('skips and re-probes a company doc with no ats.host (Fresha)', async () => {
+    const fresha: CompanySeed = {
+      id: 'fresha',
+      name: 'Fresha',
+      domain: 'fresha.example.com',
+      ats: { type: 'lever', token: 'fresha' },
+      hq: 'London',
+    };
+    const memory = memoryStore();
+    let leverRequests = 0;
+    const httpFor: ScanDeps['httpFor'] = () =>
+      testHttpClient({
+        fetch: ((input: URL) => {
+          if (input.toString().includes('/postings/fresha')) leverRequests += 1;
+          return fakeFetch(input);
+        }) as typeof fetch,
+      });
+    for (let day = 0; day < 4; day++) {
+      await runScan(
+        deps(memory.store, { seed: [fresha], httpFor, now: () => new Date(START + day * DAY) }),
+      );
+    }
+    expect(leverRequests).toBe(3);
+    expect(memory.companies.get('fresha')?.lastScan).toMatchObject({
+      broken: true,
+      board: 'lever:fresha:default',
+    });
+  });
+
+  it('picks the most frequent real error code, ties in a fixed order', () => {
+    expect(dominantCode(['timeout', 'http_500', 'timeout'])).toBe('timeout');
+    expect(dominantCode(['timeout', 'http_500'])).toBe('http_500');
+    expect(dominantCode([])).toBeUndefined();
   });
 });

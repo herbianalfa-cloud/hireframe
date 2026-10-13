@@ -203,7 +203,9 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
 
       const attempts = tried.length - gone.length;
       if (companies.length > 0 || skipped.length > 0) {
-        report.status = statusFrom(attempts, failed.length);
+        // Nothing but boards that no longer exist is a healthy source, not a skipped one.
+        const onlyGone = attempts === 0 && gone.length + skipped.length > 0 && paused.length === 0;
+        report.status = onlyGone ? 'ok' : statusFrom(attempts, failed.length);
       }
       return jobs;
     },

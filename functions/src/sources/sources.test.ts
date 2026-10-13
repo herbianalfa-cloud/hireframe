@@ -36,10 +36,11 @@ describe('ATS sources on fixtures', () => {
       'Acme Analytics builds reporting tools for B2B SaaS teams.\n\n• SQL & dashboards\n• Work with product managers\n\nYou will own the weekly metrics review, turn product questions into queries, and explain what the numbers say to the people who decide what we build next.',
     );
     expect(source.health()).toMatchObject({
-      status: 'degraded',
+      status: 'ok',
       fetched: 3,
       invalid: 1,
-      errors: 1,
+      errors: 0,
+      gone: 1,
       boards: expect.arrayContaining([
         { companyId: 'acme-analytics', status: 'ok', jobs: 2 },
         { companyId: 'echo-gone', status: 'not_found', jobs: 0, errorCode: 'not_found' },
@@ -93,11 +94,43 @@ describe('ATS sources on fixtures', () => {
     expect(source.health().status).toBe('skipped');
   });
 
-  it('is failing when every board fails', async () => {
+  it('is ok with gone 1 when the only attempted board no longer exists', async () => {
     const source = createGreenhouseSource();
     const companies = [{ id: 'x', name: 'X', ats: { type: 'greenhouse', token: 'gone' } }] as const;
     await source.fetch(testContext({ companies }));
-    expect(source.health()).toMatchObject({ status: 'failing', errors: 1 });
+    expect(source.health()).toMatchObject({ status: 'ok', errors: 0, gone: 1 });
+    expect(source.health().errorCode).toBeUndefined();
+  });
+
+  it('is failing when 3 boards on one host were attempted and all are not_found (outage)', async () => {
+    const source = createGreenhouseSource();
+    const companies = ['gone1', 'gone2', 'gone3'].map((token) => ({
+      id: token,
+      name: token,
+      ats: { type: 'greenhouse', token },
+    })) as WatchedCompany[];
+    await source.fetch(testContext({ companies }));
+    expect(source.health()).toMatchObject({ status: 'failing', errors: 3, errorCode: 'not_found' });
+    expect(source.health().gone).toBeUndefined();
+  });
+
+  it('does not count skipped gone boards as attempts for the outage guard', async () => {
+    const source = createGreenhouseSource();
+    const now = new Date('2026-10-01T08:00:00Z');
+    const known = (token: string): WatchedCompany => ({
+      id: token,
+      name: token,
+      ats: { type: 'greenhouse', token },
+      lastScannedAt: new Date(now.getTime() - 24 * 3600_000),
+      lastScan: { broken: true, board: `greenhouse:${token}:default` },
+    });
+    const companies = [
+      known('gone1'),
+      known('gone2'),
+      { id: 'gone3', name: 'gone3', ats: { type: 'greenhouse', token: 'gone3' } },
+    ] as WatchedCompany[];
+    await source.fetch(testContext({ companies, now }));
+    expect(source.health()).toMatchObject({ status: 'ok', errors: 0, gone: 3, skippedGone: 2 });
   });
 });
 
