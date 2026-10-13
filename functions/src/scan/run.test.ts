@@ -892,6 +892,9 @@ describe('boards that no longer exist (ADR-056, R4, R12)', () => {
   it('picks the most frequent real error code, ties in a fixed order', () => {
     expect(dominantCode(['timeout', 'http_500', 'timeout'])).toBe('timeout');
     expect(dominantCode(['timeout', 'http_500'])).toBe('http_500');
+    // Plain code-unit order, not locale order: '5' (53) sorts before '_' (95), though a
+    // locale collation puts punctuation first.
+    expect(dominantCode(['http_500', 'http5xx'])).toBe('http5xx');
     expect(dominantCode([])).toBeUndefined();
   });
 });

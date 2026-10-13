@@ -50,11 +50,13 @@ export function isSkippedGone(
   return now.getTime() - company.lastScannedAt.getTime() < reprobeMs;
 }
 
-/** The most frequent error code; ties go to the alphabetically first (deterministic). */
+/** The most frequent error code; ties go to the first in plain code-unit order, not locale order (deterministic). */
 export function dominantCode(codes: readonly string[]): string | undefined {
   const counts = new Map<string, number>();
   for (const code of codes) counts.set(code, (counts.get(code) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+  return [...counts.entries()].sort(
+    (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
+  )[0]?.[0];
 }
 
 /**
