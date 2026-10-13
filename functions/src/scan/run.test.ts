@@ -782,7 +782,7 @@ describe('boards that no longer exist (ADR-056, R4, R12)', () => {
     expect(memory.runs.get(result.runId)?.perSource.greenhouse?.gone).toBeUndefined();
   });
 
-  it('keeps a skipped broken board untouched for 6 daily runs, then re-probes on day 7', async () => {
+  it('keeps a skipped broken board untouched for 6 daily runs, then re-probes at 7 days minus an hour', async () => {
     const memory = memoryStore();
     const scan = scanner(memory);
     await scan.at(0);
@@ -810,10 +810,16 @@ describe('boards that no longer exist (ADR-056, R4, R12)', () => {
       expect(memory.companies.get('echo-gone')?.lastScan).toEqual(lastScanBefore);
     }
 
-    await scan.at(9); // 7 days after the last probe
+    // 6 days 22 h after the last probe is still inside the window (7 days minus 1 hour)...
+    await scan.at(9 - 2 / 24);
+    expect(scan.requests.dead).toBe(3);
+    // ...and a run 30 minutes early on day 9 (6 days 23 h 30 min) re-probes, so jitter can't
+    // push the re-probe a whole run late.
+    const early = 9 - 0.5 / 24;
+    await scan.at(early);
     expect(scan.requests.dead).toBe(4);
     expect(memory.companies.get('echo-gone')?.company.lastScannedAt).toEqual(
-      new Date(START + 9 * DAY),
+      new Date(START + early * DAY),
     );
   });
 
