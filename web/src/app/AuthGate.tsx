@@ -34,7 +34,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // rules. The cleanup runs on sign-out (uid goes null) and on unmount.
   const { pathname } = useLocation();
   const pathRef = useRef(pathname);
-  pathRef.current = pathname;
+  useEffect(() => {
+    pathRef.current = pathname;
+  }, [pathname]);
   useEffect(() => {
     if (uid === null || pathRef.current !== '/') return undefined;
     void loadTodayPage().catch(() => undefined);
