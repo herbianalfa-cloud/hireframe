@@ -16,6 +16,8 @@ export interface WatchedCompany {
   ats: Ats;
   /** When its board was last fetched; boards rotate oldest first when a host is full. */
   lastScannedAt?: Date;
+  /** What the last scan concluded about this board (ADR-056). */
+  lastScan?: { broken: boolean; board?: string };
 }
 
 export interface BoardResult {
@@ -52,9 +54,13 @@ export interface SourceReport {
   fetched: number;
   /** Postings that failed the source's item schema. */
   invalid: number;
-  /** Failed boards, queries or pages. */
+  /** Failed boards, queries or pages (boards that no longer exist are not failures). */
   errors: number;
   errorCode?: string;
+  /** Boards that no longer exist: not_found this run, plus broken boards skipped (ADR-056). */
+  gone?: number;
+  /** Of `gone`, the boards skipped without a request until their re-probe is due. */
+  skippedGone?: number;
   boards: BoardResult[];
   /** Watched boards left for a later run because their host was full (ADR-029). */
   deferred?: number;

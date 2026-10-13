@@ -186,6 +186,13 @@ export const SCAN = {
   /** A manual scan this soon after the last one is skipped (double taps, ADR-029). */
   cooldownMs: 5 * 60_000,
   emulatorCooldownMs: 30_000,
+  /** A broken board (not_found, 3 runs in a row) is skipped until its last probe is this old (ADR-056). */
+  brokenBoardReprobeMs: 7 * 24 * 60 * 60 * 1000,
+  /**
+   * If at least this many boards on one host were attempted in a run and every one was
+   * not_found, that is an outage, not dead boards: the source fails (ADR-056).
+   */
+  goneGuardMinBoards: 3,
   /** Firestore allows 500 writes per batch. */
   writeBatchOps: 400,
   /** `array-contains-any` takes at most 30 values. */

@@ -29,6 +29,34 @@ export interface AtsSpec<Item> {
   toRawJob: (item: Item, company: WatchedCompany) => RawJob | null;
 }
 
+/** The board a company's scan result is about: `type:token:host` (ADR-056). */
+export function boardKey(company: WatchedCompany): string {
+  return `${company.ats.type}:${company.ats.token ?? ''}:${company.ats.host ?? 'default'}`;
+}
+
+/**
+ * A board already known to be gone is skipped without a request until its last probe is
+ * `brokenBoardReprobeMs` old. A changed token or host no longer matches the recorded key, so
+ * it is probed at once.
+ */
+export function isSkippedGone(
+  company: WatchedCompany,
+  now: Date,
+  reprobeMs: number = SCAN.brokenBoardReprobeMs,
+): boolean {
+  const scan = company.lastScan;
+  if (!scan?.broken || scan.board !== boardKey(company)) return false;
+  if (!company.lastScannedAt) return false;
+  return now.getTime() - company.lastScannedAt.getTime() < reprobeMs;
+}
+
+/** The most frequent error code; ties go to the alphabetically first (deterministic). */
+export function dominantCode(codes: readonly string[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const code of codes) counts.set(code, (counts.get(code) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+}
+
 /**
  * The boards to fetch this run (pure). Each host gets as many boards as fit in its share of
  * the fetch budget at its request interval; when a host has more, the least recently scanned
@@ -98,11 +126,15 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
     id: spec.id,
     health: () => report,
     async fetch(ctx: SourceContext) {
-      const watched = ctx.companies.filter(
+      const ofType = ctx.companies.filter(
         (company) => company.ats.type === spec.id && company.ats.token,
       );
+      // Boards known to be gone are neither requested nor written: their `lastScannedAt` must
+      // stay put, or the weekly re-probe would never come due (ADR-056).
+      const skipped = ofType.filter((company) => isSkippedGone(company, ctx.now));
+      const watched = ofType.filter((company) => !skipped.includes(company));
       const { selected: companies, deferred } = boardsThisRun(watched, spec.boardUrl);
-      report = emptyReport(companies.length === 0 ? 'skipped' : 'ok');
+      report = emptyReport(companies.length === 0 && skipped.length === 0 ? 'skipped' : 'ok');
       if (deferred > 0) report.deferred = deferred;
       const jobs: RawJob[] = [];
       const boards: BoardResult[] = [];
@@ -128,8 +160,6 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
           boards.push({ companyId: company.id, status: 'ok', jobs: count });
         } catch (error) {
           if (!(error instanceof HttpError)) throw error;
-          report.errors += 1;
-          report.errorCode = error.code;
           boards.push({
             companyId: company.id,
             status: error.code === 'not_found' ? 'not_found' : 'error',
@@ -139,11 +169,41 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
         }
       });
       report.boards = boards;
+
       // Boards skipped because their host is paused weren't tried: they count as neither
       // attempts nor failures. A source whose every board was skipped is `skipped`.
-      const paused = boards.filter((board) => board.errorCode === 'host_paused').length;
-      if (companies.length > 0) {
-        report.status = statusFrom(companies.length - paused, report.errors - paused);
+      const paused = boards.filter((board) => board.errorCode === 'host_paused');
+      const tried = boards.filter((board) => board.errorCode !== 'host_paused');
+      // A 404 is a watchlist fact, not a source failure, unless it looks like an outage:
+      // every board attempted on a host (at least `goneGuardMinBoards`) was not_found.
+      const byHost = new Map<string, BoardResult[]>();
+      for (const board of tried) {
+        const company = companies.find((entry) => entry.id === board.companyId);
+        if (!company) continue;
+        const host = new URL(spec.boardUrl(company)).host;
+        byHost.set(host, [...(byHost.get(host) ?? []), board]);
+      }
+      const outage = new Set<BoardResult>();
+      for (const list of byHost.values()) {
+        if (
+          list.length >= SCAN.goneGuardMinBoards &&
+          list.every((board) => board.status === 'not_found')
+        ) {
+          for (const board of list) outage.add(board);
+        }
+      }
+      const gone = tried.filter((board) => board.status === 'not_found' && !outage.has(board));
+      const failed = tried.filter((board) => board.status !== 'ok' && !gone.includes(board));
+      report.errors = failed.length + paused.length;
+      const realCodes = failed.flatMap((board) => (board.errorCode ? [board.errorCode] : []));
+      const code = dominantCode(realCodes) ?? (paused.length > 0 ? 'host_paused' : undefined);
+      if (code) report.errorCode = code;
+      if (gone.length + skipped.length > 0) report.gone = gone.length + skipped.length;
+      if (skipped.length > 0) report.skippedGone = skipped.length;
+
+      const attempts = tried.length - gone.length;
+      if (companies.length > 0 || skipped.length > 0) {
+        report.status = statusFrom(attempts, failed.length);
       }
       return jobs;
     },
