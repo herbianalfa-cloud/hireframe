@@ -3,8 +3,9 @@ import { getCountFromServer, getDocs, onSnapshot } from 'firebase/firestore';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Run } from '@hireframe/shared';
+import type * as Perf from '@/lib/perf';
 
-import { hfMarks, resetMarksForTest, signalUsable } from '@/lib/perf';
+import { hfMarks, resetMarksForTest, signalUsable, whenUsable } from '@/lib/perf';
 import type { LiveState } from './profile';
 
 import {
@@ -19,6 +20,10 @@ import {
   watchTodayList,
 } from './dashboard';
 
+vi.mock('@/lib/perf', async (importOriginal) => {
+  const actual = await importOriginal<typeof Perf>();
+  return { ...actual, whenUsable: vi.fn(actual.whenUsable) };
+});
 vi.mock('./firebase', () => ({ getFirebase: () => Promise.resolve({ db: {} }) }));
 vi.mock('firebase/firestore', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -283,6 +288,16 @@ describe('prefetchToday (ADR-050, R7)', () => {
     await vi.advanceTimersByTimeAsync(9_000);
     expect(unsubscribe).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1_500);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the listener at the 30 s backstop when whenUsable never resolves', async () => {
+    vi.mocked(whenUsable).mockReturnValueOnce(new Promise<never>(() => undefined));
+    prefetchToday();
+    await flush();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
