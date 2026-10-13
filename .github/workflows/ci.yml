@@ -93,10 +93,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-      # Shipped code (web and functions bundles, prod dependencies) fails on high. Dev-only tools
-      # fail on critical: firebase-tools pulls braces (GHSA-vfj7-8cjw-p6xm, high, no patched
-      # version yet) through chokidar. See the ADR-013 addendum (M3).
+      # Shipped code (web and functions bundles, prod dependencies) fails on any high. The full
+      # tree fails on any high or critical advisory not in audit-allowlist.json (ADR-013
+      # addendum, M8): firebase-tools and @google/clasp pull braces (GHSA-vfj7-8cjw-p6xm)
+      # through chokidar and micromatch with no patched version yet. Entries expire.
       - name: Audit production dependencies (high)
         run: npm audit --omit=dev --audit-level=high
-      - name: Audit all dependencies (critical)
-        run: npm audit --audit-level=critical
+      # scripts/audit.ts imports zod, so the tree must be installed (scripts off).
+      - run: npm ci --ignore-scripts
+      - name: Audit all dependencies against the allowlist
+        run: npm run audit

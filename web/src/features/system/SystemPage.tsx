@@ -27,7 +27,7 @@ import { AgreementLine } from '@/features/jobs/AgreementLine';
 import { SpendMeter } from '@/features/today/SpendMeter';
 
 import {
-  useBrokenBoards,
+  useGoneBoards,
   useEmailHealth,
   useJobCount,
   useRecentRuns,
@@ -37,6 +37,8 @@ import {
 import {
   errorText,
   funnelText,
+  goneText,
+  partialBecause,
   rescoreText,
   RUN_STATUS_LABELS,
   RUN_TRIGGER_LABELS,
@@ -226,6 +228,9 @@ function SourceCard({ view }: { view: SourceView }) {
           it until then.
         </p>
       ) : null}
+      {goneText(counts.gone) ? (
+        <p className="mt-1 text-xs text-muted-foreground">{goneText(counts.gone)}</p>
+      ) : null}
       {health.status !== 'ok' && reason ? (
         <p className="mt-1 text-xs text-muted-foreground">Why: {reason}</p>
       ) : null}
@@ -366,8 +371,8 @@ function EmailAlerts() {
   );
 }
 
-function BrokenBoards() {
-  const state = useBrokenBoards();
+function GoneBoards() {
+  const state = useGoneBoards();
   if (state.status === 'error') {
     return (
       <p role="alert" className="mt-8 text-sm text-danger">
@@ -378,18 +383,25 @@ function BrokenBoards() {
   if (state.status !== 'ready' || state.data.length === 0) return null;
   const boards: BoardView[] = state.data;
   return (
-    <section aria-labelledby="broken-title" className="mt-8">
-      <h2 id="broken-title" className="text-sm font-medium">
-        Broken job boards
+    <section aria-labelledby="gone-title" className="mt-8">
+      <h2 id="gone-title" className="text-sm font-medium">
+        Job boards that no longer exist
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        These boards have been missing for several scans. Check the company&apos;s careers page and
-        fix its board token, or set <code className="font-mono">watch</code> to false.
+        These boards returned not found, so they don&apos;t make a scan fail. After 3 misses in a
+        row a board is skipped and tried again weekly. Check the company&apos;s careers page and fix
+        its board token, or set <code className="font-mono">watch</code> to false.
       </p>
       <ul className="mt-3 divide-y rounded-lg border bg-surface">
         {boards.map(({ id, company }) => (
           <li key={id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-            <span className="text-sm">{company.name}</span>
+            <span className="text-sm">
+              {company.name}
+              <span className="text-muted-foreground">
+                {' '}
+                · {String(company.lastScan?.consecutiveFailures ?? 0)} in a row
+              </span>
+            </span>
             <span className="font-mono text-xs text-muted-foreground">
               {company.ats.type}:{company.ats.token ?? ''}
             </span>
@@ -511,6 +523,11 @@ function RecentRuns() {
               </span>
               <RunBadge view={view} stalled={stalled} />
             </div>
+            {partialBecause(view.run) ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Partial because: {partialBecause(view.run)}
+              </p>
+            ) : null}
             {funnel ? <p className="mt-1 text-xs text-muted-foreground">{funnel}</p> : null}
             <RunNotes view={view} />
           </li>
@@ -576,7 +593,7 @@ export function SystemPage() {
         <Sources />
         <EmailAlerts />
       </section>
-      <BrokenBoards />
+      <GoneBoards />
       <section aria-labelledby="runs-title" className="mt-8">
         <h2 id="runs-title" className="text-sm font-medium">
           Recent runs

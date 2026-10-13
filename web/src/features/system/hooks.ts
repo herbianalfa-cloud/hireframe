@@ -5,7 +5,7 @@ import type { SourceHealth } from '@hireframe/shared';
 import {
   countJobs,
   countWaitingForDescription,
-  watchBrokenBoards,
+  watchGoneBoards,
   watchEmailHealth,
   watchRecentRuns,
   watchSources,
@@ -26,9 +26,9 @@ export function useRecentRuns(): LiveState<RunView[]> {
   return state;
 }
 
-export function useBrokenBoards(): LiveState<BoardView[]> {
+export function useGoneBoards(): LiveState<BoardView[]> {
   const [state, setState] = useState<LiveState<BoardView[]>>({ status: 'loading' });
-  useEffect(() => watchBrokenBoards(setState), []);
+  useEffect(() => watchGoneBoards(setState), []);
   return state;
 }
 

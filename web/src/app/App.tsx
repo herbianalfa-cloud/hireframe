@@ -5,14 +5,13 @@ import { BrowserRouter, Route, Routes } from 'react-router';
 import { Skeleton } from '@/components/ui/skeleton';
 
 import { AuthGate } from './AuthGate';
+import { loadTodayPage } from './lazy-pages';
 import { NAV_ITEMS } from './nav';
 import { EmptyPage, MorePage, NotFoundPage } from './pages';
 import { Shell } from './Shell';
 
 // Screens load on first visit (ADR-021), so the shell stays small.
-const TodayPage = lazy(() =>
-  import('@/features/today/TodayPage').then((module) => ({ default: module.TodayPage })),
-);
+const TodayPage = lazy(() => loadTodayPage().then((module) => ({ default: module.TodayPage })));
 const JobsPage = lazy(() =>
   import('@/features/jobs/JobsPage').then((module) => ({ default: module.JobsPage })),
 );

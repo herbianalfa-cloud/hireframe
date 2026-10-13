@@ -1,15 +1,17 @@
 import { DEFAULT_MONTHLY_CAP_PENCE } from '@hireframe/shared';
 import { getCountFromServer, getDocs, onSnapshot } from 'firebase/firestore';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Run } from '@hireframe/shared';
+import type * as Perf from '@/lib/perf';
 
-import { hfMarks, resetMarksForTest } from '@/lib/perf';
+import { hfMarks, resetMarksForTest, signalUsable, whenUsable } from '@/lib/perf';
 import type { LiveState } from './profile';
 
 import {
   loadAgreement,
   loadSummaryCounts,
+  prefetchToday,
   summarySpecs,
   lastRunSpec,
   resolveCapPence,
@@ -18,6 +20,10 @@ import {
   watchTodayList,
 } from './dashboard';
 
+vi.mock('@/lib/perf', async (importOriginal) => {
+  const actual = await importOriginal<typeof Perf>();
+  return { ...actual, whenUsable: vi.fn(actual.whenUsable) };
+});
 vi.mock('./firebase', () => ({ getFirebase: () => Promise.resolve({ db: {} }) }));
 vi.mock('firebase/firestore', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -232,5 +238,97 @@ describe('watchLastRun', () => {
   it('is an error, not "no runs yet", when the newest run document is invalid', async () => {
     const state = await lastRunStates([{ trigger: 'schedule' }]);
     expect(state?.status).toBe('error');
+  });
+});
+
+describe('prefetchToday (ADR-050, R7)', () => {
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+  let unsubscribe: ReturnType<typeof vi.fn>;
+  let errorHandler: ((error: { code: string }) => void) | undefined;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    unsubscribe = vi.fn();
+    errorHandler = undefined;
+    vi.mocked(onSnapshot).mockImplementation(((
+      _query: unknown,
+      _next: unknown,
+      onError: (error: { code: string }) => void,
+    ) => {
+      errorHandler = onError;
+      return unsubscribe;
+    }) as unknown as typeof onSnapshot);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('opens one listener and marks hf:prefetch', async () => {
+    prefetchToday();
+    await flush();
+    expect(onSnapshot).toHaveBeenCalledTimes(1);
+    expect(hfMarks().map(([name]) => name)).toContain('hf:prefetch');
+  });
+
+  it('drops the listener when the app becomes usable', async () => {
+    prefetchToday();
+    await flush();
+    expect(unsubscribe).not.toHaveBeenCalled();
+    signalUsable();
+    await flush();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the listener when usability never comes (whenUsable gives up at 10 s)', async () => {
+    prefetchToday();
+    await flush();
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the listener at the 30 s backstop when whenUsable never resolves', async () => {
+    vi.mocked(whenUsable).mockReturnValueOnce(new Promise<never>(() => undefined));
+    prefetchToday();
+    await flush();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the listener when stopped (sign-out), once, even if stopped again', async () => {
+    const stop = prefetchToday();
+    await flush();
+    stop();
+    stop();
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens nothing if stopped before Firebase is ready', async () => {
+    const stop = prefetchToday();
+    stop();
+    await flush();
+    expect(onSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('swallows a listener error and logs its code only', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    prefetchToday();
+    await flush();
+    expect(() => errorHandler?.({ code: 'permission-denied' })).not.toThrow();
+    expect(log).toHaveBeenCalledTimes(1);
+    const entry = JSON.parse(String(log.mock.calls[0]?.[0])) as Record<string, unknown>;
+    expect(entry).toEqual({
+      level: 'error',
+      event: 'dashboard.prefetch_failed',
+      code: 'permission-denied',
+    });
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });

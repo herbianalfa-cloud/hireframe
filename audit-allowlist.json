@@ -1,0 +1,8 @@
+[
+  {
+    "id": "GHSA-vfj7-8cjw-p6xm",
+    "roots": ["@google/clasp", "firebase-tools"],
+    "reason": "braces (ReDoS) reaches the tree only through dev tooling: firebase-tools via chokidar and @google/clasp via micromatch. No patched braces release is available yet. Neither tool ships in the web or functions bundles.",
+    "reviewBy": "2027-01-13"
+  }
+]

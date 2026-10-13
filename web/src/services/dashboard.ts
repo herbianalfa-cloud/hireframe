@@ -33,7 +33,7 @@ import {
   type QueryConstraint,
 } from 'firebase/firestore';
 
-import { markOnce } from '@/lib/perf';
+import { markOnce, whenUsable } from '@/lib/perf';
 
 import { getFirebase } from './firebase';
 import { addedByYouSpec, parseJobs, type JobView } from './jobs';
@@ -183,6 +183,47 @@ export function watchTodayList(
       callback({ status: 'error', message });
     },
   );
+}
+
+/** A prefetch listener is dropped after this long even if Today never becomes usable. */
+const PREFETCH_MAX_MS = 30_000;
+
+/**
+ * Opens the Apply list's listener before Today mounts (ADR-050). The query is exactly the one
+ * `watchTodayList('apply')` runs, so the SDK shares one target and Today gets the snapshot as
+ * soon as it is current. The listener is dropped at `hf:usable`, after 30 s, or when the
+ * returned function is called (sign-out). Errors are swallowed and logged once. The counts are
+ * not prefetched: they mount after `hf:usable`.
+ */
+export function prefetchToday(): Unsubscribe {
+  markOnce('hf:prefetch');
+  let stopped = false;
+  let unsubscribe: Unsubscribe | undefined;
+  const timer = setTimeout(stop, PREFETCH_MAX_MS);
+  function stop() {
+    stopped = true;
+    clearTimeout(timer);
+    unsubscribe?.();
+    unsubscribe = undefined;
+  }
+  void getFirebase().then(
+    ({ db }) => {
+      if (stopped) return;
+      unsubscribe = onSnapshot(
+        run(db, todayListSpec('apply'), limit(TODAY_LIST_SIZE)),
+        () => undefined,
+        (error) => {
+          logError('dashboard.prefetch_failed', { code: error.code });
+          stop();
+        },
+      );
+    },
+    (error: unknown) => {
+      logError('dashboard.prefetch_failed', { code: errorCode(error) ?? 'unknown' });
+    },
+  );
+  void whenUsable(true).then(stop);
+  return stop;
 }
 
 /**

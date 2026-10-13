@@ -8,7 +8,7 @@ import {
   countWaitingForDescription,
   scanErrorMessage,
   scanNow,
-  watchBrokenBoards,
+  watchGoneBoards,
   watchEmailHealth,
   watchRecentRuns,
   watchSources,
@@ -25,7 +25,7 @@ import { spendMeter } from '@hireframe/shared';
 vi.mock('@/services/system', () => ({
   watchSources: vi.fn(),
   watchRecentRuns: vi.fn(),
-  watchBrokenBoards: vi.fn(),
+  watchGoneBoards: vi.fn(),
   watchEmailHealth: vi.fn(),
   countJobs: vi.fn(),
   countWaitingForDescription: vi.fn(),
@@ -106,8 +106,8 @@ function givenRuns(data: RunView[]) {
   });
 }
 
-function givenBrokenBoards(data: BoardView[]) {
-  vi.mocked(watchBrokenBoards).mockImplementation((callback) => {
+function givenGoneBoards(data: BoardView[]) {
+  vi.mocked(watchGoneBoards).mockImplementation((callback) => {
     callback({ status: 'ready', data, invalid: 0 });
     return () => undefined;
   });
@@ -130,7 +130,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   givenSources(SOURCES);
   givenRuns([{ id: 'run-1', run: RUN }]);
-  givenBrokenBoards([]);
+  givenGoneBoards([]);
   givenEmail(null);
   vi.mocked(countJobs).mockResolvedValue(57);
   vi.mocked(countWaitingForDescription).mockResolvedValue(4);
@@ -324,8 +324,8 @@ describe('System screen', () => {
     );
   });
 
-  it('lists broken boards', () => {
-    givenBrokenBoards([
+  it('lists job boards that no longer exist', () => {
+    givenGoneBoards([
       {
         id: 'echo-gone',
         company: {
@@ -335,6 +335,13 @@ describe('System screen', () => {
           hq: 'London',
           watch: true,
           origin: 'seed',
+          lastScan: {
+            status: 'not_found',
+            jobs: 0,
+            consecutiveFailures: 3,
+            broken: true,
+            errorCode: 'not_found',
+          },
           createdAt: AT,
           updatedAt: AT,
           schemaVersion: 1,
@@ -342,9 +349,119 @@ describe('System screen', () => {
       },
     ]);
     render(<SystemPage />);
-    const broken = screen.getByRole('region', { name: 'Broken job boards' });
-    expect(broken.textContent).toContain('Echo Gone');
-    expect(broken.textContent).toContain('greenhouse:echogone');
+    const gone = screen.getByRole('region', { name: 'Job boards that no longer exist' });
+    expect(gone.textContent).toContain('Echo Gone');
+    expect(gone.textContent).toContain('3 in a row');
+    expect(gone.textContent).toContain('greenhouse:echogone');
+  });
+
+  it('says "Partial because" with the source and its code, and nothing for a clean run', () => {
+    givenRuns([
+      {
+        id: 'partial',
+        run: {
+          ...RUN,
+          perSource: {
+            lever: {
+              status: 'degraded',
+              fetched: 171,
+              invalid: 0,
+              new: 0,
+              duplicate: 0,
+              merged: 0,
+              errors: 1,
+              requests: 6,
+              durationMs: 100,
+              errorCode: 'http_500',
+            },
+            greenhouse: {
+              status: 'ok',
+              fetched: 3,
+              invalid: 0,
+              new: 0,
+              duplicate: 0,
+              merged: 0,
+              errors: 0,
+              gone: 1,
+              requests: 2,
+              durationMs: 100,
+            },
+          },
+          errors: [{ code: 'write_failed' }],
+        },
+      },
+      { id: 'clean', run: { ...RUN, status: 'succeeded' } },
+    ]);
+    render(<SystemPage />);
+    const items = within(screen.getByRole('region', { name: 'Recent runs' })).getAllByRole(
+      'listitem',
+    );
+    expect(items[0]?.textContent).toContain('Partial because: Lever degraded (http 500)');
+    expect(items[0]?.textContent).toContain('write failed');
+    expect(items[0]?.textContent).not.toContain('Greenhouse');
+    expect(items[1]?.textContent).not.toContain('Partial because');
+  });
+
+  it('explains a host-wide 404 outage as the host looking down, not as a board gone', () => {
+    givenRuns([
+      {
+        id: 'outage',
+        run: {
+          ...RUN,
+          perSource: {
+            greenhouse: {
+              status: 'failing',
+              fetched: 0,
+              invalid: 0,
+              new: 0,
+              duplicate: 0,
+              merged: 0,
+              errors: 3,
+              requests: 3,
+              durationMs: 100,
+              errorCode: 'host_not_found',
+            },
+          },
+        },
+      },
+    ]);
+    render(<SystemPage />);
+    const row = within(screen.getByRole('region', { name: 'Recent runs' })).getAllByRole(
+      'listitem',
+    )[0];
+    expect(row?.textContent).toContain('Partial because: Greenhouse failing');
+    expect(row?.textContent).toContain('the host looks down');
+    expect(row?.textContent).not.toContain('a board no longer exists');
+  });
+
+  it('shows boards that no longer exist on the source card as neutral text', () => {
+    givenSources([
+      {
+        id: 'greenhouse',
+        health: {
+          status: 'ok',
+          lastRunAt: AT,
+          lastOkAt: AT,
+          consecutiveFailures: 0,
+          updatedAt: AT,
+          schemaVersion: 1,
+          lastCounts: {
+            status: 'ok',
+            fetched: 3,
+            invalid: 0,
+            new: 0,
+            duplicate: 0,
+            merged: 0,
+            errors: 0,
+            gone: 2,
+            requests: 2,
+            durationMs: 100,
+          },
+        },
+      },
+    ]);
+    render(<SystemPage />);
+    expect(screen.getByText('2 boards no longer exist')).toBeDefined();
   });
 
   it('runs a scan once per click, disables the button meanwhile, and reports the result', async () => {
@@ -560,12 +677,12 @@ describe('System screen states', () => {
     expect(screen.getByRole('status', { name: 'Loading runs' })).toBeDefined();
   });
 
-  it('shows errors for recent runs and broken boards', () => {
+  it('shows errors for recent runs and boards that no longer exist', () => {
     vi.mocked(watchRecentRuns).mockImplementation((callback) => {
       callback({ status: 'error', message: "Couldn't load recent runs. Reload to try again." });
       return () => undefined;
     });
-    vi.mocked(watchBrokenBoards).mockImplementation((callback) => {
+    vi.mocked(watchGoneBoards).mockImplementation((callback) => {
       callback({ status: 'error', message: "Couldn't load board status." });
       return () => undefined;
     });

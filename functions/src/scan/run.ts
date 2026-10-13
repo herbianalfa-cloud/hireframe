@@ -27,6 +27,7 @@ import { FUNNEL, QUOTAS, SCAN } from '../config.js';
 import type { FunnelOutcome } from '../funnel/run.js';
 import type { HostPause, HttpClient } from '../http/client.js';
 import { errorFields, log } from '../log.js';
+import { boardKey } from '../sources/ats.js';
 import { addCalls, currentQuota, remainingCalls } from '../sources/queries.js';
 import type {
   BoardResult,
@@ -129,13 +130,22 @@ interface SourceOutcome {
 export function companyScanUpdate(
   previous: Company['lastScan'],
   board: BoardResult,
+  boardId?: string,
 ): NonNullable<Company['lastScan']> {
-  const failures = board.status === 'ok' ? 0 : (previous?.consecutiveFailures ?? 0) + 1;
+  // A streak is of one kind: an outage (error) followed by 404s (not_found), or the reverse,
+  // restarts at 1, so `broken` needs 3 consecutive not_found runs.
+  const failures =
+    board.status === 'ok'
+      ? 0
+      : previous?.status === board.status
+        ? previous.consecutiveFailures + 1
+        : 1;
   return {
     status: board.status,
     jobs: board.jobs,
     consecutiveFailures: failures,
     broken: board.status === 'not_found' && failures >= BROKEN_BOARD_AFTER,
+    ...(boardId ? { board: boardId } : {}),
     ...(board.errorCode ? { errorCode: board.errorCode } : {}),
   };
 }
@@ -268,7 +278,19 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
         return null;
       }),
     ]);
-    const companies = stored.map((entry) => entry.company);
+    // Each company carries what its last scan concluded, so boards known to be gone can be
+    // skipped (ADR-056).
+    const companies = stored.map((entry) => ({
+      ...entry.company,
+      ...(entry.lastScan
+        ? {
+            lastScan: {
+              broken: entry.lastScan.broken,
+              ...(entry.lastScan.board ? { board: entry.lastScan.board } : {}),
+            },
+          }
+        : {}),
+    }));
 
     // ---- Fetch every source in parallel ----
     const deadline = invokedAt.getTime() + SCAN.fetchBudgetMs;
@@ -367,6 +389,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
 
     // ---- Records: companies, sources, run ----
     const previousScan = new Map(stored.map((entry) => [entry.company.id, entry.lastScan]));
+    const boardKeys = new Map(companies.map((company) => [company.id, boardKey(company)]));
     const companyUpdates = outcomes
       .filter(([id]) => ATS_SOURCES.has(id))
       .flatMap(([, outcome]) => outcome.report.boards)
@@ -374,7 +397,11 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
       .filter((board) => board.errorCode !== 'host_paused')
       .map((board) => ({
         companyId: board.companyId,
-        lastScan: companyScanUpdate(previousScan.get(board.companyId), board),
+        lastScan: companyScanUpdate(
+          previousScan.get(board.companyId),
+          board,
+          boardKeys.get(board.companyId),
+        ),
       }));
     const companyWrites = await store.updateCompanies(companyUpdates, startedAt);
     if (companyWrites.failedWrites > 0) run.errors.push({ code: 'company_write_failed' });
@@ -391,6 +418,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
         invalid: outcome.report.invalid + (invalidBySource.get(id) ?? 0),
         ...tally,
         errors: outcome.report.errors,
+        ...(outcome.report.gone ? { gone: outcome.report.gone } : {}),
         requests: outcome.requests,
         durationMs: outcome.durationMs,
         ...(outcome.report.errorCode ? { errorCode: outcome.report.errorCode } : {}),
@@ -414,6 +442,7 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
         duplicate: counts.duplicate,
         errors: counts.errors,
         deferred: outcome.report.deferred ?? 0,
+        gone: outcome.report.gone ?? 0,
       });
     }
     await store.writeSourceHealth(health);

@@ -31,7 +31,7 @@ import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
 
 /**
- * System screen services (PRD R4, R12; ADR-029): source health, recent runs, broken boards,
+ * System screen services (PRD R4, R12; ADR-029): source health, recent runs, job boards that no longer exist,
  * the job count and the `scanNow` callable. Reads are zod-parsed live listeners. `scanNow` is
  * never retried automatically: the server lock and cooldown make a retry safe, but a retry
  * should be the owner's choice.
@@ -122,21 +122,26 @@ export function watchRecentRuns(callback: (state: LiveState<RunView[]>) => void)
   );
 }
 
-/** Watched companies whose board has been missing for several runs in a row. */
-export function watchBrokenBoards(callback: (state: LiveState<BoardView[]>) => void): Unsubscribe {
+/**
+ * Watched companies whose job board no longer exists (ADR-056). The query is on one field, so
+ * it needs no index; companies with `watch: false` are filtered out here on the client, since
+ * they are no longer scanned and a fixed-by-unwatching board should leave the list. The fix
+ * advice is on the System screen.
+ */
+export function watchGoneBoards(callback: (state: LiveState<BoardView[]>) => void): Unsubscribe {
   callback({ status: 'loading' });
   return listen(
     async () => {
       const { db } = await getFirebase();
       return onSnapshot(
-        query(collection(db, COLLECTIONS.companies), where('lastScan.broken', '==', true)),
+        query(collection(db, COLLECTIONS.companies), where('lastScan.status', '==', 'not_found')),
         (snapshot) => {
           const boards: BoardView[] = [];
           let invalid = 0;
           for (const item of snapshot.docs) {
             const parsed = CompanySchema.safeParse(timestampsToDates(item.data()));
-            if (parsed.success) boards.push({ id: item.id, company: parsed.data });
-            else invalid++;
+            if (!parsed.success) invalid++;
+            else if (parsed.data.watch) boards.push({ id: item.id, company: parsed.data });
           }
           boards.sort((a, b) => a.company.name.localeCompare(b.company.name));
           callback({ status: 'ready', data: boards, invalid });

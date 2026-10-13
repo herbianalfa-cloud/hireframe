@@ -46,6 +46,8 @@ export interface DigestSourceLine {
   id: string;
   status: string;
   errorCode?: string;
+  /** Boards that no longer exist in the latest run (ADR-056): information, not an error. */
+  gone?: number;
 }
 
 /** The Pipeline line's numbers (M7 7D.4); absent when the applications read failed. */
@@ -212,6 +214,12 @@ function runHealthSection(input: DigestInput): Section {
     });
   }
   if (failing.length === 0) lines.push({ text: 'All sources healthy' });
+  const gone = input.sources.reduce((total, source) => total + (source.gone ?? 0), 0);
+  if (gone > 0) {
+    lines.push({
+      text: `${String(gone)} job ${gone === 1 ? 'board no longer exists' : 'boards no longer exist'}`,
+    });
+  }
   lines.push({
     text: `${String(input.waitingForDescription)} waiting for a description`,
   });

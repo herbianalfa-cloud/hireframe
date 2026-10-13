@@ -247,8 +247,10 @@ export const SourceRunCountsSchema = z.object({
   duplicate: Count,
   /** Postings that added this source to a job another source (or an earlier run) found. */
   merged: Count,
-  /** Failed boards, queries or pages. */
+  /** Failed boards, queries or pages. Boards that no longer exist are not errors (ADR-056). */
   errors: Count,
+  /** ATS boards that no longer exist (not_found), probed or skipped as already known gone. */
+  gone: Count.exactOptional(),
   requests: Count,
   durationMs: Count,
   errorCode: ErrorCode.exactOptional(),
@@ -398,6 +400,8 @@ export const CompanySchema = z.object({
       jobs: Count,
       consecutiveFailures: Count,
       broken: z.boolean(),
+      /** `type:token:host` this result is for; a changed token no longer matches (ADR-056). */
+      board: z.string().min(1).max(300).exactOptional(),
       errorCode: ErrorCode.exactOptional(),
     })
     .exactOptional(),

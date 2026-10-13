@@ -23,6 +23,7 @@
     "build": "npm run build --workspaces --if-present",
     "build:apps-script": "node scripts/build-apps-script.ts",
     "check:bundle": "node scripts/check-bundle.ts",
+    "audit": "node scripts/audit.ts",
     "eval": "node scripts/eval.ts",
     "dev": "HIREFRAME_DEV_BUNDLE=1 npm run build -w @hireframe/functions && node scripts/prepare-dev-functions.ts && firebase emulators:exec --only auth,firestore,storage,functions --project demo-hireframe --ui \"node scripts/dev.ts\"",
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-hireframe \"vitest run -c vitest.rules.config.ts\"",
@@ -45,7 +46,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",
     "vite": "8.3.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "zod": "4.6.5"
   },
   "overrides": {
     "@firebase/firestore": {
