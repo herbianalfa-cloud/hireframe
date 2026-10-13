@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { prefetchToday } from '@/services/dashboard';
 
-import { loadTodayPage, startTodayPrefetch } from './lazy-pages';
+import { loadDashboardService, loadTodayPage, startTodayPrefetch } from './lazy-pages';
 
 vi.mock('@/services/dashboard', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -34,5 +34,13 @@ describe('startTodayPrefetch', () => {
     startTodayPrefetch()();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(prefetchToday).not.toHaveBeenCalled();
+  });
+});
+
+describe('loadDashboardService', () => {
+  it('returns the same import promise every time, and the prefetch uses it', async () => {
+    const first = loadDashboardService();
+    expect(loadDashboardService()).toBe(first);
+    expect(await first).toHaveProperty('prefetchToday');
   });
 });
