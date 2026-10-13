@@ -4,6 +4,18 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.8.0] - Unreleased
+### Added
+- **M8 PR 8A: run health** (ADR-050, ADR-056, ADR-013 addendum; plan `docs/plans/m8-plan.md`).
+  - **Dead boards (ADR-056):** a board that returns `not_found` no longer makes its source Degraded or the run Partial. `perSource[id].gone` counts them, `lastScan.board` records `type:token:host` (a missing `ats.host` is `default`), and a board known to be gone is skipped, with no request and no write, until its last probe is 7 days old. A changed token is probed at once. If 3 or more boards on one host were attempted in a run and all were `not_found`, the source still fails (outage guard).
+  - **System:** "Job boards that no longer exist" replaces "Broken job boards" (every `not_found` board, with scans in a row), the source card says "n boards no longer exist", and each Recent runs row says **Partial because** from `perSource` and `errors`. The digest's run health line adds "n job boards no longer exist" as information.
+  - **Today prefetch (ADR-050):** the Apply list's listener and the Today chunk start as soon as the uid is known on `/`, in parallel with the owner check. New mark `hf:prefetch`. Stops at `hf:usable`, 30 s or sign-out; errors are swallowed.
+  - **Audit gate (ADR-013 addendum):** `npm run audit` fails on any high or critical advisory not in `audit-allowlist.json` (root packages and a `reviewBy` date; expired, unused and wrong-root entries fail). CI's `audit` job runs it as step 2.
+  - Tests: gone boards in the sources and the scan (including a company with no `ats.host`, a broken board untouched for 6 daily runs and re-probed on day 7, the outage guard at 1 and 3 attempts), the emulator scan is now `succeeded`, the System panel, source card and Partial line, the digest line, the prefetch (signed out, off `/`, cleanup, errors, non-owner, shared import promise), and the audit gate (allowed, new high, wrong root, expired, unused, exit code ignored, parse error).
+
+### Changed
+- Docs: ADR-050, ADR-056, ADR-013 addendum (M8); ARCHITECTURE (`companies.lastScan`, `runs.perSource`, Today); SECURITY (prefetch row, audit allowlist); RUNBOOK Recovery (boards that no longer exist); `CLAUDE.md` Commands (`npm run audit`).
+
 ## [0.7.4] - 2026-10-12
 ### Fixed
 - **App Check replay on the `application` callable.** Every owner callable now goes through one web helper (`web/src/services/callable.ts`): a fresh `httpsCallable` and a limited-use App Check token per call, and one request for a double click (a second call with the same name and input while one is running gets that call's result). The server's replay check is unchanged; a replayed token now reads "This request may already have gone through. Check the page before you try again." (still `permission-denied`, logged as `owner.denied` with `app_check_replay` and no user text). The owner check now runs before the replay check, so a non-owner, a missing token or an invalid config always gets "Not allowed."; only the owner reads the replay wording. After a replay refusal Pipeline keeps the answer in the box and does not resend; the live card shows whether it was saved. `parseCv`, `addFact`, `resetProfile`, `scanNow`, `rescore` and `lookup` use the same helper.
