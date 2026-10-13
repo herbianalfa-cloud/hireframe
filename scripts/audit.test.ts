@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateAudit, loadAllowlist, parseAllowlist, runAudit, type AllowlistEntry } from './audit.ts';
+import {
+  evaluateAudit,
+  loadAllowlist,
+  parseAllowlist,
+  runAudit,
+  type AllowlistEntry,
+} from './audit.ts';
 
 const TODAY = '2026-10-13';
 const BRACES = 'GHSA-vfj7-8cjw-p6xm';
