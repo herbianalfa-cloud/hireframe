@@ -4,9 +4,8 @@ import { useLocation } from 'react-router';
 
 import { checkAccess, type Access } from '@/services/access';
 import { signInWithGoogle, signOut } from '@/services/auth';
-import { prefetchToday } from '@/services/dashboard';
 
-import { loadTodayPage } from './lazy-pages';
+import { startTodayPrefetch } from './lazy-pages';
 import { GateErrorScreen, LoadingScreen, NoAccessScreen, SignInScreen } from './GateScreens';
 import { SessionContext, useAuthState, type Session } from './session';
 
@@ -39,8 +38,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [pathname]);
   useEffect(() => {
     if (uid === null || pathRef.current !== '/') return undefined;
-    void loadTodayPage().catch(() => undefined);
-    return prefetchToday();
+    return startTodayPrefetch();
   }, [uid]);
 
   const handleSignOut = useCallback(() => {
