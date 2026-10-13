@@ -57,6 +57,26 @@ function withoutRun(state: DigestInput['state']): DigestInput {
 /** Every href in the HTML. */
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1] ?? '');
 
+describe('renderDigest: boards that no longer exist (ADR-056)', () => {
+  it('says so as information, with sources still healthy', () => {
+    const out = renderDigest(
+      input({
+        sources: [
+          { id: 'greenhouse', status: 'ok', gone: 1 },
+          { id: 'lever', status: 'ok', gone: 2 },
+        ],
+      }),
+    );
+    expect(out.text).toContain('3 job boards no longer exist');
+    expect(out.text).toContain('All sources healthy');
+    expect(out.text).not.toContain('Some sources failed');
+  });
+
+  it('says nothing when there are none', () => {
+    expect(renderDigest(input()).text).not.toContain('no longer exist');
+  });
+});
+
 describe('renderDigest: ready', () => {
   const out = renderDigest(input());
 

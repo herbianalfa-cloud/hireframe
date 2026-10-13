@@ -181,6 +181,7 @@ export function firestoreDigestStore(db: Firestore): DigestStore {
           ...(parsed.data.lastErrorCode === undefined
             ? {}
             : { errorCode: parsed.data.lastErrorCode }),
+          ...(parsed.data.lastCounts.gone ? { gone: parsed.data.lastCounts.gone } : {}),
         });
       }
       if (invalid > 0) log.warn('store.invalid_doc', { collection: 'sources', count: invalid });

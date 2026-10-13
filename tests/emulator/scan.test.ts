@@ -99,7 +99,9 @@ describe('runScan on the Firestore emulator', () => {
     const run = RunSchema.parse(
       timestampsToDates((await db.doc(PATHS.run(result.runId)).get()).data()),
     );
-    expect(run).toMatchObject({ status: 'partial', perStage: { s0: result.s0 } });
+    // The fake watchlist's one dead board is a watchlist fact, not a failure (ADR-056).
+    expect(run).toMatchObject({ status: 'succeeded', perStage: { s0: result.s0 } });
+    expect(run.perSource.greenhouse).toMatchObject({ status: 'ok', errors: 0, gone: 1 });
 
     const adzuna = SourceHealthSchema.parse(
       timestampsToDates((await db.doc(PATHS.source('adzuna')).get()).data()),
@@ -113,6 +115,7 @@ describe('runScan on the Firestore emulator', () => {
       status: 'not_found',
       consecutiveFailures: 1,
       broken: false,
+      board: 'greenhouse:echogone:default',
     });
     expect((await db.collection(COLLECTIONS.companies).get()).size).toBe(FAKE_SEED.length);
 
