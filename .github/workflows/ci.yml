@@ -99,5 +99,7 @@ jobs:
       # through chokidar and micromatch with no patched version yet. Entries expire.
       - name: Audit production dependencies (high)
         run: npm audit --omit=dev --audit-level=high
+      # scripts/audit.ts imports zod, so the tree must be installed (scripts off).
+      - run: npm ci --ignore-scripts
       - name: Audit all dependencies against the allowlist
         run: npm run audit
