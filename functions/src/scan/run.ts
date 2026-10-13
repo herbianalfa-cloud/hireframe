@@ -137,7 +137,7 @@ export function companyScanUpdate(
   const failures =
     board.status === 'ok'
       ? 0
-      : previous && previous.status === board.status
+      : previous?.status === board.status
         ? previous.consecutiveFailures + 1
         : 1;
   return {
