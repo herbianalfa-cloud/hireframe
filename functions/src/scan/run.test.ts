@@ -738,6 +738,34 @@ describe('boards that no longer exist (ADR-056, R4, R12)', () => {
     });
   });
 
+  it('keeps a host-wide 404 outage a failing source: no board turns broken in 4 runs', async () => {
+    const memory = memoryStore();
+    const seed = ['echogone', 'echogone2', 'echogone3'].map((token): CompanySeed => ({
+      ...dead,
+      id: `dead-${token}`,
+      ats: { type: 'greenhouse', token },
+    }));
+    const scan = scanner(memory, seed);
+    for (let day = 0; day < 4; day++) {
+      const result = await scan.at(day);
+      expect(result.runStatus).toBe('partial');
+      expect(memory.runs.get(result.runId)?.perSource.greenhouse).toMatchObject({
+        status: 'failing',
+        errors: 3,
+        errorCode: 'host_not_found',
+      });
+      expect(memory.runs.get(result.runId)?.perSource.greenhouse?.gone).toBeUndefined();
+    }
+    for (const { id } of seed) {
+      expect(memory.companies.get(id)?.lastScan).toMatchObject({
+        status: 'error',
+        consecutiveFailures: 4,
+        broken: false,
+        errorCode: 'host_not_found',
+      });
+    }
+  });
+
   it('is partial when a board returns a 5xx', async () => {
     const memory = memoryStore();
     const httpFor: ScanDeps['httpFor'] = () =>

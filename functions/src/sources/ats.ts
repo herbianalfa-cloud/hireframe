@@ -168,7 +168,6 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
           });
         }
       });
-      report.boards = boards;
 
       // Boards skipped because their host is paused weren't tried: they count as neither
       // attempts nor failures. A source whose every board was skipped is `skipped`.
@@ -192,8 +191,17 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
           for (const board of list) outage.add(board);
         }
       }
-      const gone = tried.filter((board) => board.status === 'not_found' && !outage.has(board));
-      const failed = tried.filter((board) => board.status !== 'ok' && !gone.includes(board));
+      // An outage is recorded as a real error (`host_not_found`), never as a 404: otherwise
+      // `companyScanUpdate` would mark the boards broken after 3 runs and they'd stop being
+      // attempted, turning an outage into "no longer exists" (ADR-056).
+      report.boards = boards.map((board) =>
+        outage.has(board)
+          ? { ...board, status: 'error' as const, errorCode: 'host_not_found' }
+          : board,
+      );
+      const resolved = report.boards.filter((board) => board.errorCode !== 'host_paused');
+      const gone = resolved.filter((board) => board.status === 'not_found');
+      const failed = resolved.filter((board) => board.status === 'error');
       report.errors = failed.length + paused.length;
       const realCodes = failed.flatMap((board) => (board.errorCode ? [board.errorCode] : []));
       const code = dominantCode(realCodes) ?? (paused.length > 0 ? 'host_paused' : undefined);
@@ -201,7 +209,7 @@ export function createAtsSource<Item>(spec: AtsSpec<Item>): Source {
       if (gone.length + skipped.length > 0) report.gone = gone.length + skipped.length;
       if (skipped.length > 0) report.skippedGone = skipped.length;
 
-      const attempts = tried.length - gone.length;
+      const attempts = resolved.length - gone.length;
       if (companies.length > 0 || skipped.length > 0) {
         // Nothing but boards that no longer exist is a healthy source, not a skipped one.
         const onlyGone = attempts === 0 && gone.length + skipped.length > 0 && paused.length === 0;

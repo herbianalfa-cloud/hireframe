@@ -110,8 +110,17 @@ describe('ATS sources on fixtures', () => {
       ats: { type: 'greenhouse', token },
     })) as WatchedCompany[];
     await source.fetch(testContext({ companies }));
-    expect(source.health()).toMatchObject({ status: 'failing', errors: 3, errorCode: 'not_found' });
+    expect(source.health()).toMatchObject({
+      status: 'failing',
+      errors: 3,
+      errorCode: 'host_not_found',
+    });
     expect(source.health().gone).toBeUndefined();
+    expect(source.health().boards.map((board) => board.status)).toEqual([
+      'error',
+      'error',
+      'error',
+    ]);
   });
 
   it('does not count skipped gone boards as attempts for the outage guard', async () => {

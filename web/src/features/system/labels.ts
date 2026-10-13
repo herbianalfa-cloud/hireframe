@@ -110,6 +110,7 @@ function funnelResultText(funnel: FunnelSummary): string {
 /** Plain-English reasons for the error codes a source or board can record. */
 const ERROR_TEXT: Readonly<Record<string, string>> = {
   not_found: 'a board no longer exists',
+  host_not_found: 'every board on the host returned not found, so the host looks down',
   http_status: 'the site returned an error',
   rate_limited: 'the site asked us to slow down',
   timeout: 'the site timed out',

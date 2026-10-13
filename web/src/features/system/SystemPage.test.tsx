@@ -402,6 +402,38 @@ describe('System screen', () => {
     expect(items[1]?.textContent).not.toContain('Partial because');
   });
 
+  it('explains a host-wide 404 outage as the host looking down, not as a board gone', () => {
+    givenRuns([
+      {
+        id: 'outage',
+        run: {
+          ...RUN,
+          perSource: {
+            greenhouse: {
+              status: 'failing',
+              fetched: 0,
+              invalid: 0,
+              new: 0,
+              duplicate: 0,
+              merged: 0,
+              errors: 3,
+              requests: 3,
+              durationMs: 100,
+              errorCode: 'host_not_found',
+            },
+          },
+        },
+      },
+    ]);
+    render(<SystemPage />);
+    const row = within(screen.getByRole('region', { name: 'Recent runs' })).getAllByRole(
+      'listitem',
+    )[0];
+    expect(row?.textContent).toContain('Partial because: Greenhouse failing');
+    expect(row?.textContent).toContain('the host looks down');
+    expect(row?.textContent).not.toContain('a board no longer exists');
+  });
+
   it('shows boards that no longer exist on the source card as neutral text', () => {
     givenSources([
       {
