@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateAudit, runAudit, type AllowlistEntry } from './audit.ts';
+import { evaluateAudit, parseAllowlist, runAudit, type AllowlistEntry } from './audit.ts';
 
 const TODAY = '2026-10-13';
 const BRACES = 'GHSA-vfj7-8cjw-p6xm';
@@ -100,6 +100,53 @@ describe('evaluateAudit', () => {
   it('fails on a critical advisory that is not allowlisted', () => {
     const critical = report([{ name: 'x', id: OTHER, severity: 'critical', direct: true }]);
     expect(evaluateAudit(critical, [], TODAY).ok).toBe(false);
+  });
+});
+
+describe('wrong_root', () => {
+  it('fails an allowlisted advisory whose roots cannot be determined', () => {
+    // No direct dependency is reachable from braces, so `roots` comes out empty.
+    const result = evaluateAudit(
+      report([{ name: 'braces', id: BRACES, effects: [] }]),
+      allowlist,
+      TODAY,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.problems).toEqual([
+      expect.objectContaining({ kind: 'wrong_root', allowed: ['firebase-tools', '@google/clasp'] }),
+    ]);
+  });
+});
+
+describe('parseAllowlist', () => {
+  const entry = {
+    id: BRACES,
+    roots: ['firebase-tools'],
+    reason: 'dev tooling only',
+    reviewBy: '2027-01-13',
+  };
+  const text = (value: unknown) => JSON.stringify(value);
+
+  it('accepts a well-formed file, including an npm-<n> id', () => {
+    const result = parseAllowlist(text([entry, { ...entry, id: 'npm-1234' }]));
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it('fails closed on each kind of invalid file', () => {
+    const bad: unknown[] = [
+      { not: 'an array' },
+      [{ ...entry, id: 'CVE-2024-0001' }],
+      [{ ...entry, id: 'GHSA-xyz' }],
+      [{ ...entry, roots: [] }],
+      [{ ...entry, reviewBy: '13/01/2027' }],
+      [{ ...entry, reviewBy: '2027-1-13' }],
+      [{ ...entry, reason: '   ' }],
+      [{ ...entry, extra: true }],
+      [{ id: BRACES }],
+    ];
+    for (const value of bad) expect(parseAllowlist(text(value)).ok).toBe(false);
+    expect(parseAllowlist('{not json').ok).toBe(false);
+    expect(parseAllowlist('').ok).toBe(false);
   });
 });
 

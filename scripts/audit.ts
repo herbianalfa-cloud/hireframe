@@ -10,6 +10,8 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+import { z } from 'zod';
+
 export interface AllowlistEntry {
   /** The advisory, e.g. `GHSA-vfj7-8cjw-p6xm`. */
   id: string;
@@ -18,6 +20,34 @@ export interface AllowlistEntry {
   reason: string;
   /** `YYYY-MM-DD`: the entry fails the gate from this day on, so it gets looked at again. */
   reviewBy: string;
+}
+
+const AllowlistSchema = z.array(
+  z.strictObject({
+    id: z.string().regex(/^(GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|npm-[\w.@/-]+)$/),
+    roots: z.array(z.string().min(1)).min(1),
+    reason: z.string().trim().min(1),
+    reviewBy: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }),
+);
+
+/** The allowlist file's text as entries, or why it can't be trusted (the gate then fails closed). */
+export function parseAllowlist(
+  text: string,
+): { ok: true; entries: AllowlistEntry[] } | { ok: false; message: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { ok: false, message: 'audit-allowlist.json is not valid JSON' };
+  }
+  const parsed = AllowlistSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue ? issue.path.join('.') || 'file' : 'file';
+    return { ok: false, message: `audit-allowlist.json is invalid at ${where}` };
+  }
+  return { ok: true, entries: parsed.data };
 }
 
 export interface Advisory {
@@ -124,7 +154,11 @@ export function evaluateAudit(
       continue;
     }
     used.add(entry.id);
-    if (!advisory.roots.every((root) => entry.roots.includes(root))) {
+    // An advisory whose roots can't be worked out is never covered by an entry.
+    if (
+      advisory.roots.length === 0 ||
+      !advisory.roots.every((root) => entry.roots.includes(root))
+    ) {
       problems.push({ kind: 'wrong_root', advisory, allowed: entry.roots });
     }
   }
@@ -157,7 +191,7 @@ export function describeProblem(problem: AuditProblem): string {
     case 'not_allowlisted':
       return `${problem.advisory.severity} ${problem.advisory.id} in ${problem.advisory.package} (via ${problem.advisory.roots.join(', ') || 'unknown'}) is not in audit-allowlist.json`;
     case 'wrong_root':
-      return `${problem.advisory.id} now reaches the tree through ${problem.advisory.roots.join(', ')}; the allowlist covers only ${problem.allowed.join(', ')}`;
+      return `${problem.advisory.id} now reaches the tree through ${problem.advisory.roots.join(', ') || 'no direct dependency npm names'}; the allowlist covers only ${problem.allowed.join(', ')}`;
     case 'expired':
       return `allowlist entry ${problem.entry.id} was due for review by ${problem.entry.reviewBy}`;
     case 'unused':
@@ -176,7 +210,12 @@ function npmAuditJson(): string {
 }
 
 function main(): void {
-  const allowlist = JSON.parse(readFileSync('audit-allowlist.json', 'utf8')) as AllowlistEntry[];
+  const loaded = parseAllowlist(readFileSync('audit-allowlist.json', 'utf8'));
+  if (!loaded.ok) {
+    console.error(`audit: ${loaded.message}`);
+    process.exit(1);
+  }
+  const allowlist = loaded.entries;
   const today = new Date().toISOString().slice(0, 10);
   const result = runAudit(npmAuditJson, allowlist, today);
   for (const advisory of result.advisories) {
