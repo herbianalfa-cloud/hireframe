@@ -123,8 +123,10 @@ export function watchRecentRuns(callback: (state: LiveState<RunView[]>) => void)
 }
 
 /**
- * Watched companies whose job board no longer exists (ADR-056). A single-field query, so it
- * needs no index; the fix advice is on the System screen.
+ * Watched companies whose job board no longer exists (ADR-056). The query is on one field, so
+ * it needs no index; companies with `watch: false` are filtered out here on the client, since
+ * they are no longer scanned and a fixed-by-unwatching board should leave the list. The fix
+ * advice is on the System screen.
  */
 export function watchGoneBoards(callback: (state: LiveState<BoardView[]>) => void): Unsubscribe {
   callback({ status: 'loading' });
@@ -138,8 +140,8 @@ export function watchGoneBoards(callback: (state: LiveState<BoardView[]>) => voi
           let invalid = 0;
           for (const item of snapshot.docs) {
             const parsed = CompanySchema.safeParse(timestampsToDates(item.data()));
-            if (parsed.success) boards.push({ id: item.id, company: parsed.data });
-            else invalid++;
+            if (!parsed.success) invalid++;
+            else if (parsed.data.watch) boards.push({ id: item.id, company: parsed.data });
           }
           boards.sort((a, b) => a.company.name.localeCompare(b.company.name));
           callback({ status: 'ready', data: boards, invalid });
