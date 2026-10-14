@@ -298,7 +298,7 @@ export function DeleteAllData() {
           setOpen(next);
         }}
       >
-        <DialogContent>
+        <DialogContent hideClose={running}>
           <DialogTitle>Delete all your data?</DialogTitle>
           <DialogDescription>
             This removes your jobs, applications and generated CVs for good.
