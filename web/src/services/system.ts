@@ -1,6 +1,7 @@
 import {
   COLLECTIONS,
   CompanySchema,
+  isKeptOnlySourceDoc,
   RunSchema,
   SCAN_SOURCE_IDS,
   ScanNowResultSchema,
@@ -59,24 +60,6 @@ const isScanSource = (id: string): id is ScanSourceId =>
 /** The Gmail bridge's health doc (M6); it has its own card, so the scan sources skip it. */
 const EMAIL_SOURCE = 'email';
 
-/** What a wipe leaves on a source doc: counters and pauses only (functions/src/wipe/plan.ts). */
-const KEPT_ONLY_FIELDS: ReadonlySet<string> = new Set([
-  'quota',
-  'pausedHosts',
-  'updatedAt',
-  'schemaVersion',
-]);
-
-function isKeptOnly(data: unknown): boolean {
-  if (typeof data !== 'object' || data === null) return false;
-  const keys = Object.keys(data);
-  return (
-    keys.length > 0 &&
-    keys.every((key) => KEPT_ONLY_FIELDS.has(key)) &&
-    ('quota' in data || 'pausedHosts' in data)
-  );
-}
-
 export function watchSources(callback: (state: LiveState<SourceView[]>) => void): Unsubscribe {
   callback({ status: 'loading' });
   return listen(
@@ -92,7 +75,7 @@ export function watchSources(callback: (state: LiveState<SourceView[]>) => void)
             if (item.id === EMAIL_SOURCE) continue;
             if (!isScanSource(item.id)) invalid++;
             else if (parsed.success) sources.push({ id: item.id, health: parsed.data });
-            else if (isKeptOnly(item.data())) sources.push({ id: item.id, health: null });
+            else if (isKeptOnlySourceDoc(item.data())) sources.push({ id: item.id, health: null });
             else invalid++;
           }
           sources.sort((a, b) => SCAN_SOURCE_IDS.indexOf(a.id) - SCAN_SOURCE_IDS.indexOf(b.id));

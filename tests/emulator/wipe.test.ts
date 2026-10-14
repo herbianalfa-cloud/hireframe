@@ -217,7 +217,7 @@ describe('deleteAllData on the emulators', () => {
     const pauses = await scanStore.pausedHosts();
     expect(pauses.workable).toEqual([{ host: PAUSE.host, until: PAUSE.until.getTime() }]);
     await expect(scanStore.sourceStates()).resolves.toEqual({});
-    // A scan after the wipe writes health again and keeps the same quota and pause.
+    // The pause was on workable only: adzuna kept a quota and no pause.
     expect(pauses.adzuna).toBeUndefined();
   });
 

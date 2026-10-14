@@ -68,6 +68,7 @@ if (process.env[INNER] !== '1') {
 
 // Inside the emulators.
 process.env.GCLOUD_PROJECT = PROJECT;
+process.env.GOOGLE_CLOUD_PROJECT = PROJECT;
 const outfile = 'tmp/load-test.mjs';
 mkdirSync('tmp', { recursive: true });
 await build({

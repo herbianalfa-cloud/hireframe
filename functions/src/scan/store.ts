@@ -3,6 +3,7 @@ import {
   CompanySchema,
   COLLECTIONS,
   DOCS,
+  isKeptOnlySourceDoc,
   JobKeysProjectionSchema,
   PATHS,
   QuotaSchema,
@@ -247,7 +248,10 @@ export function firestoreScanStore(db: Firestore): ScanStore {
         if (!id || !snapshot.exists) return;
         const parsed = SourceHealthSchema.safeParse(timestampsToDates(snapshot.data()));
         if (parsed.success) states[id] = parsed.data;
-        else log.warn('store.invalid_doc', { collection: 'sources', count: 1 });
+        // A doc a wipe left with only quota and pauses isn't health: not an invalid document.
+        else if (!isKeptOnlySourceDoc(snapshot.data())) {
+          log.warn('store.invalid_doc', { collection: 'sources', count: 1 });
+        }
       });
       return states;
     },

@@ -1,4 +1,9 @@
-import { COLLECTIONS, type WipeStep } from '@hireframe/shared';
+import {
+  COLLECTIONS,
+  KEPT_ONLY_SOURCE_KEYS,
+  KEPT_SOURCE_FIELDS,
+  type WipeStep,
+} from '@hireframe/shared';
 
 /**
  * The collections each wipe step empties (ADR-057), in the order a call runs them. Kept out of
@@ -21,14 +26,6 @@ export const WIPE_COLLECTIONS: Record<WipeDocStep, string> = {
 /** The Storage prefix of generated CV files; uploaded CVs sit under the profile step. */
 export const WIPE_CV_FILES_PREFIX = 'cvs/';
 
-/** What a source doc keeps: its call counters and host pauses (ADR-025). */
-const KEPT_SOURCE_FIELDS = ['quota', 'pausedHosts'] as const;
-const KEPT_ONLY_KEYS: ReadonlySet<string> = new Set([
-  ...KEPT_SOURCE_FIELDS,
-  'updatedAt',
-  'schemaVersion',
-]);
-
 export type SourceWipe =
   /** Already only the kept fields: nothing to do. */
   | { action: 'keep' }
@@ -43,6 +40,6 @@ export function planSourceDoc(data: Record<string, unknown> | undefined): Source
     if (data?.[field] !== undefined) kept[field] = data[field];
   }
   if (Object.keys(kept).length === 0) return { action: 'delete' };
-  const onlyKept = Object.keys(data ?? {}).every((key) => KEPT_ONLY_KEYS.has(key));
+  const onlyKept = Object.keys(data ?? {}).every((key) => KEPT_ONLY_SOURCE_KEYS.has(key));
   return onlyKept ? { action: 'keep' } : { action: 'rewrite', kept };
 }

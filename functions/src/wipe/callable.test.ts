@@ -106,6 +106,16 @@ describe('the deleteAllData handler refuses before any read or write', () => {
     expect(touched.paths).toEqual(['get config/app']);
   });
 
+  it('refuses a non-owner who sends invalid input as permission-denied: the owner check comes first', async () => {
+    await expect(
+      call({ data: { confirm: 'nope', extra: true }, auth: { uid: 'stranger-uid' } }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(call({ data: undefined, auth: { uid: 'stranger-uid' } })).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    expect(touched.paths).toEqual(['get config/app', 'get config/app']);
+  });
+
   it('refuses a replayed App Check token, even from the owner, after reading only config/app', async () => {
     await expect(
       call({ data: input, auth: { uid: 'owner-uid' }, app: { alreadyConsumed: true } }),

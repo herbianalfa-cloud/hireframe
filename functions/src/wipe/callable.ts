@@ -15,7 +15,8 @@ import { firestoreWipeStore } from './store.js';
 /**
  * deleteAllData (ADR-057): owner only, App Check enforced and consumed (so the client never
  * retries it). One bounded pass per call; it never calls itself, and the client repeats it until
- * `done`. One instance and one request at a time, so two tabs run one after the other. No secrets.
+ * `done`. One instance and one request at a time: a second tab's call may be refused (the
+ * dialog shows the error) rather than queued, which is safe. No secrets.
  */
 export const deleteAllData = onCall(
   {

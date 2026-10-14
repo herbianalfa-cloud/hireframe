@@ -28,6 +28,7 @@ import { LINKEDIN_ALERT_JOB } from '../../packages/shared/src/fixtures/jobs.js';
 import { runScan, type ScanDeps } from '../../functions/src/scan/run.js';
 import { firestoreScanStore } from '../../functions/src/scan/store.js';
 import { FAKE_SEED } from '../../functions/src/sources/fixtures.js';
+import { fakeFetch } from '../../functions/src/sources/fake-fetch.js';
 import { createSources } from '../../functions/src/sources/index.js';
 import { testHttpClient } from '../../functions/src/sources/testing.js';
 import { timestampsToDates } from '../../functions/src/timestamps.js';
@@ -287,6 +288,36 @@ describe('runScan on the Firestore emulator', () => {
     };
     await store.saveQuota('adzuna', quota);
     expect(await store.quotas()).toEqual({ adzuna: quota });
+  });
+
+  it('after a wipe, makes no Adzuna request at its kept daily limit and writes the quota back', async () => {
+    await runScan(deps(T0));
+    const first = (await db.doc(PATHS.source('adzuna')).get()).get('quota') as Record<
+      string,
+      unknown
+    >;
+    expect(first).toBeDefined();
+    // What a wipe leaves: only the quota, at the day's limit (225), and the bookkeeping fields.
+    const kept = { ...first, dayCount: 225 };
+    await db.doc(PATHS.source('adzuna')).set({ quota: kept, updatedAt: T0, schemaVersion: 1 });
+    await db.recursiveDelete(db.collection(COLLECTIONS.jobs));
+
+    const urls: string[] = [];
+    const recording = () =>
+      testHttpClient({
+        fetch: ((input: string | URL) => {
+          urls.push(String(input));
+          return fakeFetch(input);
+        }) as typeof fetch,
+      });
+    const second = await runScan(deps(minutes(10), { httpFor: recording }));
+    expect(second.status).toBe('completed');
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.filter((url) => url.includes('adzuna'))).toEqual([]);
+    const stored = (await db.doc(PATHS.source('adzuna')).get()).get('quota') as {
+      dayCount: number;
+    };
+    expect(stored.dayCount).toBe(225);
   });
 
   it('skips stored jobs that fail the projection schema (V1)', async () => {

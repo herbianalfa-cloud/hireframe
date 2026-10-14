@@ -6,6 +6,27 @@ import { z } from 'zod';
  */
 export const WIPE_CONFIRMATION = 'DELETE';
 
+/** What a source doc keeps through a wipe: its call counters and host pauses (ADR-025, ADR-057). */
+export const KEPT_SOURCE_FIELDS = ['quota', 'pausedHosts'] as const;
+
+/** Every field a kept-only source doc may carry. */
+export const KEPT_ONLY_SOURCE_KEYS: ReadonlySet<string> = new Set([
+  ...KEPT_SOURCE_FIELDS,
+  'updatedAt',
+  'schemaVersion',
+]);
+
+/** Whether a `sources/{id}` doc is the shape a wipe leaves: only kept fields, at least one kept. */
+export function isKeptOnlySourceDoc(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  const keys = Object.keys(data);
+  return (
+    keys.length > 0 &&
+    keys.every((key) => KEPT_ONLY_SOURCE_KEYS.has(key)) &&
+    KEPT_SOURCE_FIELDS.some((field) => field in data)
+  );
+}
+
 export const DeleteAllDataInputSchema = z.strictObject({
   confirm: z.literal(WIPE_CONFIRMATION),
   resetProfile: z.boolean(),

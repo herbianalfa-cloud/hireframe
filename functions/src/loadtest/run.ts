@@ -30,6 +30,7 @@ import { deleteAllDataHandler } from '../wipe/run.js';
 import { firestoreWipeStore } from '../wipe/store.js';
 import { counted, newCounters, type Counters } from './counting.js';
 import { buildLoadData, LOAD_DEFAULTS, prng, type LoadData } from './data.js';
+import { assertLoadTestEnvironment } from './environment.js';
 import { loadFetch, type FetchRecord } from './fetch.js';
 import { evaluate, formatTable, type Check, type Measurements, type WipeCall } from './report.js';
 import { loadTransport } from './transport.js';
@@ -46,20 +47,6 @@ export interface LoadTestOptions {
 }
 
 const MONTHLY_CAP_PENCE = 3_200;
-
-export function assertLoadTestEnvironment(env: NodeJS.ProcessEnv): string {
-  const project = env.GCLOUD_PROJECT ?? '';
-  if (!project.startsWith('demo-')) {
-    throw new Error(
-      `Refusing to run the load test against "${project || '(unset)'}": it only runs against a demo-* emulator project.`,
-    );
-  }
-  if (env.LIVE === '1') throw new Error('The load test never makes live calls: unset LIVE.');
-  if (!env.FIRESTORE_EMULATOR_HOST || !env.FIREBASE_STORAGE_EMULATOR_HOST) {
-    throw new Error('The Firestore and Storage emulators must be running.');
-  }
-  return project;
-}
 
 async function seedBasics(db: Firestore, now: Date): Promise<void> {
   const batch = db.batch();
@@ -190,7 +177,8 @@ export async function runLoadTest(options: LoadTestOptions): Promise<{
   table: string;
 }> {
   const project = assertLoadTestEnvironment(process.env);
-  process.env.FIREBASE_CONFIG ??= JSON.stringify({
+  // Always set, never kept from the caller: the Admin SDK takes its project from here.
+  process.env.FIREBASE_CONFIG = JSON.stringify({
     projectId: project,
     storageBucket: `${project}.appspot.com`,
   });
