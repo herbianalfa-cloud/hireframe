@@ -26,10 +26,7 @@ const html = readFileSync(join(DIST, 'index.html'), 'utf8');
 const initial = [...html.matchAll(/(?:src|href)="\/(assets\/[^"]+\.js)"/g)].map((m) => m[1] ?? '');
 if (initial.length === 0) failures.push('index.html loads no JS: is web/dist built?');
 // The Firebase config fetch must start from the HTML, before the entry script (ADR-061).
-const preloadAt =
-  html.indexOf('rel="preload"') === -1
-    ? -1
-    : html.search(/<link[^>]*rel="preload"[^>]*href="\/__\/firebase\/init\.json"/);
+const preloadAt = html.search(/<link[^>]*rel="preload"[^>]*href="\/__\/firebase\/init\.json"/);
 const entryAt = html.search(/<script[^>]*type="module"/);
 if (preloadAt === -1) {
   failures.push('index.html has no preload for /__/firebase/init.json (ADR-061)');
