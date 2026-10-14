@@ -84,9 +84,12 @@ await build({
     js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
   },
 });
-const loadTest = (await import(
-  pathToFileURL(outfile).href
-)) as typeof import('../functions/src/loadtest/run.ts');
+const loadTest = (await import(pathToFileURL(outfile).href)) as {
+  runLoadTest: (options: {
+    jobs: number;
+    s1Passes: number;
+  }) => Promise<{ table: string; checks: { pass: boolean }[] }>;
+};
 const { table, checks } = await loadTest.runLoadTest(args);
 console.log(table);
 process.exit(checks.every((check) => check.pass) ? 0 : 1);
