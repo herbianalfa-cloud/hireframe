@@ -3,6 +3,16 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
+### Added
+- **M8 PR 8B, session 1: Delete all my data, server side** (ADR-057 to be written in session 4; plan `docs/plans/m8b-plan.md`).
+  - **`deleteAllData` (new callable, needs C10 after deploy):** owner only, App Check enforced and consumed, 120 s, 512 MiB, `maxInstances` 1 and `concurrency` 1. Input `{ confirm: 'DELETE', resetProfile }` (strict). Each call is one bounded pass (3,000 documents, 20 Storage pages of 200, no new page after 90 s) over `applications`, `cvs/` files, `cvs`, `jobs` with their descriptions, `runs`, `events`, `alertMessages`, `companies` and `sources`, then a reads-only check; `done: true` only from a call that deleted nothing and found every step empty. It never calls itself; the client repeats it. `config`, `criteria`, `usage`, `locks`, `nonces` and each source's `quota` and `pausedHosts` are kept; the profile goes only when ticked, and only from a pass that found the rest empty.
+  - **`wipe` lock holder:** a short holder on `locks/scan` (3 min stale, refreshed per call, released when done without starting the scan cooldown). Scans, re-scores, ingest and Lookup answer busy; the `application` callable refuses all seven actions with "Deleting your data, try again when it has finished."
+  - **Kept source docs:** the scan reads `pausedHosts` field by field, so a source doc holding only quota and pauses still carries its pauses; System shows it as "No scan since your data was deleted".
+  - `resetProfileCore` extracted from Reset profile (same behaviour and wording).
+  - Tests: wipe plan, run (fake clock: caps, deadline, retry after a store error, a document written mid-wipe, profile ordering) and callable; emulator wipe loop, held-lock `start`, and the worker's lost path (files removed when the application is deleted mid-write).
+
+### Changed
+- Fresha's seed row is `keep-none` (moved to Teamtailor, which isn't supported); ROADMAP parks a Teamtailor source.
 
 ## [0.8.1] - Unreleased
 ### Changed
