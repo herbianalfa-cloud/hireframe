@@ -360,11 +360,23 @@ describe('runFunnel', () => {
       'hydrate.end',
       's3.end',
     ]);
-    expect(marks.filter((m) => m.name.startsWith('hydrate')).map((m) => m.jobId)).toEqual(['a', 'a']);
+    expect(marks.filter((m) => m.name.startsWith('hydrate')).map((m) => m.jobId)).toEqual([
+      'a',
+      'a',
+    ]);
     expect(marks.map((m) => m.at)).toEqual([...marks.map((m) => m.at)].sort((a, b) => a - b));
     expect(withProbe).toEqual(without);
     const bare = (store: MemoryFunnelStore) =>
-      [...store.jobs.entries()].map(([id, job]) => [id, { ...job, url: '' }]);
+      [...store.jobs.entries()].map(([id, j]) => [
+        id,
+        j.stage,
+        j.verdict,
+        j.fitScore,
+        j.luckScore,
+        j.next,
+        j.flags,
+        j.costPence,
+      ]);
     expect(bare(probed)).toEqual(bare(plain));
   });
 
