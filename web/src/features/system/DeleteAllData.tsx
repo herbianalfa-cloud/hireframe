@@ -65,20 +65,40 @@ function CountLine({ label, state }: { label: string; state: Count | undefined }
   );
 }
 
+/**
+ * The server counts the profile's facts, uploads and files in its totals too; the summary shows
+ * them on their own line, so the data counts leave them out.
+ */
+function dataCounts(totals: WipeTotals): { documents: number; files: number } {
+  const { facts, documents, files } = totals.profile;
+  return {
+    documents: Math.max(0, totals.documents - facts - documents),
+    files: Math.max(0, totals.files - files),
+  };
+}
+
 function progressLine(totals: WipeTotals): string {
-  const so_far = `Deleted ${plural(totals.documents, 'document', 'documents')} and ${plural(totals.files, 'file', 'files')} so far`;
+  const data = dataCounts(totals);
+  const so_far = `Deleted ${plural(data.documents, 'document', 'documents')} and ${plural(data.files, 'file', 'files')} so far`;
   if (totals.remaining.length === 0) return so_far;
   const todo = totals.remaining.map((step) => WIPE_STEP_LABELS[step]).join(', ');
   return `${so_far} · still to do: ${todo}`;
 }
 
-function Form({ onFinished }: { onFinished: () => void }) {
+function Form({
+  running,
+  setRunning,
+  onFinished,
+}: {
+  running: boolean;
+  setRunning: (running: boolean) => void;
+  onFinished: () => void;
+}) {
   const inputId = useId();
   const profileId = useId();
   const counts = usePreview(ALL_COUNTS);
   const [typed, setTyped] = useState('');
   const [resetProfile, setResetProfile] = useState(false);
-  const [running, setRunning] = useState(false);
   const [totals, setTotals] = useState<WipeTotals>(EMPTY_WIPE_TOTALS);
   const [error, setError] = useState<string>();
   // What was ticked when the wipe started: Continue and the summary use it, not the live box.
@@ -114,8 +134,8 @@ function Form({ onFinished }: { onFinished: () => void }) {
     return (
       <div className="mt-4 space-y-3">
         <p role="status" className="text-sm">
-          Done. Deleted {plural(totals.documents, 'document', 'documents')} and{' '}
-          {plural(totals.files, 'file', 'files')}.
+          Done. Deleted {plural(dataCounts(totals).documents, 'document', 'documents')} and{' '}
+          {plural(dataCounts(totals).files, 'file', 'files')}.
           {sentProfile
             ? ` Profile reset: ${plural(totals.profile.facts, 'fact', 'facts')}, ${plural(totals.profile.documents, 'upload', 'uploads')} and ${plural(totals.profile.files, 'file', 'files')} deleted.`
             : ''}
@@ -138,6 +158,9 @@ function Form({ onFinished }: { onFinished: () => void }) {
           ) : null}
           {progressLine(totals)}
         </p>
+        {running ? (
+          <p className="text-sm text-muted-foreground">Keep this open until it finishes.</p>
+        ) : null}
         {error ? (
           <p role="alert" className="text-sm text-danger">
             {error}
@@ -244,6 +267,8 @@ function Form({ onFinished }: { onFinished: () => void }) {
 /** Delete all my data (ADR-057), in the System page's Danger zone. */
 export function DeleteAllData() {
   const [open, setOpen] = useState(false);
+  // Held here, not in the form, so a close request can be ignored while passes are running.
+  const [running, setRunning] = useState(false);
   return (
     <section
       aria-labelledby="wipe-title"
@@ -266,7 +291,13 @@ export function DeleteAllData() {
       >
         Delete all my data
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && running) return;
+          setOpen(next);
+        }}
+      >
         <DialogContent>
           <DialogTitle>Delete all your data?</DialogTitle>
           <DialogDescription>
@@ -274,6 +305,8 @@ export function DeleteAllData() {
           </DialogDescription>
           {open ? (
             <Form
+              running={running}
+              setRunning={setRunning}
               onFinished={() => {
                 setOpen(false);
               }}

@@ -130,4 +130,46 @@ describe('DeleteAllData (ADR-057)', () => {
     expect(call).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
   });
+
+  it('ignores Escape while passes run, then closes on Close after it finishes', async () => {
+    let release: (value: DeleteAllDataResult) => void = () => undefined;
+    call.mockImplementationOnce(
+      () =>
+        new Promise<DeleteAllDataResult>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await start();
+    expect(await screen.findByText(/keep this open until it finishes/i)).toBeTruthy();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByText(/keep this open until it finishes/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/type delete to confirm/i)).toBeNull();
+    release(pass({ done: true, deleted: { documents: 3, files: 0 }, remaining: [] }));
+    expect(await screen.findByText(/^Done\. Deleted 3 documents/)).toBeTruthy();
+    expect(call).toHaveBeenCalledTimes(1);
+    // The dialog's own X and the summary's Close share a name; either one closes it now.
+    const close = screen.getAllByRole('button', { name: 'Close' })[0];
+    if (!close) throw new Error('no Close button');
+    await userEvent.click(close);
+    await waitFor(() => {
+      expect(screen.queryByText(/^Done\./)).toBeNull();
+    });
+  });
+
+  it('shows the profile counts on their own line, not inside the data counts', async () => {
+    call.mockResolvedValue(
+      pass({
+        done: true,
+        deleted: { documents: 12, files: 3 },
+        remaining: [],
+        profile: { facts: 8, documents: 1, files: 2 },
+      }),
+    );
+    await openDialog();
+    await userEvent.click(screen.getByRole('checkbox', { name: /also reset profile/i }));
+    await typeDelete();
+    await userEvent.click(submitButton());
+    expect(await screen.findByText(/^Done\. Deleted 3 documents and 1 file\./)).toBeTruthy();
+    expect(screen.getByText(/Profile reset: 8 facts, 1 upload and 2 files deleted/)).toBeTruthy();
+  });
 });
