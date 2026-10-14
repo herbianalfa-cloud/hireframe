@@ -296,6 +296,33 @@ describe('the description upgrade on merge (ADR-048)', () => {
     },
   );
 
+  it.each([
+    { next: 's3', restored: false },
+    { next: 'description', restored: true },
+  ])(
+    'a purged snippet job at next=$next: description restored is $restored (S1)',
+    async ({ next, restored }) => {
+      await runIngest(ingestDeps(T0), [message('alert-1', LINKEDIN_ALERT)]);
+      const [acme] = await acmeJobs();
+      if (!acme) throw new Error('no job');
+      await db.doc(PATHS.job(acme.id)).update({
+        descriptionKind: 'snippet',
+        descriptionPurgedAt: T0,
+        stage: 's2',
+        next,
+      });
+      await db.doc(PATHS.jobDescription(acme.id)).delete();
+
+      await runScan(scanDeps(minutes(10)));
+      const data = (await db.doc(PATHS.job(acme.id)).get()).data();
+      const description = await db.doc(PATHS.jobDescription(acme.id)).get();
+      expect(description.exists).toBe(restored);
+      expect(data?.descriptionKind).toBe(restored ? 'full' : 'snippet');
+      expect(data?.descriptionPurgedAt !== undefined).toBe(!restored);
+      if (restored) expect(data?.next).toBe('s3');
+    },
+  );
+
   it('keeps a job waiting when only a snippet-only source merges in', async () => {
     await runIngest(ingestDeps(T0), [message('alert-1', LINKEDIN_ALERT)]);
     const [acme] = await acmeJobs();
