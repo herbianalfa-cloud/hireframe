@@ -344,6 +344,28 @@ Amendment (funnel intake, ADR-045; approved 8 Oct): the default lease is sized t
 
 Consequences: at the default cap, steady-state volume fits and a large backlog takes several runs. If verdicts lag, raising the monthly cap is the lever. A crashed run overstates the month by its unused lease, never understates it. FUNNEL's per-run caps are now budget-first.
 
+*Addendum (load test, M8 8B; `node scripts/load-test.ts`, 14 Oct 2026, emulator, fake data, real scan, funnel, HTTP client and deadlines):* ADR-032's open question was whether 32 S3 calls fit inside 450 s. **Time is not the limit; the lease is.** The test seeds 1,000 postings on 20 fake Greenhouse boards (105 pass S1, 32 of those pass S2), 12 alert jobs without text (half have a posting on their board), 300 stale queued jobs, a £32 monthly cap (lease 52p), model latency S2 about 1.2 s and S3 about 8 s, and token counts calibrated to c₂ = 0.151p and c₃ = 1.0p.
+
+| | Peak (`--s1-passes 105`) | Stress (`--s1-passes 210`) |
+|---|---|---|
+| Whole run (limit 540 s) | 318.7 s | 345.1 s |
+| Ingest (20 board reads at 1 s per host) / S1 / sweep | 20.9 s / 0.4 s / 0.1 s | 20.7 s / 0.4 s / 0.1 s |
+| S2: calls, time, stop | 111, 147.9 s, none | 134, 181.4 s, `run_budget` |
+| Hydrate (12 board reads, 6 found) | 10.6 s | 10.1 s |
+| S3: calls, time, stop | 31, 149.3 s (169.4 s to 318.6 s), `run_budget` | 28, 142.5 s, `run_budget` |
+| Last S2 / last S3 call started | 168.4 s / 309.5 s | 198.7 s / 338.8 s |
+| Lease used | 47.76p of 52p | 48.23p of 52p |
+| Documents read / written, largest batch | 2,811 / 3,529, 400 | 3,033 / 3,549, 400 |
+| Peak RSS | 162 MiB | 154 MiB |
+| Second run: new jobs, changed sources or keys | 0, 0 | 0, 0 |
+| Wipe of 2,665 documents | 2 calls (2,665, then 0), 0.2 s | same |
+
+- **The answer is no for the count, yes for the time.** At the approved peak S3 made 31 calls, not 32, and stopped with `run_budget`; its last call started at 309.5 s, 140 s before the deadline. In the stress run it made 28. No stage stopped at a deadline in either run, and every stage's last start was well inside its stop time.
+- **Why 31:** the test's S2 made 111 calls, not the approved n₂ = 99. The 105 S1 passes are untouched by adopted rules (t = 0), and 6 more postings, the ones that match an alert's title on its board, also pass S1 and S2. The ADR-045 formula for these numbers gives L = 0.151 × 111 + 1.0 × 32 + 4.5 = 53.3p, above the 52p lease. With 31 S3 calls used the 32nd reservation (5.5p worst case) can't fit with nothing in flight, so S3 stops. This is the lease working as designed (ADR-039), not a defect.
+- **Lever, if S3 should reach 32 at 111 S2 calls:** `config/app.funnel.runBudgetPence` 54 (or `monthlyCapPence` 3300). Nothing was changed to make the test pass; the owner decides. The deadline and `s3Concurrency` need no change.
+- **What the test can't show:** emulator latency and Firestore are not production's, the run is in one process (no cold start), and the S2 and S3 latencies are assumed. The first real runs at the 52p lease (the 10-run re-check above) are still the proof. Reads are counted through a proxy on the Admin SDK (`functions/src/loadtest/counting.ts`).
+- **Sweep and queues:** the sweep expired 100 S2 and 200 S3 stale jobs in 0.1 s, so the 2,000-job read limit is not close. The largest batch was 400 operations (the ingest writer's chunk).
+
 ## ADR-033 S1 rules and the work-rights setting
 Context: FUNNEL's S1 needs "wording that excludes {profile.work_rights}", but nothing structured stored work rights; only free-text constraint facts did. Some criteria entries are prose labels ("Big Four graduate schemes", "sponsorship-restricted wording"), not patterns. Decision:
 - **Work rights are an owner setting** on `profile/main`: `unrestricted`, `time_limited` or `needs_sponsorship`, plus an optional `validUntil` (YYYY-MM-DD) that only the prompts use. It's personal data, so it lives in Firebase only (ADR-010). The rules allow exactly these keys, server time and a fixed `createdAt`; Reset profile deletes the document.

@@ -18,6 +18,13 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - New index `jobs (verdict ASC, judgedAt ASC)` in `firestore.indexes.json` (ADR-040 spec test).
   - Tests: retention run (fake clock: 59/61 days, every status, application race, status race, ties, caps, deadline, cursor, store error), query spec, schedule options, config budget, emulator transaction run; wipe service and dialog; System Danger zone and kept-only source card; preview counts in `indexes.test.ts`.
 
+- **M8 PR 8B, session 3: load test** (ADR-032 addendum; plan `docs/plans/m8b-plan.md` B4).
+  - **`node scripts/load-test.ts [--jobs N] [--s1-passes N]`:** starts its own Firestore and Storage emulators (`demo-hireframe-load`), seeds 1,000 fake postings on 20 fake Greenhouse boards (105 pass S1 and about 30% of those pass S2), 12 alert jobs without text and 300 stale queued jobs, then runs the real scan and funnel twice and the wipe core to the end. Real deadlines, so about 6 to 10 minutes. It makes no network or live model call, refuses `LIVE=1`, any project that isn't `demo-*` and busy emulator ports (stop `npm run dev` first). It exits 1 if a pass criterion is missed and prints the stage table and the answer to "32 S3 calls + 12 board reads inside 450 s".
+  - **Funnel probe hook:** `FunnelDeps.probe` and `FunnelWiring.probe`, an optional `mark(name, detail)` at S1, sweep, S2 and S3 start and end and around each hydrator read. Production passes nothing; the funnel is identical without it (tested).
+  - **`functions/src/loadtest/`** (not imported by `index.ts`, so not in the deploy bundle): seeded data, a latency and cost-calibrated transport over the fake answers, a fake Greenhouse `fetch` that goes through the real HTTP client, a read and write counter, and the pure report.
+  - **Result (ADR-032 addendum):** the run takes 319 s at the approved peak and 345 s at twice the S1 passes, and no stage hits a deadline. S3 made 31 calls, not 32, and stopped at the 52p lease because S2 made 111 calls (the approved plan assumes 99). The lever is `runBudgetPence` 54; nothing was changed.
+  - Tests (fake clock and injected sleep): the data mix against the real S1 rules and the fake S2, transport latency and token calibration, the counting proxy, the report's criteria (pass and fail each), the fake fetch, the argument parser, and the probe's marks in order.
+
 ### Changed
 - Fresha's seed row is `keep-none` (moved to Teamtailor, which isn't supported); ROADMAP parks a Teamtailor source.
 
