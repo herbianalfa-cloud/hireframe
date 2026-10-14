@@ -83,6 +83,13 @@ describe('s3Answer', () => {
     expect(s3Answer(good({ s3Stop: 'deadline' }))).toContain(': NO');
     expect(s3Answer(good({ s3Calls: 20 }))).toContain(': NO');
   });
+  it('says whether time or the lease was the limit', () => {
+    const lease = s3Answer(good({ s3Calls: 31, s3Stop: 'run_budget' }));
+    expect(lease).toContain(': NO');
+    expect(lease).toContain('The limit was not time');
+    expect(lease).toContain('31 of 32 calls');
+    expect(s3Answer(good({ s3Stop: 'deadline', s3Calls: 25 }))).toContain('Time was the limit');
+  });
   it('is printed in the table with the stage numbers', () => {
     const table = formatTable(good(), evaluate(good()));
     expect(table).toContain('32 S3 calls + 12 board reads inside 450 s: YES');

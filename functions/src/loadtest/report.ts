@@ -129,11 +129,24 @@ export function s3Answer(m: Measurements): string {
     m.s3Stop !== 'deadline' &&
     m.s3Calls >= Math.min(32, m.expectedS3) &&
     (m.lastS3StartAt === null || m.lastS3StartAt <= FUNNEL.s3StopMs / 1000);
+  const want = Math.min(32, m.expectedS3);
+  let why = '';
+  if (!fit) {
+    if (m.s3Stop === 'deadline') why = ' Time was the limit: S3 stopped at its deadline.';
+    else if (m.s3Calls < want) {
+      why =
+        ` The limit was not time: S3 stopped at ${m.s3Stop ?? 'the end of its queue'} after ` +
+        `${String(m.s3Calls)} of ${String(want)} calls` +
+        (m.lastS3StartAt === null
+          ? '.'
+          : `, and the last call started at ${secs(m.lastS3StartAt)}.`);
+    } else why = ' A call started after the deadline.';
+  }
   return (
     `32 S3 calls + 12 board reads inside 450 s: ${fit ? 'YES' : 'NO'} ` +
     `(S3 ${secs(m.s3StartedAt)} to ${secs(m.s3EndedAt)}; stops.s3 ${m.s3Stop ?? 'none'}; ` +
-    `${String(m.s3Calls)} S3 calls; ${String(m.hydrate.reads)} board reads, ${String(m.hydrate.ok)} ok, ` +
-    `${secs(m.hydrate.totalSeconds)} in total)`
+    `${String(m.s3Calls)} S3 calls; ${String(m.hydrate.reads)} board reads, ` +
+    `${String(m.hydrate.ok)} ok, ${secs(m.hydrate.totalSeconds)} in total).${why}`
   );
 }
 
