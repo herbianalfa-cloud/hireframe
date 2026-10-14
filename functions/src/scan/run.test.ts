@@ -42,6 +42,8 @@ function memoryStore(options: { lock?: LockResult } = {}) {
   const companies = new Map<string, StoredCompany>();
   const sources: Partial<Record<ScanSourceId, SourceHealth>> = {};
   const quotas: Partial<Record<ScanSourceId, Quota>> = {};
+  /** Pauses on a doc a wipe kept: it has no health to parse, only `pausedHosts`. */
+  const keptPauses: Partial<Record<ScanSourceId, { host: string; until: Date }[]>> = {};
   let nextId = 0;
   let locked = false;
   const calls = { writes: 0, releases: 0 };
@@ -73,21 +75,18 @@ function memoryStore(options: { lock?: LockResult } = {}) {
     },
     watchedCompanies: () => Promise.resolve([...companies.values()]),
     sourceStates: () => Promise.resolve({ ...sources }),
-    pausedHosts: () =>
-      Promise.resolve(
-        Object.fromEntries(
-          Object.entries(sources).flatMap(([id, health]) =>
-            health.pausedHosts?.length
-              ? [
-                  [
-                    id,
-                    health.pausedHosts.map(({ host, until }) => ({ host, until: until.getTime() })),
-                  ],
-                ]
-              : [],
-          ),
-        ),
-      ),
+    pausedHosts: () => {
+      const found: Partial<Record<ScanSourceId, { host: string; until: number }[]>> = {};
+      for (const [id, health] of Object.entries(sources)) {
+        const list = health.pausedHosts ?? [];
+        if (list.length)
+          found[id as ScanSourceId] = list.map((p) => ({ host: p.host, until: p.until.getTime() }));
+      }
+      for (const [id, list] of Object.entries(keptPauses)) {
+        found[id as ScanSourceId] = list.map((p) => ({ host: p.host, until: p.until.getTime() }));
+      }
+      return Promise.resolve(found);
+    },
     quotas: () => Promise.resolve({ ...quotas }),
     saveQuota: (id, quota) => {
       quotas[id] = quota;
@@ -145,7 +144,7 @@ function memoryStore(options: { lock?: LockResult } = {}) {
       return Promise.resolve();
     },
   };
-  return { store, jobs, runs, companies, sources, quotas, calls };
+  return { store, jobs, runs, companies, sources, quotas, keptPauses, calls };
 }
 
 function deps(store: ScanStore, overrides: Partial<ScanDeps> = {}): ScanDeps {
@@ -400,6 +399,31 @@ describe('paused hosts across scans', () => {
     expect(memory.sources.workable?.pausedHosts?.[0]?.until).toEqual(pause?.until);
     // A skipped board is neither a failure nor "scanned".
     expect(memory.companies.get('delta-dock')?.lastScan).toEqual(lastScanAfterFirst);
+  });
+});
+
+describe('a source doc kept by Delete all my data (ADR-057)', () => {
+  it('still carries its pause: Workable gets no request, and the pause is saved again', async () => {
+    const memory = memoryStore();
+    const until = new Date(NOW.getTime() + 20 * 3600_000);
+    memory.keptPauses.workable = [{ host: 'apply.workable.com', until }];
+    let workableRequests = 0;
+    const httpFor: ScanDeps['httpFor'] = (_deadline, paused) =>
+      testHttpClient({
+        paused,
+        fetch: ((input: URL) => {
+          if (input.host === 'apply.workable.com') workableRequests += 1;
+          return fakeFetch(input);
+        }) as typeof fetch,
+      });
+    const result = await runScan(deps(memory.store, { httpFor }));
+    if (result.status !== 'completed') throw new Error(result.status);
+    expect(workableRequests).toBe(0);
+    expect(result.perSource.workable?.status).toBe('skipped');
+    expect(memory.sources.workable?.pausedHosts?.[0]).toMatchObject({
+      host: 'apply.workable.com',
+      until,
+    });
   });
 });
 

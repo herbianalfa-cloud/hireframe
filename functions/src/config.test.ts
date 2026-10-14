@@ -18,6 +18,7 @@ import {
   RUNTIME_SERVICE_ACCOUNT,
   SCAN,
   SHORT_LOCK,
+  WIPE,
   type LlmPurpose,
 } from './config.js';
 
@@ -168,6 +169,12 @@ describe('Gmail bridge limits (ADR-046, ADR-047, ADR-048)', () => {
     expect(SHORT_LOCK.scheduledWaitMaxMs).toBe(4 * 60_000);
   });
 
+  it('keeps the wipe lock past one call, and a scheduled scan waits out a short holder', () => {
+    // A call is at most 120 s and the client repeats it at once.
+    expect(SHORT_LOCK.wipeStaleMs).toBeGreaterThan(CALLABLE_TIMEOUT_SECONDS.deleteAllData * 1000);
+    expect(SHORT_LOCK.wipeStaleMs).toBeLessThan(SCAN.lockStaleMs);
+  });
+
   it('caps alert parsing at 10p a day by default, which is about 30 emails', () => {
     expect(ALERTS.dailyCapPence).toBe(10);
   });
@@ -190,5 +197,22 @@ describe('Gmail bridge limits (ADR-046, ADR-047, ADR-048)', () => {
         'workatastartup.com',
       ].sort(),
     );
+  });
+});
+
+describe('Delete all my data bounds (ADR-057)', () => {
+  it('starts no page after 90 s, and one page worst case still fits the 120 s callable', () => {
+    expect(WIPE.deadlineMs).toBe(90_000);
+    expect(WIPE.deadlineMs + WIPE.pageWorstCaseMs).toBeLessThanOrEqual(
+      CALLABLE_TIMEOUT_SECONDS.deleteAllData * 1000,
+    );
+  });
+
+  it('keeps a page inside one batch of at most 400 ops (a job and its description are two)', () => {
+    expect(WIPE.batchOps).toBe(400);
+    expect(WIPE.pageSize).toBeLessThanOrEqual(WIPE.batchOps);
+    expect(WIPE.maxDocuments).toBe(3_000);
+    expect(WIPE.maxStoragePages).toBe(20);
+    expect(WIPE.storagePageSize).toBe(200);
   });
 });

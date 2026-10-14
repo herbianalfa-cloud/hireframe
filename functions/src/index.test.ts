@@ -65,6 +65,7 @@ describe('deployed functions (ADR-017)', () => {
     ['parseCv', ['ANTHROPIC_API_KEY']],
     ['addFact', ['ANTHROPIC_API_KEY']],
     ['resetProfile', []],
+    ['deleteAllData', []],
     ['scanNow', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['scheduledScan', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
@@ -139,6 +140,29 @@ describe('generateCvs (ADR-053)', () => {
       'utf8',
     );
     expect(wiring).toMatch(/import\('\.\.\/cv\/render\/index\.js'\)/);
+  });
+});
+
+describe('deleteAllData (ADR-057)', () => {
+  const endpoint = endpoints.find(([name]) => name === 'deleteAllData')?.[1];
+
+  it('is an owner callable in europe-west2, 120 s, 512 MiB, one instance and one request', () => {
+    expect(endpoint?.callableTrigger).toBeDefined();
+    expect(endpoint?.region).toEqual(['europe-west2']);
+    expect(endpoint?.timeoutSeconds).toBe(120);
+    expect(endpoint?.availableMemoryMb).toBe(512);
+    expect(endpoint?.maxInstances).toBe(1);
+    expect(endpoint?.concurrency).toBe(1);
+  });
+
+  it('states its limits in its own options, and never calls itself', () => {
+    const source = readFileSync(new URL('./wipe/callable.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/^\s*maxInstances: 1,$/m);
+    expect(source).toMatch(/^\s*concurrency: 1,$/m);
+    for (const file of ['./wipe/run.ts', './wipe/store.ts', './wipe/callable.ts']) {
+      const text = readFileSync(new URL(file, import.meta.url), 'utf8');
+      expect(text, file).not.toMatch(/httpsCallable|setTimeout|enqueue|CloudTasks|PubSub/);
+    }
   });
 });
 

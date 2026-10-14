@@ -77,4 +77,14 @@ describe('applicationHandler', () => {
       ),
     ).rejects.toMatchObject({ code: 'resource-exhausted' });
   });
+
+  it('answers failed-precondition with the wipe wording while Delete all my data holds the lock', async () => {
+    const result = applicationHandler({ action: 'start', jobId: TEST_JOB_ID }, () =>
+      Promise.resolve({ ...deps(), lockHolder: () => Promise.resolve('wipe' as const) }),
+    );
+    await expect(result).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'Deleting your data, try again when it has finished.',
+    });
+  });
 });

@@ -223,6 +223,16 @@ describe('runIngest: LinkedIn alerts', () => {
 });
 
 describe('runIngest: the lock', () => {
+  it('answers busy and parses nothing while Delete all my data holds the lock (ADR-057)', async () => {
+    const { store, deps, calls } = setup();
+    store.holdLock('wipe');
+    const result = await runIngest(deps, [msg('g1', LINKEDIN_ALERT)]);
+    expect(result).toEqual({ status: 'busy', holder: 'wipe' });
+    expect(store.jobs.size).toBe(0);
+    expect(calls).toEqual([]);
+    expect(store.messages.size).toBe(0);
+  });
+
   it('answers busy and parses nothing while a scan holds the lock', async () => {
     const { store, deps, calls } = setup();
     store.holdLock('scan');

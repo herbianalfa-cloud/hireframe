@@ -157,7 +157,7 @@ function Count({ label, value }: { label: string; value: number }) {
 
 /** The latest time a host of this source asked us to stay away until, if still ahead. */
 function pausedUntil(view: SourceView, now: Date): Date | null {
-  const ahead = (view.health.pausedHosts ?? [])
+  const ahead = (view.health?.pausedHosts ?? [])
     .map((pause) => pause.until)
     .filter((until) => until.getTime() > now.getTime());
   return ahead.length ? new Date(Math.max(...ahead.map((until) => until.getTime()))) : null;
@@ -200,6 +200,15 @@ function Alerts() {
 
 function SourceCard({ view }: { view: SourceView }) {
   const { health } = view;
+  if (!health) {
+    // A doc Delete all my data kept (its API counters and pauses): nothing has run since.
+    return (
+      <li className="rounded-lg border bg-surface p-4">
+        <h3 className="text-sm font-medium">{SOURCE_LABELS[view.id]}</h3>
+        <p className="mt-3 text-xs text-muted-foreground">No scan since your data was deleted.</p>
+      </li>
+    );
+  }
   const counts = health.lastCounts;
   const reason = errorText(health.lastErrorCode);
   const paused = pausedUntil(view, new Date());

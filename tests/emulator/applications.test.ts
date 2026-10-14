@@ -26,6 +26,7 @@ import type { ApplicationDeps } from '../../functions/src/applications/run.js';
 import { firestoreApplicationStore } from '../../functions/src/applications/store.js';
 import { llmCall } from '../../functions/src/llm/call.js';
 import { fakeTransport } from '../../functions/src/llm/fake-transport.js';
+import { liveLockHolder } from '../../functions/src/scan/store.js';
 import { firestoreUsageStore } from '../../functions/src/llm/usage-store.js';
 import {
   bucketFileDeleter,
@@ -137,6 +138,7 @@ function deps(): ApplicationDeps {
     llm: (input) => llmCall(llm, input),
     deleteFiles: bucketFileDeleter(bucket()),
     listFiles: bucketFileLister(bucket()),
+    lockHolder: () => liveLockHolder(db, NOW),
     now: () => NOW,
   };
 }
@@ -181,6 +183,34 @@ describe('application on the emulator', () => {
       (await events()).map((event) => (event.type === 'application_stage' ? event.to : null)),
     ).toEqual(expect.arrayContaining(['needs_input', 'generating']));
     expect(await events()).toHaveLength(2);
+  });
+
+  it('leaves no application and no event when Delete all my data holds the lock (ADR-057)', async () => {
+    await db.doc(DOCS.scanLock).set({
+      runId: 'wipe',
+      startedAt: NOW,
+      holder: 'wipe',
+      staleAt: new Date(NOW.getTime() + 3 * 60_000),
+      schemaVersion: 1,
+    });
+    await expect(call({ action: 'start', jobId: JOB_ID })).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'Deleting your data, try again when it has finished.',
+    });
+    expect((await db.doc(PATHS.application(JOB_ID)).get()).exists).toBe(false);
+    expect((await db.collection('events').count().get()).data().count).toBe(0);
+    // A stale wipe lock no longer blocks.
+    await db.doc(DOCS.scanLock).set({
+      runId: 'wipe',
+      startedAt: new Date(NOW.getTime() - 10 * 60_000),
+      holder: 'wipe',
+      staleAt: new Date(NOW.getTime() - 60_000),
+      schemaVersion: 1,
+    });
+    await expect(call({ action: 'start', jobId: JOB_ID })).resolves.toMatchObject({
+      jobId: JOB_ID,
+    });
+    await db.doc(DOCS.scanLock).delete();
   });
 
   it('writes the answer as a manual fact for the job, with its v1 snapshot', async () => {
