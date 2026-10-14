@@ -11,6 +11,13 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - `resetProfileCore` extracted from Reset profile (same behaviour and wording).
   - Tests: wipe plan, run (fake clock: caps, deadline, retry after a store error, a document written mid-wipe, profile ordering) and callable; emulator wipe loop, held-lock `start`, and the worker's lost path (files removed when the application is deleted mid-write).
 
+- **M8 PR 8B, session 2: Delete all my data UI and retention.**
+  - **System → Danger zone → Delete all my data** (`DeleteAllData.tsx`, `services/wipe.ts`): a dialog with the preview counts (each its own aggregation read, "unavailable" on failure; the alert-message line has no count), what is kept, **Also reset profile** (off by default), the watchlist and 8-week backup notes and a typed `DELETE`. It calls `deleteAllData` in a loop of up to 20 passes with a progress line, then stops and offers **Continue** (20 more). An error or refusal stops the loop with the message and nothing retries. The profile counts are summed over calls.
+  - **`purgeOldData` (new scheduled function, needs C11, C12, C13 after deploy):** 03:30 UK time daily, 300 s, 512 MiB, `maxInstances` 1, `retryCount` 0, no secrets. Deletes the stored description of `skip` jobs judged more than 60 days ago whose status is `new` or `skipped` and that have no application, in a transaction per 100 jobs (re-checked on fresh reads), at most 500 a run and no new transaction after 240 s. The cursor `(judgedAt, id)` in `locks/retention` is saved after each commit. Logs `retention.done` and `retention.failed`.
+  - `JobSchema.descriptionPurgedAt`; the job sheet says "Description deleted after 60 days (skipped job)." for such a job. S3 already routes a job without a description document to wait for one (pinned by a test).
+  - New index `jobs (verdict ASC, judgedAt ASC)` in `firestore.indexes.json` (ADR-040 spec test).
+  - Tests: retention run (fake clock: 59/61 days, every status, application race, status race, ties, caps, deadline, cursor, store error), query spec, schedule options, config budget, emulator transaction run; wipe service and dialog; System Danger zone and kept-only source card; preview counts in `indexes.test.ts`.
+
 ### Changed
 - Fresha's seed row is `keep-none` (moved to Teamtailor, which isn't supported); ROADMAP parks a Teamtailor source.
 
