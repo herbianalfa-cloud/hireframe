@@ -26,6 +26,7 @@ import {
 import { AgreementLine } from '@/features/jobs/AgreementLine';
 import { SpendMeter } from '@/features/today/SpendMeter';
 
+import { DeleteAllData } from './DeleteAllData';
 import {
   useGoneBoards,
   useEmailHealth,
@@ -619,6 +620,7 @@ export function SystemPage() {
           <S1RecentSkips />
         </Suspense>
       </ErrorBoundary>
+      <DeleteAllData />
     </section>
   );
 }

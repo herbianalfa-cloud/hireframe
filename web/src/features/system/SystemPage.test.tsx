@@ -718,6 +718,25 @@ describe('System screen states', () => {
   });
 });
 
+describe('System: Delete all my data (ADR-057)', () => {
+  it('shows the Danger zone with its button, and nothing runs before it is pressed', () => {
+    render(<SystemPage />);
+    const zone = screen.getByRole('region', { name: 'Danger zone' });
+    expect(within(zone).getByRole('button', { name: 'Delete all my data' })).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows a source doc kept by a wipe as "no scan since", not as invalid', () => {
+    givenSources([
+      { id: 'greenhouse', health: health() },
+      { id: 'adzuna', health: null },
+    ]);
+    render(<SystemPage />);
+    expect(screen.getByText('No scan since your data was deleted.')).toBeDefined();
+    expect(screen.queryByText(/invalid/i)).toBeNull();
+  });
+});
+
 describe('scanResultText', () => {
   it('explains a skipped scan', () => {
     expect(

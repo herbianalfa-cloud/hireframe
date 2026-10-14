@@ -24,6 +24,7 @@ import { PIPELINE_STAGES, stageSpec } from './applications';
 import { lookupKeysSpec, lookupUrlSpec, needsDescriptionSpec } from './lookup';
 import { needsDescriptionCountSpec } from './system';
 import { indexServes, type CompositeIndex, type QuerySpec } from './query-spec';
+import { PREVIEW_COUNTS, PROFILE_PREVIEW_COUNTS } from './wipe';
 
 const indexFile = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../../firestore.indexes.json', import.meta.url)), 'utf8'),
@@ -221,19 +222,44 @@ describe('indexServes', () => {
     orderBy: direction === 'desc' ? [{ field: 'judgedAt', direction }] : [],
   });
 
+  // The retention job's own `(verdict, judgedAt asc)` index (ADR-057) would serve these shapes,
+  // so the guards below look at the indexes the web app's queries rely on.
+  const webIndexes = indexes.filter(
+    (index) =>
+      !(
+        index.collectionGroup === 'jobs' &&
+        index.fields.length === 2 &&
+        index.fields[0]?.fieldPath === 'verdict' &&
+        index.fields[1]?.fieldPath === 'judgedAt' &&
+        index.fields[1].order === 'ASCENDING'
+      ),
+  );
+
   it('rejects the v0.5.0 bug: an unordered range scans ascending against a descending index', () => {
-    expect(indexServes(judgedToday('asc'), indexes)).toBe(false);
-    expect(indexServes(judgedToday('desc'), indexes)).toBe(true);
+    expect(indexServes(judgedToday('asc'), webIndexes)).toBe(false);
+    expect(indexServes(judgedToday('desc'), webIndexes)).toBe(true);
   });
 
   it('rejects a sort direction, a field set or a collection no index has', () => {
     const base = jobFilterSpec({ verdict: 'apply' });
     expect(
-      indexServes({ ...base, orderBy: [{ field: 'judgedAt', direction: 'asc' }] }, indexes),
+      indexServes({ ...base, orderBy: [{ field: 'judgedAt', direction: 'asc' }] }, webIndexes),
     ).toBe(false);
     expect(
       indexServes({ ...base, orderBy: [{ field: 'firstSeenAt', direction: 'desc' }] }, indexes),
     ).toBe(false);
     expect(indexServes({ ...base, collection: 'other' }, indexes)).toBe(false);
   });
+});
+
+describe('Delete all my data preview (ADR-057)', () => {
+  // Plain collection counts: no filter and no order, so the automatic indexes serve them.
+  it.each([...PREVIEW_COUNTS, ...PROFILE_PREVIEW_COUNTS].map((entry) => [entry.key, entry.path]))(
+    'counts %s with no filter or order, so no composite index is needed',
+    (_key, path) => {
+      expect(indexServes({ collection: String(path), filters: [], orderBy: [] }, indexes)).toBe(
+        true,
+      );
+    },
+  );
 });
