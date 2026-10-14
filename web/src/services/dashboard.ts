@@ -211,7 +211,13 @@ export function prefetchToday(): Unsubscribe {
       if (stopped) return;
       unsubscribe = onSnapshot(
         run(db, todayListSpec('apply'), limit(TODAY_LIST_SIZE)),
-        () => undefined,
+        (snapshot) => {
+          // When the data arrives, to tell whether the list or the owner check gates `hf:usable`.
+          markOnce('hf:prefetch:data', {
+            docs: snapshot.size,
+            fromCache: snapshot.metadata.fromCache,
+          });
+        },
         (error) => {
           logError('dashboard.prefetch_failed', { code: error.code });
           stop();
