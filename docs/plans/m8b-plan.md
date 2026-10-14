@@ -48,7 +48,7 @@ Each handoff note holds: commits so far, decisions taken in the session, deviati
 |---|---|
 | Name | `deleteAllData` (**new callable**, flagged: needs **C10** after deploy) |
 | Trigger | `onCall`, `ownerOptions` (App Check **enforced and consumed**) |
-| Limits | `maxInstances: 1`, **`concurrency: 1`** (two tabs run one after the other), `timeoutSeconds: 120`, `memory: '512MiB'`, no secrets |
+| Limits | `maxInstances: 1`, **`concurrency: 1`** (a second call waits for the first), `timeoutSeconds: 120`, `memory: '512MiB'`, no secrets |
 | Invoker | `allUsers` (C10). Safe for the same reason as every callable: App Check plus the owner check |
 
 ### Order inside each call
