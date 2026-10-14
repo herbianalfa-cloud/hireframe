@@ -21,6 +21,7 @@ import { firestoreUsageStore } from '../llm/usage-store.js';
 import { bucketFileDeleter, bucketFileLister, firestoreProfileStore } from '../profile/store.js';
 import { applicationHandler } from './handler.js';
 import { applicationLlmDeps } from './llm.js';
+import { liveLockHolder } from '../scan/store.js';
 import { firestoreApplicationStore } from './store.js';
 
 /**
@@ -63,6 +64,7 @@ export const application = onCall(
         llm: <T>(input: LlmCallInput<T>) => llmCall(deps, input),
         deleteFiles: bucketFileDeleter(bucket()),
         listFiles: bucketFileLister(bucket()),
+        lockHolder: () => liveLockHolder(firestore, new Date()),
         now: () => new Date(),
       };
     });

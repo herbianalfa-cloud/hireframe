@@ -1,4 +1,4 @@
-import { ApplicationSchema, type FactDraft } from '@hireframe/shared';
+import { ApplicationSchema, type FactDraft, type LockHolder } from '@hireframe/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { llmCall, type LlmCallInput } from '../llm/call.js';
@@ -42,6 +42,8 @@ interface Harness {
   listings: { prefix?: string; maxResults?: number; autoPaginate?: boolean }[];
   /** The clock `deps.now` reads; a delete advances it by `deleteTakesMs`. */
   clock: { now: Date; deleteTakesMs: number };
+  /** Who holds `locks/scan` right now (a stale lock reads as null, as in production). */
+  lock: { holder: LockHolder | null };
   facts: ReturnType<typeof existingFact>[];
   answers: { facts: FactDraft[] };
 }
@@ -62,6 +64,7 @@ function harness(): Harness {
   const objects = new Set<string>();
   const listings: Harness['listings'] = [];
   const clock = { now: NOW, deleteTakesMs: 0 };
+  const lock: { holder: LockHolder | null } = { holder: null };
   const facts: ReturnType<typeof existingFact>[] = [];
   // The production lister and deleter over a fake bucket: only Storage itself is faked.
   const bucket = {
@@ -93,9 +96,10 @@ function harness(): Harness {
     },
     deleteFiles: bucketFileDeleter(bucket),
     listFiles: bucketFileLister(bucket),
+    lockHolder: () => Promise.resolve(lock.holder),
     now: () => clock.now,
   };
-  return { store, deps, calls, deleted, objects, listings, clock, facts, answers };
+  return { store, deps, calls, deleted, objects, listings, clock, lock, facts, answers };
 }
 
 const run = (h: Harness, input: Parameters<typeof runApplication>[1]) =>
@@ -877,4 +881,53 @@ describe('the model call', () => {
     ).rejects.toMatchObject({ code: 'unavailable' });
     expect(h.store.facts).toHaveLength(0);
   });
+});
+
+describe('while Delete all my data holds the lock (ADR-057)', () => {
+  const ACTIONS: Parameters<typeof runApplication>[1][] = [
+    { action: 'start', jobId: TEST_JOB_ID },
+    { action: 'retry', jobId: TEST_JOB_ID },
+    {
+      action: 'answer',
+      jobId: TEST_JOB_ID,
+      questionId: 'q-0123456789ab',
+      text: 'I built reports.',
+    },
+    { action: 'skip', jobId: TEST_JOB_ID, questionId: 'q-0123456789ab' },
+    { action: 'skipAll', jobId: TEST_JOB_ID },
+    { action: 'regenerate', jobId: TEST_JOB_ID },
+    { action: 'withdraw', jobId: TEST_JOB_ID, deleteFiles: true },
+  ];
+
+  it.each(ACTIONS)('refuses $action and writes nothing', async (input) => {
+    h.lock.holder = 'wipe';
+    seedApplication(h, { stage: 'needs_input' });
+    const before = structuredClone([...h.store.applications.values()]);
+    expect(await refusal(run(h, input))).toBe('wiping');
+    expect([...h.store.applications.values()]).toEqual(before);
+    expect(h.store.events).toHaveLength(0);
+    expect(h.store.facts).toHaveLength(0);
+    expect(h.store.cvDocs.size).toBe(0);
+    expect(h.store.commits).toBe(0);
+    expect(h.calls).toHaveLength(0);
+    expect(h.deleted).toHaveLength(0);
+    expect(h.listings).toHaveLength(0);
+  });
+
+  it('does not block when the lock is stale (the store reads it as free)', async () => {
+    h.lock.holder = null;
+    await expect(run(h, { action: 'start', jobId: TEST_JOB_ID })).resolves.toMatchObject({
+      stage: 'needs_input',
+    });
+  });
+
+  it.each(['scan', 'rescore', 'email', 'lookup'] as const)(
+    'does not block while %s holds it (today’s behaviour)',
+    async (holder) => {
+      h.lock.holder = holder;
+      await expect(run(h, { action: 'start', jobId: TEST_JOB_ID })).resolves.toMatchObject({
+        stage: 'needs_input',
+      });
+    },
+  );
 });

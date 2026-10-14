@@ -14,6 +14,7 @@ function deps(): ApplicationDeps {
     llm: () => Promise.reject(new DailyCapExceededError()),
     deleteFiles: () => Promise.resolve(0),
     listFiles: () => Promise.resolve({ names: [], more: false }),
+    lockHolder: () => Promise.resolve(null),
     now: () => new Date('2026-10-05T08:00:00Z'),
   };
 }
