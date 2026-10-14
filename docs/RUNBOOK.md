@@ -440,6 +440,34 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
 
 97. **Speed on your phone** (R7, `v0.8.1`, ADR-061). This is the pass or fail for R7. On your own phone, **Wi-Fi off**, on mobile data, no throttling, signed in, open Today in the browser and reload it 5 times. After each reload read `performance.getEntriesByName('hf:usable')[0].duration` through remote inspection: on Android, USB debugging and `chrome://inspect` on the laptop; on iPhone, Settings → Safari → Advanced → Web Inspector, then Safari → Develop → your phone. The **median of the 5 must be 2000 ms or less**. Paste the 5 numbers in the chat, with the lab median from step 89 beside them (recorded, not gating). If the phone median is over 2000 ms, stop and report it with the marks table (`console.table` from step 89).
 
+### Part J: Data lifecycle and backups (M8 8B, `v0.9.0`)
+Design: `docs/plans/m8b-plan.md`, ADR-057 (wipe and retention), ADR-058 (backups). Cloud Shell, project `P=hireframe-f6b03`, region `R=europe-west2`. Each command is checked in chat first. There is no new non-callable HTTPS function, so no temporary `cloudfunctions.admin` grant is needed.
+
+98. **Before the tag** (J1). Repeat the invoker check on `scheduledScan` (Part G step 77, C1 and C2). Release in a quiet window with nothing Generating.
+99. **After the deploy: `deleteAllData`** (J2, C10). Give the callable its public invoker as in Part C step 28 (`allUsers`; App Check and the owner check are the protection). Then, in the app, open System → Danger zone and check the preview shows counts. Do not run a wipe on live data to test it.
+100. **After the deploy: `purgeOldData`** (J3). Its invoker must be **only** `hireframe-fns` (C11). Run it once (C12) and read the log for `retention.done` (C13). If the deploy said "Failed to set invoker function purgeOldData", use the Recovery entry below (C13b). Re-check `retention.done` a month after the first purge: `full: true` every day means a backlog.
+101. **Check the scheduler and indexes** (J4). Cloud Scheduler must list exactly three jobs (`scheduledScan`, `generateCvs`, `purgeOldData`; C3), and C14 must show both new functions with `maxInstances` 1 in europe-west2. In **Firestore → Indexes**, `jobs (verdict, judgedAt ascending)` must be **Enabled** before the first 03:30 run, or the run logs `retention.failed` and tries again the next day.
+102. **Create the backup schedule** (J5).
+    ```bash
+    P=hireframe-f6b03
+    gcloud firestore backups schedules create --database='(default)' --recurrence=weekly --day-of-week=SUN --retention=8w --project=$P   # C15
+    gcloud firestore backups schedules list --database='(default)' --project=$P   # C16: one weekly SUNDAY schedule, 8 weeks
+    ```
+    After the first Sunday (C17): `gcloud firestore backups list --location=europe-west2 --project=$P`. Note the newest `<BACKUP_ID>` and that its state is READY.
+103. **Restore drill** (J6, once, a quiet weekend afternoon). First run `gcloud firestore databases restore --help` once to confirm the flags. Never restore over `(default)`.
+    ```bash
+    P=hireframe-f6b03; R=europe-west2
+    gcloud firestore databases restore --source-backup=projects/$P/locations/$R/backups/<BACKUP_ID> --destination-database=restore-drill --project=$P   # C18
+    gcloud firestore operations list --database=restore-drill --project=$P   # C18a: repeat until done
+    gcloud firestore databases describe --database=restore-drill --project=$P   # C19
+    ```
+    In the Firebase console pick database `restore-drill`: **Rules** must deny everything (publish `allow read, write: if false;` there first if not), and `jobs`, `runs`, `profile/main/facts` and `criteria` must have documents with counts close to `(default)`. Then delete it and confirm only `(default)` remains:
+    ```bash
+    gcloud firestore databases delete --database=restore-drill --project=$P   # C20
+    gcloud firestore databases list --project=$P --format='value(name)'
+    ```
+    Optional read (C20c): `gcloud storage buckets describe gs://hireframe-f6b03.firebasestorage.app --format='value(soft_delete_policy)'`.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -496,6 +524,10 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
 - **Runs keep stopping early with "run budget used":** System shows a reason per stage (Triage, Deep reads). A stage stops on the budget only when its next call can't fit even with nothing in flight, so the backlog is larger than one run's lease. It catches up over a few runs. To go faster, raise `config/app.monthlyCapPence` or set `config/app.funnel.runBudgetPence` (Part E step 72).
 - **CI fails with "recordings stale":** a prompt, schema or golden case changed. Run `LIVE=1 npm run eval` locally and commit `evals/recordings.jsonl` (`evals/README.md`).
 - **"The monthly AI spend cap has been reached":** check `usage/{yyyy-mm}` in Firestore. Raise `config/app.monthlyCapPence` deliberately, or wait for next month. Stale `reservations` entries expire on their own after 15 minutes.
+- **`purgeOldData` has no schedule after its first deploy** (C13b; "Failed to set invoker function purgeOldData"). The same cause and fix as `generateCvs`: add the invoker binding for `hireframe-fns`, create the job `firebase-schedule-purgeOldData-europe-west2` with schedule `30 3 * * *`, time zone `Europe/London`, an attempt deadline of 300 s and the `hireframe-fns` OIDC account, then run it once. The invoker must be **only** `hireframe-fns`.
+- **Delete all my data stopped part-way:** reopen the dialog and press **Continue**; every pass is safe to rerun. The scan lock (`wipe` holder) goes stale after 3 minutes if the page was closed, so scans resume by themselves.
+- **Full erase after a wipe:** backups keep the old data for 8 weeks. To erase it now, list the backups (C17) and delete each (C20b): `gcloud firestore backups delete --location=europe-west2 --backup=<BACKUP_ID> --project=hireframe-f6b03`.
+- **Data lost:** restore the newest READY backup into a new database named `restore-<date>` (step 103, C18 with that name), read what is needed there, then stop and decide with Claude how to bring it back. No automated path back is built.
 
 ## Local setup (per machine)
 1. **Node 22:** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.

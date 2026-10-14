@@ -2,7 +2,7 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
-## [Unreleased]
+## [0.9.0] - Unreleased
 ### Added
 - **M8 PR 8B, session 1: Delete all my data, server side** (ADR-057 to be written in session 4; plan `docs/plans/m8b-plan.md`).
   - **`deleteAllData` (new callable, needs C10 after deploy):** owner only, App Check enforced and consumed, 120 s, 512 MiB, `maxInstances` 1 and `concurrency` 1. Input `{ confirm: 'DELETE', resetProfile }` (strict). Each call is one bounded pass (3,000 documents, 20 Storage pages of 200, no new page after 90 s) over `applications`, `cvs/` files, `cvs`, `jobs` with their descriptions, `runs`, `events`, `alertMessages`, `companies` and `sources`, then a reads-only check; `done: true` only from a call that deleted nothing and found every step empty. It never calls itself; the client repeats it. `config`, `criteria`, `usage`, `locks`, `nonces` and each source's `quota` and `pausedHosts` are kept; the profile goes only when ticked, and only from a pass that found the rest empty.
@@ -25,7 +25,10 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - **Result (ADR-032 addendum):** the run takes 319 s at the approved peak and 345 s at twice the S1 passes, and no stage hits a deadline. S3 made 31 calls, not 32, and stopped at the 52p lease because S2 made 111 calls (the approved plan assumes 99). The lever is `runBudgetPence` 54; nothing was changed.
   - Tests (fake clock and injected sleep): the data mix against the real S1 rules and the fake S2, transport latency and token calibration, the counting proxy, the report's criteria (pass and fail each), the fake fetch, the argument parser, and the probe's marks in order.
 
+- **M8 PR 8B, session 4: docs.** ADR-057 (wipe and 60-day purge), ADR-058 (managed backups and the restore drill), the ADR-032 addendum records the owner's decision to keep the 52p lease (no `runBudgetPence` 54: 46 × 54p = 2,484p would break the 75% scanning share), ARCHITECTURE, SECURITY (Data loss, destructive callable, Data retention), RUNBOOK Part J (steps 98 to 103) and four Recovery entries, ROADMAP.
+
 ### Changed
+- `weeklyBackup` (never built) is replaced by Firestore managed backups (ADR-058).
 - Fresha's seed row is `keep-none` (moved to Teamtailor, which isn't supported); ROADMAP parks a Teamtailor source.
 
 ## [0.8.1] - Unreleased
