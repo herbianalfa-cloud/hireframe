@@ -274,8 +274,8 @@ describe('exact cap', () => {
     for (const result of results) {
       expect(result.deleted.documents).toBeLessThanOrEqual(5);
     }
-    // The first call: 3 events leave room for one job and its description (2 of the 2 left),
-    // then the odd remainder stops the step instead of taking a third document.
+    // The first call: jobs go before events, so 2 jobs and their 2 descriptions take 4 of the 5,
+    // the odd remainder stops the jobs step, and the one document left goes to an event.
     expect(results[0]?.deleted.documents).toBe(5);
     expect(results.at(-1)?.done).toBe(true);
     expect(total(w)).toBe(0);
