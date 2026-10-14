@@ -116,4 +116,32 @@ describe('purgeOldData (ADR-057)', () => {
     });
     expect(await hasDescription('late')).toBe(true);
   });
+
+  it('pages through ties on judgedAt with mixed-case IDs, without a repeat or a gap', async () => {
+    const ids = ['Bb', 'aa', 'Aa', 'ab', 'Zz', 'a1', 'B2'];
+    for (const id of ids) await addJob(id, {});
+    const store = firestoreRetentionStore(db);
+    const seen: string[] = [];
+    let after: { purgedThrough: Date; lastId: string } | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const rows = await store.readPage(NOW, after, 2);
+      if (rows.length === 0) break;
+      for (const row of rows) seen.push(row.id);
+      const last = rows[rows.length - 1];
+      if (!last) break;
+      after = { purgedThrough: last.judgedAt, lastId: last.id };
+    }
+    // Document IDs sort by their UTF-8 bytes: capitals before lowercase, digits before letters.
+    expect(seen).toEqual([...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  });
+
+  it('skips a malformed job and a malformed cursor instead of failing', async () => {
+    await addJob('fine', {});
+    await addJob('malformed', { status: 42, descriptionKind: { not: 'a string' } });
+    await db.doc(DOCS.retentionCursor).set({ purgedThrough: 'yesterday', lastId: 7 });
+    const result = await runRetention({ store: firestoreRetentionStore(db), now: () => NOW });
+    expect(result).toMatchObject({ purged: 1, failed: false });
+    expect(await hasDescription('fine')).toBe(false);
+    expect(await hasDescription('malformed')).toBe(true);
+  });
 });

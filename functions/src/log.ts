@@ -81,7 +81,9 @@ export type LogEvent =
   | 'wipe.refused'
   | 'wipe.pass'
   | 'retention.done'
-  | 'retention.failed';
+  | 'retention.failed'
+  | 'retention.invalid_cursor'
+  | 'retention.invalid_doc';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

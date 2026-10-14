@@ -1,19 +1,46 @@
 import { DOCS, PATHS } from '@hireframe/shared';
 import { FieldPath, Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { z } from 'zod';
 
+import { log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
 import { oldSkipsSpec } from './queries.js';
 import { decidePurge, type PurgeCandidate, type RetentionStore } from './run.js';
+
+/** The cursor document as stored; anything else counts as no cursor (a fresh start). */
+const CursorSchema = z.object({
+  purgedThrough: z.instanceof(Timestamp),
+  lastId: z.string().min(1),
+});
+
+/** One page row: only the field the cursor needs. */
+const PageRowSchema = z.object({ judgedAt: z.instanceof(Timestamp) });
+
+/**
+ * The job fields the purge decision reads (a fresh read inside the transaction). A malformed
+ * document fails the parse and counts as kept, so one bad job can't fail the chunk and pin the
+ * cursor behind it every night.
+ */
+const PurgeCandidateSchema = z.object({
+  verdict: z.string().exactOptional(),
+  judgedAt: z.date().exactOptional(),
+  status: z.string().exactOptional(),
+  descriptionKind: z.string().exactOptional(),
+  descriptionPurgedAt: z.date().exactOptional(),
+});
 
 /** Admin SDK side of the retention job (ADR-057). Nothing here is read by the client. */
 export function firestoreRetentionStore(db: Firestore): RetentionStore {
   return {
     async readCursor() {
       const data = (await db.doc(DOCS.retentionCursor).get()).data();
-      const purgedThrough: unknown = data?.purgedThrough;
-      const lastId: unknown = data?.lastId;
-      if (!(purgedThrough instanceof Timestamp) || typeof lastId !== 'string') return null;
-      return { purgedThrough: purgedThrough.toDate(), lastId };
+      if (data === undefined) return null;
+      const parsed = CursorSchema.safeParse(data);
+      if (!parsed.success) {
+        log.warn('retention.invalid_cursor', {});
+        return null;
+      }
+      return { purgedThrough: parsed.data.purgedThrough.toDate(), lastId: parsed.data.lastId };
     },
 
     async readPage(cutoff, after, limit) {
@@ -28,8 +55,8 @@ export function firestoreRetentionStore(db: Firestore): RetentionStore {
       if (after) query = query.startAfter(Timestamp.fromDate(after.purgedThrough), after.lastId);
       const snapshot = await query.limit(limit).get();
       return snapshot.docs.flatMap((doc) => {
-        const judgedAt: unknown = doc.get('judgedAt');
-        return judgedAt instanceof Timestamp ? [{ id: doc.id, judgedAt: judgedAt.toDate() }] : [];
+        const row = PageRowSchema.safeParse(doc.data());
+        return row.success ? [{ id: doc.id, judgedAt: row.data.judgedAt.toDate() }] : [];
       });
     },
 
@@ -44,7 +71,12 @@ export function firestoreRetentionStore(db: Firestore): RetentionStore {
         ids.forEach((id, index) => {
           const job = snapshots[index];
           const application = snapshots[ids.length + index];
-          const data = job?.exists ? (timestampsToDates(job.data()) as PurgeCandidate) : null;
+          let data: PurgeCandidate | null = null;
+          if (job?.exists) {
+            const parsed = PurgeCandidateSchema.safeParse(timestampsToDates(job.data()));
+            if (parsed.success) data = parsed.data;
+            else log.warn('retention.invalid_doc', { jobId: id });
+          }
           const decision = decidePurge(data, application?.exists ?? false, cutoff);
           if (decision === 'application') outcome.skippedApplication += 1;
           else if (decision === 'kept') outcome.skippedKept += 1;
