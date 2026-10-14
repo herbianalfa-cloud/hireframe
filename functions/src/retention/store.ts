@@ -75,7 +75,7 @@ export function firestoreRetentionStore(db: Firestore): RetentionStore {
           if (job?.exists) {
             const parsed = PurgeCandidateSchema.safeParse(timestampsToDates(job.data()));
             if (parsed.success) data = parsed.data;
-            else log.warn('retention.invalid_doc', { jobId: id });
+            else log.warn('retention.invalid_doc', { count: 1 });
           }
           const decision = decidePurge(data, application?.exists ?? false, cutoff);
           if (decision === 'application') outcome.skippedApplication += 1;
