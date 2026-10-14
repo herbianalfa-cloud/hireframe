@@ -257,9 +257,7 @@ describe('Delete all my data preview (ADR-057)', () => {
   it.each([...PREVIEW_COUNTS, ...PROFILE_PREVIEW_COUNTS].map((entry) => [entry.key, entry.path]))(
     'counts %s with no filter or order, so no composite index is needed',
     (_key, path) => {
-      expect(indexServes({ collection: path, filters: [], orderBy: [] }, indexes)).toBe(
-        true,
-      );
+      expect(indexServes({ collection: path, filters: [], orderBy: [] }, indexes)).toBe(true);
     },
   );
 });
