@@ -247,16 +247,19 @@ describe('prefetchToday (ADR-050, R7)', () => {
   };
   let unsubscribe: ReturnType<typeof vi.fn>;
   let errorHandler: ((error: { code: string }) => void) | undefined;
+  let nextHandler: ((snapshot: unknown) => void) | undefined;
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     unsubscribe = vi.fn();
     errorHandler = undefined;
+    nextHandler = undefined;
     vi.mocked(onSnapshot).mockImplementation(((
       _query: unknown,
-      _next: unknown,
+      next: (snapshot: unknown) => void,
       onError: (error: { code: string }) => void,
     ) => {
+      nextHandler = next;
       errorHandler = onError;
       return unsubscribe;
     }) as unknown as typeof onSnapshot);
@@ -271,6 +274,15 @@ describe('prefetchToday (ADR-050, R7)', () => {
     await flush();
     expect(onSnapshot).toHaveBeenCalledTimes(1);
     expect(hfMarks().map(([name]) => name)).toContain('hf:prefetch');
+  });
+
+  it('marks hf:prefetch:data at the first snapshot, with scalars only', async () => {
+    prefetchToday();
+    await flush();
+    expect(hfMarks().map(([name]) => name)).not.toContain('hf:prefetch:data');
+    nextHandler?.({ size: 10, metadata: { fromCache: false } });
+    const mark = performance.getEntriesByName('hf:prefetch:data')[0] as PerformanceMark | undefined;
+    expect(mark?.detail).toEqual({ docs: 10, fromCache: false });
   });
 
   it('drops the listener when the app becomes usable', async () => {

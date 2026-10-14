@@ -5,13 +5,24 @@ import { BrowserRouter, Route, Routes } from 'react-router';
 import { Skeleton } from '@/components/ui/skeleton';
 
 import { AuthGate } from './AuthGate';
-import { loadTodayPage } from './lazy-pages';
+import { loadedTodayPage, loadTodayPage } from './lazy-pages';
 import { NAV_ITEMS } from './nav';
 import { EmptyPage, MorePage, NotFoundPage } from './pages';
 import { Shell } from './Shell';
 
 // Screens load on first visit (ADR-021), so the shell stays small.
-const TodayPage = lazy(() => loadTodayPage().then((module) => ({ default: module.TodayPage })));
+const LazyTodayPage = lazy(() => loadTodayPage().then((module) => ({ default: module.TodayPage })));
+
+/**
+ * Today renders its component directly when the chunk is already loaded (the sign-in prefetch
+ * starts it, ADR-050). A `lazy()` component suspends even then, and React throttles the reveal
+ * after a fallback by 300 ms (ADR-061). The choice is made once per mount, so it never remounts.
+ */
+function TodayPage() {
+  const [Page] = useState(() => loadedTodayPage()?.TodayPage ?? LazyTodayPage);
+  return <Page />;
+}
+
 const JobsPage = lazy(() =>
   import('@/features/jobs/JobsPage').then((module) => ({ default: module.JobsPage })),
 );

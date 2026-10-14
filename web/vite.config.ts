@@ -2,10 +2,36 @@ import { fileURLToPath } from 'node:url';
 
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defaultClientConditions, defineConfig } from 'vite';
+import { defaultClientConditions, defineConfig, type Plugin } from 'vite';
+
+/**
+ * Build only (ADR-061): the Firebase config fetch starts from the HTML instead of after the
+ * entry script has run, and the three Google API hosts the first reads go to are connected
+ * early. Same URL and CORS mode as the app's `fetch`, so the preload is reused. No new host.
+ */
+const earlyFirebase: Plugin = {
+  name: 'hireframe-early-firebase',
+  apply: 'build',
+  transformIndexHtml: () => [
+    {
+      tag: 'link',
+      attrs: { rel: 'preload', href: '/__/firebase/init.json', as: 'fetch', crossorigin: '' },
+      injectTo: 'head-prepend',
+    },
+    ...[
+      'https://identitytoolkit.googleapis.com',
+      'https://securetoken.googleapis.com',
+      'https://firestore.googleapis.com',
+    ].map((href) => ({
+      tag: 'link',
+      attrs: { rel: 'preconnect', href, crossorigin: '' },
+      injectTo: 'head-prepend' as const,
+    })),
+  ],
+};
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), earlyFirebase],
   resolve: {
     // `source` resolves `@hireframe/shared` to its TypeScript sources (ADR-012).
     conditions: ['source', ...defaultClientConditions],

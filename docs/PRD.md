@@ -61,7 +61,7 @@ Out (later waves): see `ROADMAP.md`.
 - Today: Apply / Near miss / Wildcard lists under a summary bar (open Apply, near miss and wildcard counts, applied this week vs target 10, last run, next run, spend this month vs cap as a chip), which loads after the Apply list (ADR-051). The lists are each sortable (Best overall, Fit, Luck, Newest); Jobs adds Lane and, for near misses, Gap filters (ADR-044).
 - Job actions: Open posting, Apply, Skip, 👍/👎 on verdict (with optional reason), Start application (a separate control from Apply; disabled with its reason when the job has no verdict or deep read). Apply on a job that has an application also moves it to Applied, and undoing it restores the stage; Apply waits, with the reason, while the CV is being written.
 - Pipeline: Chosen, Needs your input, Generating, Ready to send and Applied, with a to-do count (needs your input + ready to send) on the navigation item and in Today's summary bar, both read after the Apply list.
-- AC: Lighthouse accessibility ≥ 95 (including Pipeline); all actions keyboard-accessible; loads usable in < 2 s on 4G, where usable means the Apply list is filled (the summary bar's counts load after it, ADR-051).
+- AC: Lighthouse accessibility ≥ 95 (including Pipeline); all actions keyboard-accessible; usable in 2 s or less, where usable means the Apply list is filled (the summary bar's counts load after it, ADR-051). Judged on real use (ADR-061): the median `hf:usable` of 5 repeat visits to Today on the owner's own phone, on mobile data (Wi-Fi off), with no throttling. The Fast 4G + 4× CPU lab number is recorded each release with its marks table and does not gate.
 
 ### R8 Lookup
 - Paste any job URL (incl. LinkedIn). Returns: seen or not, verdict, stage, when.

@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AppRoutes } from './App';
+import { loadTodayPage } from './lazy-pages';
 import appSource from './App.tsx?raw';
 import { SessionContext } from './session';
 
@@ -42,6 +43,13 @@ describe('AppRoutes', () => {
   ])('routes %s to the built screen, not the placeholder', async (path, heading) => {
     renderAt(path);
     expect(await screen.findByRole('heading', { name: heading })).toBeTruthy();
+  });
+
+  it('renders Today at once, with no loading fallback, when its chunk is already loaded', async () => {
+    await loadTodayPage();
+    renderAt('/');
+    expect(screen.queryByRole('status', { name: 'Loading screen' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Today screen' })).toBeTruthy();
   });
 
   it('loads the Pipeline screen lazily, so none of its code is in the initial bundle', () => {
