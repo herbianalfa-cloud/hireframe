@@ -69,6 +69,18 @@ describe('input', () => {
 });
 
 describe('refusals (nothing is deleted)', () => {
+  it('refuses when the lock is free on read but taken on acquire (a race)', async () => {
+    const w = memoryWipe({ jobs: 3, runs: 2 });
+    w.store.acquire = (): ReturnType<typeof w.store.acquire> => {
+      w.calls.push('acquire');
+      return Promise.resolve({ ok: false, holder: 'scan' });
+    };
+    const error = await refusal(call(w, CONFIRMED));
+    expect(error.code).toBe('failed-precondition');
+    expect(w.calls.filter((c) => c.startsWith('delete:'))).toEqual([]);
+    expect(total(w)).toBe(5);
+  });
+
   it.each([
     ['scan', 'A scan is already running.'],
     ['rescore', 'A scan is already running.'],
@@ -255,6 +267,32 @@ describe('bounds', () => {
   });
 });
 
+describe('exact cap', () => {
+  it('never deletes more than the cap, even with one document of room at the jobs step', async () => {
+    const w = memoryWipe({ events: 3, jobs: 10 });
+    const results = await loop(w, CONFIRMED, { maxDocuments: 5, pageSize: 200 });
+    for (const result of results) {
+      expect(result.deleted.documents).toBeLessThanOrEqual(5);
+    }
+    // The first call: 3 events leave room for one job and its description (2 of the 2 left),
+    // then the odd remainder stops the step instead of taking a third document.
+    expect(results[0]?.deleted.documents).toBe(5);
+    expect(results.at(-1)?.done).toBe(true);
+    expect(total(w)).toBe(0);
+  });
+
+  it('marks jobs unfinished when only one document of cap is left', async () => {
+    const w = memoryWipe({ events: 4, jobs: 10 });
+    const first = await call(w, CONFIRMED, { maxDocuments: 5 });
+    // Two jobs and their descriptions (4), then one document of room: the jobs step stops short
+    // and the one document goes to the next step.
+    expect(first.remaining).toContain('jobs');
+    expect(w.docs.jobs).toHaveLength(8);
+    expect(w.docs.events).toHaveLength(3);
+    expect(first.deleted.documents).toBe(5);
+  });
+});
+
 describe('concurrent writes and failures', () => {
   it('catches an application written after step 1 on the next call', async () => {
     const w = memoryWipe({ applications: 1, jobs: 600 });
@@ -299,6 +337,35 @@ describe('the profile (ticked)', () => {
     expect(withProfile[0]?.profile).toEqual({ facts: 40, documents: 2, files: 1 });
     expect(results.at(-1)).toMatchObject({ done: true, deleted: { documents: 0, files: 0 } });
     expect(w.profile).toEqual({ facts: 0, documents: 0, files: 0 });
+  });
+
+  it('runs on the pass that deleted the last jobs, and is done only on a later clean pass (D1)', async () => {
+    const w = memoryWipe({ jobs: 3 });
+    w.profile = { facts: 4, documents: 1, files: 0 };
+    const first = await call(w, WITH_PROFILE);
+    expect(first.done).toBe(false);
+    expect(first.deleted.documents).toBe(6 + 5);
+    expect(first.profile).toEqual({ facts: 4, documents: 1, files: 0 });
+    expect(first.remaining).toEqual([]);
+    const second = await call(w, WITH_PROFILE);
+    expect(second).toMatchObject({ done: true, deleted: { documents: 0, files: 0 } });
+  });
+
+  it('does not start after 90 s, and a call that skipped it is not done', async () => {
+    const w = memoryWipe({});
+    w.profile = { facts: 4, documents: 1, files: 0 };
+    const hasAny = w.store.hasAny.bind(w.store);
+    // The last read of the check pass lands past the deadline.
+    w.store.hasAny = async (step) => {
+      const found = await hasAny(step);
+      if (step === 'sources') w.clock.now = new Date(w.clock.now.getTime() + 95_000);
+      return found;
+    };
+    const result = await call(w, WITH_PROFILE);
+    expect(result).toMatchObject({ done: false, remaining: [] });
+    expect(result.profile).toBeUndefined();
+    expect(w.calls).not.toContain('deleteProfile');
+    expect(w.lock.holder).toBe('wipe');
   });
 
   it('is not touched when unticked', async () => {

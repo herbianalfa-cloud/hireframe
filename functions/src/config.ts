@@ -446,6 +446,8 @@ export const WIPE = {
   /** Storage listing pages of `storagePageSize` per call. */
   maxStoragePages: 20,
   storagePageSize: 200,
+  /** Concurrent file deletes within one Storage page. */
+  fileDeleteConcurrency: 20,
   /** Ops per batch (Firestore's limit is 500). */
   batchOps: 400,
   /** Documents read per page of a collection step. */

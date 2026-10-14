@@ -98,8 +98,10 @@ export async function deleteAllDataHandler(
       }
       continue;
     }
+    // A job goes with its description, so the jobs step needs room for both or it stops short.
+    const perItem = step === 'jobs' ? 2 : 1;
     for (;;) {
-      if (docsLeft <= 0 || !timeLeft()) {
+      if (docsLeft < perItem || !timeLeft()) {
         unfinished.add(step);
         break;
       }
@@ -116,15 +118,18 @@ export async function deleteAllDataHandler(
     if (unfinished.has(step) || !timeLeft() || (await store.hasAny(step))) remaining.push(step);
   }
 
-  // The profile goes last, and only from a pass that found everything else empty.
+  // The profile goes last, and only from a pass that found everything else empty and still has
+  // time: its core is unbounded, so no new step starts after the deadline. A pass that deleted
+  // the last jobs may run it (ADR-057); `done` still needs a later pass that deletes nothing.
   let profile: DeleteAllDataResult['profile'];
-  if (input.data.resetProfile && remaining.length === 0) {
+  const profileSkipped = input.data.resetProfile && (remaining.length > 0 || !timeLeft());
+  if (input.data.resetProfile && !profileSkipped) {
     profile = await resetProfileCore(deps.reset);
     documents += profile.facts + profile.documents;
     files += profile.files;
   }
 
-  const done = remaining.length === 0 && documents === 0 && files === 0;
+  const done = remaining.length === 0 && !profileSkipped && documents === 0 && files === 0;
   if (done) {
     await store.release(deps.now());
   } else {

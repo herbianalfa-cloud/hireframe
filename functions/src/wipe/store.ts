@@ -87,13 +87,16 @@ export function firestoreWipeStore(db: Firestore, bucket: Bucket): WipeStore {
         autoPaginate: false,
       });
       let index = 0;
-      const workers = Array.from({ length: Math.min(20, found.length) }, async () => {
-        while (index < found.length) {
-          const file = found[index];
-          index += 1;
-          if (file) await file.delete({ ignoreNotFound: true });
-        }
-      });
+      const workers = Array.from(
+        { length: Math.min(WIPE.fileDeleteConcurrency, found.length) },
+        async () => {
+          while (index < found.length) {
+            const file = found[index];
+            index += 1;
+            if (file) await file.delete({ ignoreNotFound: true });
+          }
+        },
+      );
       await Promise.all(workers);
       return { deleted: found.length, exhausted: !next };
     },
