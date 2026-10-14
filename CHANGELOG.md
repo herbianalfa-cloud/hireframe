@@ -27,6 +27,16 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
 - **M8 PR 8B, session 4: docs.** ADR-057 (wipe and 60-day purge), ADR-058 (managed backups and the restore drill), the ADR-032 addendum records the owner's decision to keep the 52p lease (no `runBudgetPence` 54: 46 × 54p = 2,484p would break the 75% scanning share), ARCHITECTURE, SECURITY (Data loss, destructive callable, Data retention), RUNBOOK Part J (steps 98 to 103) and four Recovery entries, ROADMAP.
 
+### Fixed (PR #37 review, `docs/plans/m8b-review.md`)
+- **Delete all my data:** the profile step no longer starts after 90 s, and a ticked call that skipped it is never `done`; a call can no longer pass the 3,000-document cap (the jobs step needs room for a job and its description); the file-delete concurrency is `WIPE.fileDeleteConcurrency`. A pass that deletes the last jobs may still run the profile step, and `done` still needs a later clean pass (pinned by a test, ADR-057 unchanged). A second tab's call may be refused rather than queued (comment corrected).
+- **Re-score** says "Deleting your data, try again when it has finished." while a wipe holds the lock.
+- **Scan:** a job whose description retention purged is no longer given a description back by a later full-text match, unless it is waiting for one (then `descriptionPurgedAt` is cleared and its re-judgement re-stamps `judgedAt`).
+- **Retention** parses its cursor and job reads with zod: a malformed one is skipped (a malformed cursor starts afresh), never a failed night.
+- **Wipe dialog** ignores Escape, the X and outside clicks while passes run, says "Keep this open until it finishes", and shows the profile counts on their own line.
+- **Hardening:** the load test sets `FIREBASE_CONFIG` itself and refuses a non-demo `GOOGLE_CLOUD_PROJECT` or `FIREBASE_CONFIG`; the kept-only source shape lives in `packages/shared`, and the first scan after a wipe no longer logs `store.invalid_doc` for it.
+- **Docs:** RUNBOOK Part J has each command and its expected output (C10 to C16, with the backup schedule moved before the tag), the Storage soft-delete clause in SECURITY, the RUNBOOK and the dialog, the ARCHITECTURE model lines, and a ROADMAP parking-lot line for the disabled-source quota.
+- Tests: the owner check before input, the lock race, the profile deadline and exact cap, the wipe wording on re-score, the purged-description dedupe, retention ties across a page boundary with mixed-case IDs and malformed docs, the dialog closing mid-run, the import walk from `index.ts` away from `loadtest/`, and a post-wipe scan at Adzuna's kept daily limit.
+
 ### Changed
 - `weeklyBackup` (never built) is replaced by Firestore managed backups (ADR-058).
 - Fresha's seed row is `keep-none` (moved to Teamtailor, which isn't supported); ROADMAP parks a Teamtailor source.
