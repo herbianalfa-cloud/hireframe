@@ -4,6 +4,12 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.8.1] - Unreleased
+### Changed
+- **`hf:usable` (ADR-061, plan `docs/plans/m8a2-plan.md`).** Today renders directly when its chunk is already loaded, so React's 300 ms reveal throttle after a `lazy()` fallback no longer sits between the owner check and Today. The Firebase bootstrap starts before the first render (`main.tsx`), the built HTML preloads `/__/firebase/init.json` and preconnects to `identitytoolkit`, `securetoken` and `firestore.googleapis.com`, and `check:bundle` fails if the preload is missing or after the entry script. New mark `hf:prefetch:data` (`docs`, `fromCache`). Initial JS 295.0 kB gzip (limit 300).
+- **R7 is judged on real use (ADR-061).** Pass = the median `hf:usable` of 5 repeat visits on the owner's phone, on mobile data, no throttling, 2,000 ms or less (new RUNBOOK step 97). The step 89 lab number (Fast 4G + 4× CPU) is recorded with its marks table and no longer gates. PRD R7, ADR-061, RUNBOOK steps 89 and 97.
+- Docs: ADR-061 (also records why the persistent cache, deferred App Check and a slimmer Today document were not taken), ARCHITECTURE (start-up order), SECURITY (preload row), ROADMAP parking lot.
+
 ## [0.8.0] - Unreleased
 ### Added
 - **M8 PR 8A: run health** (ADR-050, ADR-056, ADR-013 addendum; plan `docs/plans/m8-plan.md`).
