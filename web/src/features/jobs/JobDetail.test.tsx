@@ -227,6 +227,23 @@ describe('JobDetail', () => {
     expect(document.querySelector('b')).toBeNull();
   });
 
+  it('says a purged description was deleted after 60 days, not that none was stored', async () => {
+    show({ descriptionPurgedAt: new Date('2026-10-01T03:30:00Z') });
+    vi.mocked(loadJobDescription).mockResolvedValue(null);
+    open();
+    await userEvent.click(screen.getByRole('button', { name: /show description/i }));
+    expect(await screen.findByText(/description deleted after 60 days/i)).toBeTruthy();
+    expect(screen.queryByText(/no description stored/i)).toBeNull();
+  });
+
+  it('still says no description is stored when none was purged', async () => {
+    show();
+    vi.mocked(loadJobDescription).mockResolvedValue(null);
+    open();
+    await userEvent.click(screen.getByRole('button', { name: /show description/i }));
+    expect(await screen.findByText(/no description stored/i)).toBeTruthy();
+  });
+
   it('shows hostile titles, reasons and gaps as text too', () => {
     show({ title: INJECTION, reason: INJECTION, gaps: [{ type: 'tool', text: INJECTION }] });
     open();
