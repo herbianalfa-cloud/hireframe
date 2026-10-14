@@ -23,6 +23,8 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   application: 120,
   /** The scheduled CV worker; an `onSchedule` function, so the table is where budgets are checked. */
   generateCvs: 540,
+  /** The scheduled retention job; an `onSchedule` function, so the table is where budgets are checked. */
+  purgeOldData: 300,
 } as const;
 
 export type CallableName = keyof typeof CALLABLE_TIMEOUT_SECONDS;

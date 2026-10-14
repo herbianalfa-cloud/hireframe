@@ -571,6 +571,26 @@ export const APPLICATIONS = {
   withdrawDeadlineMs: 60_000,
 } as const;
 
+/** The retention job (ADR-057): deletes the stored description of old skipped jobs. */
+export const RETENTION = {
+  /** A skipped job's description is kept this long after it was judged. */
+  skipAgeDays: 60,
+  /** Jobs read and considered per run. */
+  maxJobsPerRun: 500,
+  /** Jobs per transaction: at most 2 writes each, inside the 400-op limit. */
+  chunkJobs: 100,
+  /** No new transaction starts after this much of the run. */
+  deadlineMs: 240_000,
+  /** The worst case of one transaction that started just before the deadline. */
+  chunkWorstCaseMs: 30_000,
+} as const;
+
+/** The retention job's schedule: 03:30 every day, UK time; the third and last free Cloud Scheduler job. */
+export const RETENTION_SCHEDULE = {
+  cron: '30 3 * * *',
+  timeZone: 'Europe/London',
+} as const;
+
 /** The CV worker's schedule: every 10 minutes, 07:00 to 23:50, UK time (ADR-053). */
 export const CV_WORKER_SCHEDULE = {
   cron: '*/10 7-23 * * *',

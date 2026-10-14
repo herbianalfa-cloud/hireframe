@@ -1154,6 +1154,19 @@ describe('needs-description state (ADR-048)', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('routes a job whose description was purged by retention to wait: no text, no model call', async () => {
+    const store = memoryFunnelStore();
+    store.add(
+      'purged',
+      atS3({ descriptionKind: 'full', descriptionPurgedAt: daysAgo(3) }),
+      null,
+    );
+    const { transport, sent } = recordingTransport();
+    await run(deps(store, { transport }));
+    expect(store.get('purged').next).toBe('description');
+    expect(sent).toHaveLength(0);
+  });
+
   it('gives a short snippet its deep read, flagged snippet_only, instead of waiting', async () => {
     const store = memoryFunnelStore();
     store.add('snippet', atS3({ descriptionKind: 'snippet' }), 'Join our analytics team.');

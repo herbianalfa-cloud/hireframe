@@ -17,6 +17,7 @@ import {
   PURPOSE_CALLABLE,
   RUNTIME_SERVICE_ACCOUNT,
   SCAN,
+  RETENTION,
   SHORT_LOCK,
   WIPE,
   type LlmPurpose,
@@ -214,5 +215,13 @@ describe('Delete all my data bounds (ADR-057)', () => {
     expect(WIPE.maxDocuments).toBe(3_000);
     expect(WIPE.maxStoragePages).toBe(20);
     expect(WIPE.storagePageSize).toBe(200);
+  });
+});
+
+describe('retention budgets (ADR-057)', () => {
+  it('240 s plus one transaction fits in the 300 s timeout', () => {
+    expect(RETENTION.deadlineMs + RETENTION.chunkWorstCaseMs).toBeLessThanOrEqual(
+      CALLABLE_TIMEOUT_SECONDS.purgeOldData * 1000,
+    );
   });
 });

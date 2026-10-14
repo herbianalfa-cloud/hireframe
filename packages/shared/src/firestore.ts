@@ -33,6 +33,8 @@ export const DOCS = {
   /** The contact block code puts on every generated CV (M7). */
   cvHeader: `${COLLECTIONS.profile}/cvHeader`,
   scanLock: `${COLLECTIONS.locks}/scan`,
+  /** The retention job's cursor (ADR-057): `{ purgedThrough, lastId, lastRunAt, schemaVersion }`. */
+  retentionCursor: `${COLLECTIONS.locks}/retention`,
 } as const;
 
 /** Subcollections under `profile/main`, `profile/main/facts/{factId}` and `jobs/{jobId}`. */

@@ -196,6 +196,11 @@ export const JobSchema = JobFunnelFieldsSchema.extend({
   firstSeenAt: z.date(),
   descriptionRef: z.string().min(1),
   descriptionKind: z.enum(DESCRIPTION_KINDS),
+  /**
+   * Server time the retention job deleted this skipped job's stored description (ADR-057). The
+   * verdict, reason and every other field stay; only `description/raw` is gone.
+   */
+  descriptionPurgedAt: z.date().exactOptional(),
   salary: SalarySchema.exactOptional(),
   stage: z.enum(JOB_STAGES),
   status: z.enum(JOB_STATUSES),
