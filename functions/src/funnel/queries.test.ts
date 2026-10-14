@@ -84,6 +84,7 @@ describe('funnel query specs', () => {
       'descriptionKind',
       'next',
       'postedAt',
+      'descriptionPurgedAt',
     ]);
   });
 });

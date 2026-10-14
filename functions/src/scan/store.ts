@@ -288,6 +288,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
             descriptionKind,
             next,
             postedAt,
+            descriptionPurgedAt,
           } = parsed.data;
           found.set(doc.id, {
             id: doc.id,
@@ -297,6 +298,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
             ...(descriptionKind ? { descriptionKind } : {}),
             ...(next === undefined ? {} : { next }),
             ...(postedAt ? { postedAt } : {}),
+            ...(descriptionPurgedAt ? { descriptionPurged: true } : {}),
           });
         }
       });
@@ -354,6 +356,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
               ...(upgrade
                 ? {
                     descriptionKind: 'full',
+                    ...(upgrade.clearPurged ? { descriptionPurgedAt: FieldValue.delete() } : {}),
                     ...(upgrade.postedAt ? { postedAt: upgrade.postedAt } : {}),
                     ...(upgrade.release
                       ? { next: 's3', flags: FieldValue.arrayRemove('needs_description') }

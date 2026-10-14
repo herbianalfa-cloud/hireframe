@@ -365,6 +365,8 @@ export const JobKeysProjectionSchema = z.object({
   descriptionKind: z.enum(DESCRIPTION_KINDS).exactOptional(),
   next: z.enum(WAIT_STATES).nullable().exactOptional(),
   postedAt: z.date().exactOptional(),
+  /** Set by the 60-day retention job; a purged job isn't given a description back (ADR-057). */
+  descriptionPurgedAt: z.date().exactOptional(),
 });
 
 // ---- Companies (watchlist) ----
