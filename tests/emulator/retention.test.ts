@@ -83,13 +83,13 @@ describe('purgeOldData (ADR-057)', () => {
       expect(await hasDescription(kept), kept).toBe(true);
     }
     const stamped = (await db.doc(PATHS.job('old-new')).get()).data();
-    expect(stamped?.descriptionPurgedAt.toDate()).toEqual(NOW);
+    expect((stamped?.descriptionPurgedAt as Timestamp).toDate()).toEqual(NOW);
     expect(stamped?.verdict).toBe('skip');
     expect((await db.doc(PATHS.job('young')).get()).data()?.descriptionPurgedAt).toBeUndefined();
 
     const cursor = (await db.doc(DOCS.retentionCursor).get()).data();
     expect(cursor?.lastId).toBeTypeOf('string');
-    expect(cursor?.lastRunAt.toDate()).toEqual(NOW);
+    expect((cursor?.lastRunAt as Timestamp).toDate()).toEqual(NOW);
   });
 
   it('a second run purges nothing new', async () => {

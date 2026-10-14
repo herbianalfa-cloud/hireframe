@@ -20,7 +20,7 @@ interface FakeJob extends PurgeCandidate {
 }
 
 /** An in-memory store that applies `decidePurge` on its current state, as the transaction does. */
-function fakeStore(jobs: FakeJob[], applications: Set<string> = new Set()) {
+function fakeStore(jobs: FakeJob[], applications = new Set<string>()) {
   const state: {
     cursor: RetentionCursor | null;
     saves: RetentionCursor[];
@@ -33,7 +33,7 @@ function fakeStore(jobs: FakeJob[], applications: Set<string> = new Set()) {
     readPage(cutoff, after, limit) {
       const rows = jobs
         .filter((job) => job.verdict === 'skip' && job.judgedAt && job.judgedAt < cutoff)
-        .map((job): PageRow => ({ id: job.id, judgedAt: job.judgedAt as Date }))
+        .flatMap((job): PageRow[] => (job.judgedAt ? [{ id: job.id, judgedAt: job.judgedAt }] : []))
         .sort((a, b) => a.judgedAt.getTime() - b.judgedAt.getTime() || a.id.localeCompare(b.id))
         .filter(
           (row) =>
@@ -138,7 +138,7 @@ describe('runRetention (ADR-057)', () => {
     const jobs = [job('a', 70, { status: 'skipped' })];
     const { store, state } = fakeStore(jobs);
     state.beforeChunk = () => {
-      (jobs[0] as FakeJob).status = 'saved';
+      for (const each of jobs) each.status = 'saved';
     };
     expect((await run(store)).purged).toBe(0);
     expect(jobs[0]?.hasDescription).toBe(true);
@@ -148,7 +148,7 @@ describe('runRetention (ADR-057)', () => {
     const jobs = [job('a', 70), job('b', 70)];
     const { store, state } = fakeStore(jobs);
     state.beforeChunk = () => {
-      (jobs[0] as FakeJob).judgedAt = NOW;
+      for (const each of jobs) if (each.id === 'a') each.judgedAt = NOW;
       jobs.splice(1, 1);
     };
     const result = await run(store);

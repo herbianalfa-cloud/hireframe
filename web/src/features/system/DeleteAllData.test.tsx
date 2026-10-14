@@ -32,6 +32,14 @@ async function openDialog() {
   await userEvent.click(screen.getByRole('button', { name: 'Delete all my data' }));
 }
 
+function submitButton(): HTMLElement {
+  const found = screen
+    .getAllByRole('button', { name: 'Delete all my data' })
+    .find((b) => b.getAttribute('type') === 'submit');
+  if (!found) throw new Error('no submit button');
+  return found;
+}
+
 const typeDelete = (text = 'DELETE') =>
   userEvent.type(screen.getByLabelText(/type delete to confirm/i), text);
 
@@ -59,9 +67,7 @@ describe('DeleteAllData (ADR-057)', () => {
     await openDialog();
     const box = screen.getByRole('checkbox', { name: /also reset profile/i });
     expect((box as HTMLInputElement).checked).toBe(false);
-    const button = screen.getByRole('button', { name: 'Delete all my data', hidden: false });
-    const buttons = screen.getAllByRole('button', { name: 'Delete all my data' });
-    const submit = buttons.find((b) => b.getAttribute('type') === 'submit') ?? button;
+    const submit = submitButton();
     expect((submit as HTMLButtonElement).disabled).toBe(true);
     await typeDelete('delete');
     expect((submit as HTMLButtonElement).disabled).toBe(true);
@@ -79,10 +85,7 @@ describe('DeleteAllData (ADR-057)', () => {
     if (ticked)
       await userEvent.click(screen.getByRole('checkbox', { name: /also reset profile/i }));
     await typeDelete();
-    const submit = screen
-      .getAllByRole('button', { name: 'Delete all my data' })
-      .find((b) => b.getAttribute('type') === 'submit');
-    await userEvent.click(submit as HTMLElement);
+    await userEvent.click(submitButton());
     await waitFor(() => {
       expect(call).toHaveBeenCalledWith({ confirm: 'DELETE', resetProfile: expected });
     });
@@ -91,10 +94,7 @@ describe('DeleteAllData (ADR-057)', () => {
   async function start() {
     await openDialog();
     await typeDelete();
-    const submit = screen
-      .getAllByRole('button', { name: 'Delete all my data' })
-      .find((b) => b.getAttribute('type') === 'submit');
-    await userEvent.click(submit as HTMLElement);
+    await userEvent.click(submitButton());
   }
 
   it('loops until done and shows a summary', async () => {

@@ -26,7 +26,7 @@ function plural(n: number, one: string, many: string): string {
 
 function usePreview(paths: readonly { key: string; path: string }[]): Record<string, Count> {
   const [counts, setCounts] = useState<Record<string, Count>>(() =>
-    Object.fromEntries(paths.map(({ key }) => [key, { status: 'loading' } as Count])),
+    Object.fromEntries(paths.map(({ key }) => [key, { status: 'loading' }])),
   );
   useEffect(() => {
     let cancelled = false;
