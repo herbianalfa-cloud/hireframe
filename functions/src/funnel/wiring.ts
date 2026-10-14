@@ -16,7 +16,7 @@ import { firestoreUsageStore } from '../llm/usage-store.js';
 import { log } from '../log.js';
 import { createAtsSearch } from '../lookup/ats-search.js';
 import { composeHydrators, createAtsHydrator, createReedHydrator } from './hydrate.js';
-import { runFunnel, type FunnelOutcome, type Hydrator } from './run.js';
+import { runFunnel, type FunnelOutcome, type FunnelProbe, type Hydrator } from './run.js';
 import { firestoreFunnelStore, type FirestoreFunnelStore } from './store.js';
 
 /**
@@ -31,6 +31,8 @@ export interface FunnelWiring {
   /** Fetch for Reed hydration (the fake one in the emulator). */
   fetch: typeof fetch;
   reedApiKey?: string;
+  /** Timing marks for the load test. Production passes nothing. */
+  probe?: FunnelProbe;
 }
 
 export type FunnelRunner = (input: {
@@ -129,6 +131,7 @@ export function funnelFor(wiring: FunnelWiring): FunnelRunner {
             setTimeout(resolve, ms);
           }),
         startedAtMs: invokedAt.getTime(),
+        ...(wiring.probe ? { probe: wiring.probe } : {}),
       },
       { runId, ...(rescoreSince ? { rescoreSince } : {}) },
     );

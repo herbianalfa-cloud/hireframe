@@ -132,7 +132,24 @@ export interface FunnelDeps {
   sleep: (ms: number) => Promise<void>;
   /** When the run started (epoch ms); stage deadlines count from here. */
   startedAtMs: number;
+  /** Timing marks for the load test (scripts/load-test.ts). Production passes nothing. */
+  probe?: FunnelProbe;
 }
+
+/** Called at stage and hydrator boundaries; must not throw and never changes the funnel. */
+export type FunnelProbe = (name: ProbeMark, detail?: { jobId?: string }) => void;
+
+export type ProbeMark =
+  | 's1.start'
+  | 's1.end'
+  | 'sweep.start'
+  | 'sweep.end'
+  | 's2.start'
+  | 's2.end'
+  | 's3.start'
+  | 's3.end'
+  | 'hydrate.start'
+  | 'hydrate.end';
 
 export interface FunnelOptions {
   runId: string;
@@ -226,6 +243,7 @@ function emptyCounts() {
 
 export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promise<FunnelOutcome> {
   const { store } = deps;
+  const mark: FunnelProbe = (name, detail) => deps.probe?.(name, detail);
   const { s1, s2, s3 } = emptyCounts();
   const flags = new Set<RunFlag>();
   const stops: { setup?: StopReason; s2?: StopReason; s3?: StopReason } = {};
@@ -381,6 +399,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   }
 
   // ---- S1: free rules on jobs no stage has judged yet ----
+  mark('s1.start');
   const fresh = await store.s0Jobs(deps.limits.s1MaxJobs);
   const freshTexts = await loadTexts(fresh);
   for (const entry of fresh) {
@@ -398,10 +417,12 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     await write(entry.id, s1SkipPatch(result.ruleId, s1Outcome(result), ctx()));
   }
   await flush();
+  mark('s1.end');
 
   // ---- Expiry sweep: queued jobs past freshness_days leave their queue, free (ADR-043) ----
   // Runs before the lease, so it happens even at the monthly cap or without a profile. The stage
   // reads below only see the newest 300 / best 50, so without this the rest would wait forever.
+  mark('sweep.start');
   const staleBefore = freshnessCutoff(criteria, deps.now());
   for (const stage of WAIT_STATES) {
     try {
@@ -442,6 +463,8 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     log.error('funnel.failed', { step: 'describe_sweep', ...errorFields(error) });
     sweepFailed = true;
   }
+
+  mark('sweep.end');
 
   // ---- The run's spend lease (ADR-032) ----
   const month = monthKey(deps.now());
@@ -608,6 +631,34 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
   }
 
   async function runS2(activeLease: RunLease): Promise<void> {
+    mark('s2.start');
+    try {
+      await runS2Inner(activeLease);
+    } finally {
+      mark('s2.end');
+    }
+  }
+
+  async function runS3(activeLease: RunLease): Promise<void> {
+    mark('s3.start');
+    try {
+      await runS3Inner(activeLease);
+    } finally {
+      mark('s3.end');
+    }
+  }
+
+  /** A hydrator read, marked for the probe. */
+  async function hydrate(hydrator: Hydrator, entry: StoredJob): Promise<string | null> {
+    mark('hydrate.start', { jobId: entry.id });
+    try {
+      return await hydrator.fullText(entry);
+    } finally {
+      mark('hydrate.end', { jobId: entry.id });
+    }
+  }
+
+  async function runS2Inner(activeLease: RunLease): Promise<void> {
     const began = deps.clock();
     const pacer = createPacer(deps.limits.triageRpm, deps.clock, deps.sleep);
     const queue = await readQueue('s2', deps.limits.s2MaxJobs);
@@ -668,7 +719,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
     s2.durationMs = Math.max(0, deps.clock() - began);
   }
 
-  async function runS3(activeLease: RunLease): Promise<void> {
+  async function runS3Inner(activeLease: RunLease): Promise<void> {
     const began = deps.clock();
     const pacer = createPacer(deps.limits.deepReadRpm, deps.clock, deps.sleep);
     const { hydrator } = deps;
@@ -723,7 +774,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       }
       let hydrated = false;
       if (noText && hydrator) {
-        const full = await hydrator.fullText(entry);
+        const full = await hydrate(hydrator, entry);
         if (full === null) {
           // Nothing found: the slot goes back and the job waits for a description.
           started -= 1;
@@ -737,7 +788,7 @@ export async function runFunnel(deps: FunnelDeps, options: FunnelOptions): Promi
       const extraFlags: JobFlag[] = (job.flags ?? []).filter((flag) => !STALE_FLAGS.includes(flag));
       let snippet = job.descriptionKind === 'snippet' && !hydrated;
       if (snippet && hydrator) {
-        const full = await hydrator.fullText(entry);
+        const full = await hydrate(hydrator, entry);
         if (full !== null) {
           text = full;
           snippet = false;

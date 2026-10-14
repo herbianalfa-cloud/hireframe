@@ -63,6 +63,7 @@ function deps(
     criteria?: FunnelDeps['criteria'];
     hydrator?: Hydrator;
     startedAtMs?: number;
+    probe?: FunnelDeps['probe'];
   } = {},
 ): FunnelDeps {
   return {
@@ -81,6 +82,7 @@ function deps(
       return Promise.resolve();
     },
     startedAtMs: options.startedAtMs ?? TEST_NOW.getTime(),
+    ...(options.probe ? { probe: options.probe } : {}),
   };
 }
 
@@ -324,6 +326,46 @@ describe('runFunnel', () => {
     expect(store.get('adzuna').flags).toContain('snippet_only');
     expect(store.get('reed').flags ?? []).not.toContain('snippet_only');
     expect(result.perStage.hydrate.attempted).toBe(2);
+  });
+
+  it('marks stage and hydrator boundaries in order for the probe, and changes nothing', async () => {
+    const build = () => {
+      const store = memoryFunnelStore();
+      store.add('a', testJob({ title: 'Product Analyst', descriptionKind: 'snippet' }));
+      store.add('b', testJob({ title: 'Product Analyst' }));
+      return store;
+    };
+    const hydrator: Hydrator = {
+      fullText: () => Promise.resolve('A full description of the role.'),
+      counts: () => ({ attempted: 1, ok: 1, failed: 0 }),
+      finish: () => Promise.resolve(),
+    };
+    const marks: { name: string; at: number; jobId?: string }[] = [];
+    const probe: FunnelDeps['probe'] = (name, detail) =>
+      marks.push({ name, at: clock, ...(detail?.jobId ? { jobId: detail.jobId } : {}) });
+    const probed = build();
+    const withProbe = await run(deps(probed, { hydrator, probe }));
+    const plain = build();
+    clock = TEST_NOW.getTime();
+    const without = await run(deps(plain, { hydrator }));
+    expect(marks.map((m) => m.name)).toEqual([
+      's1.start',
+      's1.end',
+      'sweep.start',
+      'sweep.end',
+      's2.start',
+      's2.end',
+      's3.start',
+      'hydrate.start',
+      'hydrate.end',
+      's3.end',
+    ]);
+    expect(marks.filter((m) => m.name.startsWith('hydrate')).map((m) => m.jobId)).toEqual(['a', 'a']);
+    expect(marks.map((m) => m.at)).toEqual([...marks.map((m) => m.at)].sort((a, b) => a - b));
+    expect(withProbe).toEqual(without);
+    const bare = (store: MemoryFunnelStore) =>
+      [...store.jobs.entries()].map(([id, job]) => [id, { ...job, url: '' }]);
+    expect(bare(probed)).toEqual(bare(plain));
   });
 
   it('skips on right-to-work wording from the profile setting, and flags it when unset', async () => {
