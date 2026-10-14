@@ -72,6 +72,8 @@ export interface ScanStore {
   ensureSeedCompanies(seed: readonly CompanySeed[], now: Date): Promise<number>;
   watchedCompanies(): Promise<StoredCompany[]>;
   sourceStates(): Promise<Partial<Record<ScanSourceId, SourceHealth>>>;
+  /** Saved host pauses, read field by field so a source doc kept by a wipe still carries them. */
+  pausedHosts(): Promise<Partial<Record<ScanSourceId, HostPause[]>>>;
   /** API call counters, read on their own so a run that died after saving them still counts. */
   quotas(): Promise<Partial<Record<ScanSourceId, Quota>>>;
   /** Saves a keyed source's counters as soon as it finishes, before anything else can fail. */
@@ -199,11 +201,6 @@ export function runStatus(
   return 'succeeded';
 }
 
-/** Pauses saved on a source's health that haven't ended yet. */
-function carriedPauses(health: SourceHealth | undefined): HostPause[] {
-  return (health?.pausedHosts ?? []).map(({ host, until }) => ({ host, until: until.getTime() }));
-}
-
 function sourceCode(error: unknown): string {
   const code = errorFields(error).errorCode;
   return typeof code === 'string' && /^[a-z0-9_]{1,60}$/.test(code) ? code : 'internal';
@@ -268,10 +265,11 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
 
     const seeded = await store.ensureSeedCompanies(deps.seed, startedAt);
     if (seeded > 0) log.info('watchlist.seeded', { created: seeded });
-    const [stored, states, quotas, criteria] = await Promise.all([
+    const [stored, states, quotas, pauses, criteria] = await Promise.all([
       store.watchedCompanies(),
       store.sourceStates(),
       store.quotas(),
+      store.pausedHosts(),
       deps.readCriteria().catch((error: unknown) => {
         log.error('scan.failed', { step: 'criteria', ...errorFields(error) });
         run.errors.push({ code: 'criteria_invalid' });
@@ -313,14 +311,14 @@ export async function runScan(deps: ScanDeps): Promise<ScanResult> {
               jobs: [],
               requests: 0,
               durationMs: 0,
-              pausedHosts: carriedPauses(states[id]),
+              pausedHosts: pauses[id] ?? [],
             },
           ];
         }
         const quotaKey = QUOTA_SOURCES[id];
         const quota = quotaKey ? currentQuota(quotas[id], startedAt) : undefined;
         const callBudget = quotaKey && quota ? remainingCalls(quota, QUOTAS[quotaKey]) : Infinity;
-        const http = deps.httpFor(deadline, carriedPauses(states[id]));
+        const http = deps.httpFor(deadline, pauses[id] ?? []);
         const source = sources[id];
         const began = Date.now();
         let jobs: unknown[] = [];

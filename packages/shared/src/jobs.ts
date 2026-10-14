@@ -460,13 +460,14 @@ export const RESCORE_DAYS = 14;
 
 /**
  * Who holds `locks/scan`. A scan or re-score holds it for a whole run; `email` (alert ingest) and
- * `lookup` (M6) hold it briefly, and a scheduled scan waits for them (ADR-048).
+ * `lookup` (M6) hold it briefly, and a scheduled scan waits for them (ADR-048). `wipe` (Delete all
+ * my data, ADR-057) holds it for the calls of one wipe and refuses application actions meanwhile.
  */
-export const LOCK_HOLDERS = ['scan', 'rescore', 'email', 'lookup'] as const;
+export const LOCK_HOLDERS = ['scan', 'rescore', 'email', 'lookup', 'wipe'] as const;
 export type LockHolder = (typeof LOCK_HOLDERS)[number];
 
 /** Holders that finish in minutes: a scheduled scan waits for them instead of skipping. */
-export const SHORT_LOCK_HOLDERS: readonly LockHolder[] = ['email', 'lookup'];
+export const SHORT_LOCK_HOLDERS: readonly LockHolder[] = ['email', 'lookup', 'wipe'];
 
 /**
  * `locks/scan`: the single-flight lock (ADR-029). `runId` is set only while someone holds it.

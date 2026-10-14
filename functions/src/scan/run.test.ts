@@ -73,6 +73,21 @@ function memoryStore(options: { lock?: LockResult } = {}) {
     },
     watchedCompanies: () => Promise.resolve([...companies.values()]),
     sourceStates: () => Promise.resolve({ ...sources }),
+    pausedHosts: () =>
+      Promise.resolve(
+        Object.fromEntries(
+          Object.entries(sources).flatMap(([id, health]) =>
+            health.pausedHosts?.length
+              ? [
+                  [
+                    id,
+                    health.pausedHosts.map(({ host, until }) => ({ host, until: until.getTime() })),
+                  ],
+                ]
+              : [],
+          ),
+        ),
+      ),
     quotas: () => Promise.resolve({ ...quotas }),
     saveQuota: (id, quota) => {
       quotas[id] = quota;

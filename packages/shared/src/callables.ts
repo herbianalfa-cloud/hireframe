@@ -9,6 +9,8 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   parseCv: 540,
   addFact: 120,
   resetProfile: 120,
+  /** Delete all my data: one bounded pass per call; the client repeats it (ADR-057). */
+  deleteAllData: 120,
   scanNow: 540,
   rescore: 540,
   /** Lookup judges a paste of up to 50 jobs on the spot (ADR-049). */

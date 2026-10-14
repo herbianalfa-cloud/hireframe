@@ -432,6 +432,28 @@ export const SHORT_LOCK = {
   scheduledWaitMaxMs: 4 * 60_000,
   /** A Lookup create step takes seconds; a killed one blocks scans for this long (ADR-049). */
   lookupStaleMs: 2 * 60_000,
+  /** One wipe call is at most 120 s and the client repeats it at once (ADR-057). */
+  wipeStaleMs: 3 * 60_000,
+} as const;
+
+/**
+ * Delete all my data (ADR-057). One call is bounded in documents, Storage pages and time; the
+ * client repeats it until a pass finds everything empty.
+ */
+export const WIPE = {
+  /** Documents deleted per call (a description subdoc counts as one). */
+  maxDocuments: 3_000,
+  /** Storage listing pages of `storagePageSize` per call. */
+  maxStoragePages: 20,
+  storagePageSize: 200,
+  /** Ops per batch (Firestore's limit is 500). */
+  batchOps: 400,
+  /** Documents read per page of a collection step. */
+  pageSize: 200,
+  /** No new page or step starts after this much of the call. */
+  deadlineMs: 90_000,
+  /** The worst case of one page that started just before the deadline. */
+  pageWorstCaseMs: 20_000,
 } as const;
 
 /**
@@ -483,7 +505,7 @@ export const LOOKUP = {
   /** Watched boards one `add` may read to find postings (one request each, cached). */
   atsBoardsPerCall: 12,
   /** What `busy` tells the client, by who holds the lock (seconds). */
-  busyRetrySeconds: { scan: 240, rescore: 240, email: 60, lookup: 30 },
+  busyRetrySeconds: { scan: 240, rescore: 240, email: 60, lookup: 30, wipe: 60 },
   /** A claimed description older than this, still unfinished, may be claimed again. */
   describeClaimStaleMs: 10 * 60_000,
 } as const;

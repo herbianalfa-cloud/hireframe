@@ -77,7 +77,9 @@ export type LogEvent =
   | 'digest.refused'
   | 'digest.done'
   | 'digest.failed'
-  | 'digest.pipeline_failed';
+  | 'digest.pipeline_failed'
+  | 'wipe.refused'
+  | 'wipe.pass';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';

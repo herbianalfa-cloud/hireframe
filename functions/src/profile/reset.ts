@@ -29,16 +29,9 @@ export interface ResetDeps {
   now: () => Date;
 }
 
-export async function resetProfileHandler(
-  data: unknown,
-  deps: ResetDeps,
-): Promise<ResetProfileResult> {
-  if (!ResetProfileInputSchema.safeParse(data).success) {
-    throw new HttpsError('invalid-argument', 'Type RESET to confirm.');
-  }
-
-  const now = deps.now();
-  const reading = (await deps.store.parsingDocuments()).some((raw) => {
+/** Refuses while a CV is being read, so a parse can't write facts back into an emptied profile. */
+export async function assertNoCvBeingRead(store: ResetStore, now: Date): Promise<void> {
+  const reading = (await store.parsingDocuments()).some((raw) => {
     const parsed = ProfileDocumentSchema.safeParse(raw);
     // An unreadable document can't be a parse in progress that we know of.
     return parsed.success && !isParseStalled(parsed.data, now);
@@ -50,9 +43,27 @@ export async function resetProfileHandler(
       'A CV is being read. Try again when it has finished.',
     );
   }
+}
 
+/**
+ * The delete itself, shared by Reset profile and Delete all my data (ADR-057): the parse check,
+ * then every fact, upload document, the profile settings and the uploaded files.
+ */
+export async function resetProfileCore(deps: ResetDeps): Promise<ResetProfileResult> {
+  await assertNoCvBeingRead(deps.store, deps.now());
   const { facts, documents } = await deps.store.deleteProfile();
   const files = await deps.deleteFiles(STORAGE_PATHS.profileDocumentsPrefix);
-  log.info('profile.reset', { facts, documents, files });
   return { facts, documents, files };
+}
+
+export async function resetProfileHandler(
+  data: unknown,
+  deps: ResetDeps,
+): Promise<ResetProfileResult> {
+  if (!ResetProfileInputSchema.safeParse(data).success) {
+    throw new HttpsError('invalid-argument', 'Type RESET to confirm.');
+  }
+  const result = await resetProfileCore(deps);
+  log.info('profile.reset', { ...result });
+  return result;
 }

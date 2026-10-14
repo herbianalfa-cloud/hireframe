@@ -35,6 +35,7 @@ export * from './schedule.js';
 export * from './s2-diagnostics.js';
 export * from './score.js';
 export * from './usage.js';
+export * from './wipe.js';
 export { WATCHLIST_SEED } from './watchlist-seed.js';
 
 /**
