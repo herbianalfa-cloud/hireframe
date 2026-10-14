@@ -10,3 +10,5 @@ export { ingestEmailJobs } from './ingest/endpoint.js';
 export { getDigest } from './digest/endpoint.js';
 export { application } from './applications/callable.js';
 export { generateCvs } from './applications/schedule.js';
+export { deleteAllData } from './wipe/callable.js';
+export { purgeOldData } from './retention/schedule.js';

@@ -6,6 +6,7 @@ import {
 import { HttpsError } from 'firebase-functions/https';
 
 import { DailyCapExceededError } from '../llm/errors.js';
+import { busyMessage } from '../scan/handler.js';
 import {
   ApplicationRefusal,
   runApplication,
@@ -40,6 +41,7 @@ const REFUSALS: Readonly<
     message: 'Add your CV header on Profile first.',
   },
   no_verdict: { code: 'failed-precondition', message: 'This job has not been judged yet.' },
+  wiping: { code: 'failed-precondition', message: busyMessage('wipe') },
 };
 
 export async function applicationHandler(

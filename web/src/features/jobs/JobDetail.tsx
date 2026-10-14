@@ -113,12 +113,12 @@ function Requirements({ job, factText }: { job: Job; factText: (factId: string) 
   );
 }
 
-function Description({ jobId }: { jobId: string }) {
+function Description({ jobId, purged }: { jobId: string; purged: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <Section title="Description">
       {open ? (
-        <DescriptionText jobId={jobId} />
+        <DescriptionText jobId={jobId} purged={purged} />
       ) : (
         <Button
           variant="secondary"
@@ -135,7 +135,7 @@ function Description({ jobId }: { jobId: string }) {
 }
 
 /** The stored text, shown as plain text only: it comes from the open web, so it is never parsed. */
-function DescriptionText({ jobId }: { jobId: string }) {
+function DescriptionText({ jobId, purged }: { jobId: string; purged: boolean }) {
   const state = useJobDescription(jobId);
   if (state.status === 'loading')
     return <Skeleton role="status" aria-label="Loading description" className="h-24" />;
@@ -146,7 +146,13 @@ function DescriptionText({ jobId }: { jobId: string }) {
       </p>
     );
   }
-  if (!state.description) return <p className="text-muted-foreground">No description stored.</p>;
+  if (!state.description) {
+    return (
+      <p className="text-muted-foreground">
+        {purged ? 'Description deleted after 60 days (skipped job).' : 'No description stored.'}
+      </p>
+    );
+  }
   return (
     <>
       {state.description.kind === 'snippet' ? (
@@ -449,7 +455,9 @@ function JobBody({ view, handlers }: { view: JobView; handlers: JobActionHandler
         </Section>
       ) : null}
 
-      {job.descriptionKind === 'none' ? null : <Description jobId={view.id} />}
+      {job.descriptionKind === 'none' ? null : (
+        <Description jobId={view.id} purged={job.descriptionPurgedAt !== undefined} />
+      )}
 
       <Section title="Sources">
         <ul className="space-y-1">

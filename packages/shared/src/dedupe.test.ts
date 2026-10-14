@@ -337,6 +337,28 @@ describe('description upgrade on merge (ADR-048)', () => {
     next: 'description' as const,
   };
 
+  it('does not bring back the description of a purged job (ADR-057)', () => {
+    const purged = {
+      ...waiting,
+      descriptionKind: 'snippet' as const,
+      next: null,
+      descriptionPurged: true,
+    };
+    const plan = planIngest(dedupeBatch([greenhouse]), [purged]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0]?.upgrade).toBeUndefined();
+  });
+
+  it('upgrades a purged job that waits for a description and clears its stamp', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [{ ...waiting, descriptionPurged: true }]);
+    expect(plan.updates[0]?.upgrade).toMatchObject({ release: true, clearPurged: true });
+  });
+
+  it('leaves clearPurged off for a job that was never purged', () => {
+    const plan = planIngest(dedupeBatch([greenhouse]), [waiting]);
+    expect(plan.updates[0]?.upgrade?.clearPurged).toBeUndefined();
+  });
+
   it('writes the full text, the posting date and releases the job to S3', () => {
     const plan = planIngest(dedupeBatch([greenhouse]), [waiting]);
     expect(plan.updates).toHaveLength(1);

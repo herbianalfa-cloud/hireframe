@@ -26,6 +26,7 @@ export async function scanNowHandler(
 export function busyMessage(holder: LockHolder | undefined): string {
   if (holder === 'email') return 'Importing alerts, try again in a minute.';
   if (holder === 'lookup') return 'Adding a job from Lookup, try again in a minute.';
+  if (holder === 'wipe') return 'Deleting your data, try again when it has finished.';
   return 'A scan is already running.';
 }
 

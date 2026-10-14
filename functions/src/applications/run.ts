@@ -4,6 +4,7 @@ import {
   type ApplicationInput,
   type ApplicationResult,
   type ExistingFact,
+  type LockHolder,
 } from '@hireframe/shared';
 
 import type { LlmCallInput, LlmCallResult } from '../llm/call.js';
@@ -34,7 +35,14 @@ import {
  */
 
 export type RefusalCode =
-  'not_found' | 'wrong_stage' | 'lost' | 'no_fact' | 'header_missing' | 'no_verdict';
+  | 'not_found'
+  | 'wrong_stage'
+  | 'lost'
+  | 'no_fact'
+  | 'header_missing'
+  | 'no_verdict'
+  /** Delete all my data holds the lock: every action creates a document (ADR-057). */
+  | 'wiping';
 
 /** A request that can't be done from where the application is. User-safe: no job or answer text. */
 export class ApplicationRefusal extends Error {
@@ -59,6 +67,8 @@ export interface ApplicationDeps {
    * page: `more` is true when the listing was cut short.
    */
   listFiles: (prefix: string, limit: number) => Promise<{ names: string[]; more: boolean }>;
+  /** The live (not stale) holder of `locks/scan`, or null: one read, taken before anything else. */
+  lockHolder: () => Promise<LockHolder | null>;
   now: () => Date;
 }
 
@@ -304,6 +314,10 @@ export async function runApplication(
   deps: ApplicationDeps,
   input: ApplicationInput,
 ): Promise<ApplicationResult> {
+  // Every action writes a document, and a wipe is deleting them: refuse before reading anything.
+  // Not a transaction precondition: the wipe's own `generating` refusal and its order cover the
+  // instant before it takes the lock (ADR-057).
+  if ((await deps.lockHolder()) === 'wipe') throw new ApplicationRefusal('wiping');
   switch (input.action) {
     case 'start':
       return start(deps, input.jobId, 'start');

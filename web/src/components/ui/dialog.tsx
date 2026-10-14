@@ -27,8 +27,13 @@ export function DialogContent({
   className,
   children,
   side = 'center',
+  hideClose = false,
   ...props
-}: ComponentProps<typeof DialogPrimitive.Content> & { side?: 'center' | 'right' }) {
+}: ComponentProps<typeof DialogPrimitive.Content> & {
+  side?: 'center' | 'right';
+  // Hide the corner X while a close would be ignored (a wipe in progress).
+  hideClose?: boolean;
+}) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm" />
@@ -43,12 +48,14 @@ export function DialogContent({
         {...props}
       >
         {children}
-        <DialogPrimitive.Close
-          aria-label="Close"
-          className="absolute top-2 right-2 inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 ease-out hover:bg-surface-raised hover:text-foreground"
-        >
-          <X aria-hidden="true" className="size-4" />
-        </DialogPrimitive.Close>
+        {hideClose ? null : (
+          <DialogPrimitive.Close
+            aria-label="Close"
+            className="absolute top-2 right-2 inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 ease-out hover:bg-surface-raised hover:text-foreground"
+          >
+            <X aria-hidden="true" className="size-4" />
+          </DialogPrimitive.Close>
+        )}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );

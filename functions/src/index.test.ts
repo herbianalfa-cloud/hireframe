@@ -65,12 +65,14 @@ describe('deployed functions (ADR-017)', () => {
     ['parseCv', ['ANTHROPIC_API_KEY']],
     ['addFact', ['ANTHROPIC_API_KEY']],
     ['resetProfile', []],
+    ['deleteAllData', []],
     ['scanNow', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['scheduledScan', ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY', 'ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['rescore', ['ANTHROPIC_API_KEY', 'REED_API_KEY']],
     ['lookup', ['ANTHROPIC_API_KEY']],
     ['application', ['ANTHROPIC_API_KEY']],
     ['generateCvs', ['ANTHROPIC_API_KEY']],
+    ['purgeOldData', []],
     ['ingestEmailJobs', ['ANTHROPIC_API_KEY', 'INGEST_HMAC_SECRET']],
     ['getDigest', ['INGEST_HMAC_SECRET']],
   ])('%s mounts %j', (name, secrets) => {
@@ -139,6 +141,29 @@ describe('generateCvs (ADR-053)', () => {
       'utf8',
     );
     expect(wiring).toMatch(/import\('\.\.\/cv\/render\/index\.js'\)/);
+  });
+});
+
+describe('deleteAllData (ADR-057)', () => {
+  const endpoint = endpoints.find(([name]) => name === 'deleteAllData')?.[1];
+
+  it('is an owner callable in europe-west2, 120 s, 512 MiB, one instance and one request', () => {
+    expect(endpoint?.callableTrigger).toBeDefined();
+    expect(endpoint?.region).toEqual(['europe-west2']);
+    expect(endpoint?.timeoutSeconds).toBe(120);
+    expect(endpoint?.availableMemoryMb).toBe(512);
+    expect(endpoint?.maxInstances).toBe(1);
+    expect(endpoint?.concurrency).toBe(1);
+  });
+
+  it('states its limits in its own options, and never calls itself', () => {
+    const source = readFileSync(new URL('./wipe/callable.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/^\s*maxInstances: 1,$/m);
+    expect(source).toMatch(/^\s*concurrency: 1,$/m);
+    for (const file of ['./wipe/run.ts', './wipe/store.ts', './wipe/callable.ts']) {
+      const text = readFileSync(new URL(file, import.meta.url), 'utf8');
+      expect(text, file).not.toMatch(/httpsCallable|setTimeout|enqueue|CloudTasks|PubSub/);
+    }
   });
 });
 
@@ -211,5 +236,51 @@ describe('application (M7, ADR-055)', () => {
   it('is not scheduled and has no event trigger (no self-triggering code)', () => {
     expect(endpoint).not.toHaveProperty('scheduleTrigger');
     expect(endpoint).not.toHaveProperty('eventTrigger');
+  });
+});
+
+describe('purgeOldData (ADR-057)', () => {
+  const endpoint = (
+    deployed.purgeOldData as unknown as {
+      __endpoint?: {
+        scheduleTrigger?: {
+          schedule?: string;
+          timeZone?: string;
+          retryConfig?: { retryCount?: number };
+        };
+        timeoutSeconds?: number;
+        availableMemoryMb?: number | string;
+        maxInstances?: number | string;
+        callableTrigger?: object;
+        httpsTrigger?: object;
+        eventTrigger?: object;
+      };
+    }
+  ).__endpoint;
+
+  it('runs at 03:30 every day, UK time, without platform retries', () => {
+    expect(endpoint?.scheduleTrigger).toMatchObject({
+      schedule: '30 3 * * *',
+      timeZone: 'Europe/London',
+      retryConfig: { retryCount: 0 },
+    });
+  });
+
+  it('states 300 s, 512 MiB and one instance', () => {
+    expect(endpoint?.timeoutSeconds).toBe(300);
+    expect(endpoint?.availableMemoryMb).toBe(512);
+    expect(endpoint?.maxInstances).toBe(1);
+  });
+
+  it('is started by its schedule only', () => {
+    expect(endpoint?.callableTrigger).toBeUndefined();
+    expect(endpoint?.httpsTrigger).toBeUndefined();
+    expect(endpoint?.eventTrigger).toBeUndefined();
+  });
+
+  it('states maxInstances and retryCount in its own options', () => {
+    const source = readFileSync(new URL('./retention/schedule.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/^\s*maxInstances: 1,$/m);
+    expect(source).toMatch(/^\s*retryCount: 0,$/m);
   });
 });

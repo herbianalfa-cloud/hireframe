@@ -3,11 +3,13 @@ import {
   CompanySchema,
   COLLECTIONS,
   DOCS,
+  isKeptOnlySourceDoc,
   JobKeysProjectionSchema,
   PATHS,
   QuotaSchema,
   ScanLockSchema,
   SCAN_SOURCE_IDS,
+  SHORT_LOCK_HOLDERS,
   SourceHealthSchema,
   sourceRef,
   type Company,
@@ -27,6 +29,7 @@ import {
 } from 'firebase-admin/firestore';
 
 import { SCAN, SHORT_LOCK } from '../config.js';
+import type { HostPause } from '../http/client.js';
 import { JOBS_BY_KEYS_SELECT, jobsByKeysSpec } from '../funnel/queries.js';
 import { errorFields, log } from '../log.js';
 import { timestampsToDates } from '../timestamps.js';
@@ -39,13 +42,14 @@ import type { LockResult, ScanStore, StoredCompany } from './run.js';
  */
 
 function isShortHolder(holder: LockHolder | undefined): boolean {
-  return holder === 'email' || holder === 'lookup';
+  return holder !== undefined && SHORT_LOCK_HOLDERS.includes(holder);
 }
 
 /** How long a lock may stay held before it counts as dead (ADR-048). */
 export function lockStaleMs(holder: LockHolder): number {
   if (holder === 'email') return SHORT_LOCK.emailStaleMs;
   if (holder === 'lookup') return SHORT_LOCK.lookupStaleMs;
+  if (holder === 'wipe') return SHORT_LOCK.wipeStaleMs;
   return SCAN.lockStaleMs;
 }
 
@@ -53,6 +57,71 @@ function chunks<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
+}
+
+/** The live holder of `locks/scan`, or null when it is free or stale. */
+export async function liveLockHolder(db: Firestore, now: Date): Promise<LockHolder | null> {
+  const snapshot = await db.doc(DOCS.scanLock).get();
+  const parsed = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
+  if (!parsed.success || !parsed.data.runId || !parsed.data.startedAt) return null;
+  const staleAt =
+    parsed.data.staleAt ?? new Date(parsed.data.startedAt.getTime() + SCAN.lockStaleMs);
+  return now.getTime() < staleAt.getTime() ? (parsed.data.holder ?? 'scan') : null;
+}
+
+export type WipeLockResult = { ok: true; recovered?: string } | { ok: false; holder: LockHolder };
+
+/**
+ * Takes `locks/scan` as `wipe`, or refreshes it when `wipe` already holds it (every call of one
+ * wipe). The runId is fixed (`wipe`) so the wipe's own calls recognise it; a stale lock left by a
+ * dead scan is taken over and its run marked failed, as `acquireLock` does. No cooldown applies,
+ * and `lastFinishedAt` is kept so a wipe never starts the manual-scan cooldown (ADR-057).
+ */
+export function acquireOrRefreshWipe(db: Firestore, now: Date): Promise<WipeLockResult> {
+  const lockRef = db.doc(DOCS.scanLock);
+  return db.runTransaction(async (tx): Promise<WipeLockResult> => {
+    const snapshot = await tx.get(lockRef);
+    const parsed = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
+    const lock = parsed.success ? parsed.data : undefined;
+    const staleAt = lock?.startedAt
+      ? (lock.staleAt ?? new Date(lock.startedAt.getTime() + SCAN.lockStaleMs))
+      : undefined;
+    const live = Boolean(lock?.runId && staleAt && now.getTime() < staleAt.getTime());
+    if (live && lock?.holder !== 'wipe') return { ok: false, holder: lock?.holder ?? 'scan' };
+    const deadScan = !live && lock?.runId && !isShortHolder(lock.holder);
+    const deadRunRef = deadScan && lock.runId ? db.doc(PATHS.run(lock.runId)) : null;
+    const deadRun = deadRunRef ? await tx.get(deadRunRef) : null;
+    const recovered =
+      deadRunRef && deadRun?.exists && deadRun.get('status') === 'running' ? deadRunRef : null;
+    tx.set(lockRef, {
+      runId: 'wipe',
+      startedAt: now,
+      holder: 'wipe',
+      staleAt: new Date(now.getTime() + lockStaleMs('wipe')),
+      ...(lock?.lastFinishedAt ? { lastFinishedAt: lock.lastFinishedAt } : {}),
+      schemaVersion: 1,
+    });
+    if (recovered) {
+      tx.update(recovered, {
+        status: 'failed',
+        finishedAt: now,
+        errors: FieldValue.arrayUnion({ code: 'timeout' }),
+      });
+      return { ok: true, recovered: recovered.id };
+    }
+    return { ok: true };
+  });
+}
+
+/**
+ * `sources/{id}.pausedHosts`, read field by field. A source doc kept by Delete all my data holds
+ * only `quota` and `pausedHosts`, so it fails the full health parse but its pauses still count.
+ */
+function storedPauses(value: unknown): HostPause[] {
+  const parsed = SourceHealthSchema.shape.pausedHosts.safeParse(timestampsToDates(value));
+  return parsed.success
+    ? parsed.data.map(({ host, until }) => ({ host, until: until.getTime() }))
+    : [];
 }
 
 export function firestoreScanStore(db: Firestore): ScanStore {
@@ -179,9 +248,24 @@ export function firestoreScanStore(db: Firestore): ScanStore {
         if (!id || !snapshot.exists) return;
         const parsed = SourceHealthSchema.safeParse(timestampsToDates(snapshot.data()));
         if (parsed.success) states[id] = parsed.data;
-        else log.warn('store.invalid_doc', { collection: 'sources', count: 1 });
+        // A doc a wipe left with only quota and pauses isn't health: not an invalid document.
+        else if (!isKeptOnlySourceDoc(snapshot.data())) {
+          log.warn('store.invalid_doc', { collection: 'sources', count: 1 });
+        }
       });
       return states;
+    },
+
+    async pausedHosts() {
+      const snapshots = await db.getAll(...SCAN_SOURCE_IDS.map((id) => db.doc(PATHS.source(id))));
+      const pauses: Partial<Record<ScanSourceId, HostPause[]>> = {};
+      snapshots.forEach((snapshot, index) => {
+        const id = SCAN_SOURCE_IDS[index];
+        if (!id || !snapshot.exists) return;
+        const stored = storedPauses(snapshot.get('pausedHosts'));
+        if (stored.length > 0) pauses[id] = stored;
+      });
+      return pauses;
     },
 
     async findJobsByKeys(keys) {
@@ -208,6 +292,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
             descriptionKind,
             next,
             postedAt,
+            descriptionPurgedAt,
           } = parsed.data;
           found.set(doc.id, {
             id: doc.id,
@@ -217,6 +302,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
             ...(descriptionKind ? { descriptionKind } : {}),
             ...(next === undefined ? {} : { next }),
             ...(postedAt ? { postedAt } : {}),
+            ...(descriptionPurgedAt ? { descriptionPurged: true } : {}),
           });
         }
       });
@@ -274,6 +360,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
               ...(upgrade
                 ? {
                     descriptionKind: 'full',
+                    ...(upgrade.clearPurged ? { descriptionPurgedAt: FieldValue.delete() } : {}),
                     ...(upgrade.postedAt ? { postedAt: upgrade.postedAt } : {}),
                     ...(upgrade.release
                       ? { next: 's3', flags: FieldValue.arrayRemove('needs_description') }

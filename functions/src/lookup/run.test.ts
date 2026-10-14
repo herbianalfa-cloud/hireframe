@@ -229,6 +229,16 @@ describe('lookup add', () => {
     expect(h.sent).toHaveLength(0);
   });
 
+  it('answers busy with the wipe retry time while Delete all my data holds the lock', async () => {
+    const h = lookupHarness();
+    h.lockAnswers.splice(0, h.lockAnswers.length, { ok: false, reason: 'running', holder: 'wipe' });
+    const result = await runAdd(h.deps, [row({ linkedinId: '4012345678' })]);
+    expect(result).toEqual({ status: 'busy', retryAfterSeconds: LOOKUP.busyRetrySeconds.wipe });
+    expect(LOOKUP.busyRetrySeconds.wipe).toBe(60);
+    expect(h.funnel.jobs.size).toBe(0);
+    expect(h.sent).toHaveLength(0);
+  });
+
   it('answers busy after waiting 20 s for a scan, and creates nothing', async () => {
     const h = lookupHarness();
     h.lockAnswers.splice(0, h.lockAnswers.length, { ok: false, reason: 'running', holder: 'scan' });

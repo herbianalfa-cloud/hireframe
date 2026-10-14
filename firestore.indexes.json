@@ -261,6 +261,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "verdict",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "judgedAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

@@ -1,6 +1,7 @@
 import {
   RESCORE_DAYS,
   RescoreInputSchema,
+  SHORT_LOCK_HOLDERS,
   type LockHolder,
   type RescoreResult,
   type Run,
@@ -110,7 +111,7 @@ export async function rescoreHandler(
     // Short holders get their own wording; a scan keeps the message the screen already shows.
     throw new HttpsError(
       'failed-precondition',
-      result.holder === 'email' || result.holder === 'lookup'
+      result.holder !== undefined && SHORT_LOCK_HOLDERS.includes(result.holder)
         ? busyMessage(result.holder)
         : 'A scan is running. Try again when it finishes.',
     );

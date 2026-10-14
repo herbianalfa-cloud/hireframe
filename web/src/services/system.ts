@@ -1,6 +1,7 @@
 import {
   COLLECTIONS,
   CompanySchema,
+  isKeptOnlySourceDoc,
   RunSchema,
   SCAN_SOURCE_IDS,
   ScanNowResultSchema,
@@ -39,7 +40,8 @@ import { timestampsToDates } from './timestamps';
 
 export interface SourceView {
   id: ScanSourceId;
-  health: SourceHealth;
+  /** Null for a doc Delete all my data kept: only its quota and pauses, no scan since (ADR-057). */
+  health: SourceHealth | null;
 }
 
 export interface RunView {
@@ -71,9 +73,10 @@ export function watchSources(callback: (state: LiveState<SourceView[]>) => void)
           for (const item of snapshot.docs) {
             const parsed = SourceHealthSchema.safeParse(timestampsToDates(item.data()));
             if (item.id === EMAIL_SOURCE) continue;
-            if (parsed.success && isScanSource(item.id)) {
-              sources.push({ id: item.id, health: parsed.data });
-            } else invalid++;
+            if (!isScanSource(item.id)) invalid++;
+            else if (parsed.success) sources.push({ id: item.id, health: parsed.data });
+            else if (isKeptOnlySourceDoc(item.data())) sources.push({ id: item.id, health: null });
+            else invalid++;
           }
           sources.sort((a, b) => SCAN_SOURCE_IDS.indexOf(a.id) - SCAN_SOURCE_IDS.indexOf(b.id));
           callback({ status: 'ready', data: sources, invalid });

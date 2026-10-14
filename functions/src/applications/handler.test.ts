@@ -14,6 +14,7 @@ function deps(): ApplicationDeps {
     llm: () => Promise.reject(new DailyCapExceededError()),
     deleteFiles: () => Promise.resolve(0),
     listFiles: () => Promise.resolve({ names: [], more: false }),
+    lockHolder: () => Promise.resolve(null),
     now: () => new Date('2026-10-05T08:00:00Z'),
   };
 }
@@ -75,5 +76,15 @@ describe('applicationHandler', () => {
         () => Promise.resolve(d),
       ),
     ).rejects.toMatchObject({ code: 'resource-exhausted' });
+  });
+
+  it('answers failed-precondition with the wipe wording while Delete all my data holds the lock', async () => {
+    const result = applicationHandler({ action: 'start', jobId: TEST_JOB_ID }, () =>
+      Promise.resolve({ ...deps(), lockHolder: () => Promise.resolve('wipe' as const) }),
+    );
+    await expect(result).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'Deleting your data, try again when it has finished.',
+    });
   });
 });

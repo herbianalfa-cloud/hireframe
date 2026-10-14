@@ -182,6 +182,8 @@ export interface ExistingJobKeys {
   descriptionChars?: number;
   next?: WaitState | null;
   postedAt?: Date;
+  /** The stored description was purged by retention (ADR-057); nothing is restored to it. */
+  descriptionPurged?: boolean;
 }
 
 export type IngestOutcome = 'new' | 'merged' | 'duplicate';
@@ -197,6 +199,8 @@ export interface DescriptionUpgrade {
   postedAt?: Date;
   /** The job was at `next: 'description'`: it moves on to `s3`. */
   release: boolean;
+  /** The job had been purged by retention and is waiting again: its stamp is removed. */
+  clearPurged?: true;
 }
 
 export interface JobUpdate {
@@ -319,6 +323,9 @@ function descriptionUpgrade(
   minChars: number,
 ): DescriptionUpgrade | undefined {
   if (target.descriptionKind !== 'none' && target.descriptionKind !== 'snippet') return undefined;
+  // A purged job stays purged, unless it waits for a description: then it is judged again and
+  // its new `judgedAt` lets retention see it (ADR-057).
+  if (target.descriptionPurged && target.next !== 'description') return undefined;
   const stored = target.descriptionKind === 'none' ? 0 : (target.descriptionChars ?? 0);
   let best: NormalisedJob | undefined;
   for (const job of added) {
@@ -333,6 +340,7 @@ function descriptionUpgrade(
     sourceId: best.sourceId,
     ...(gap && best.postedAt ? { postedAt: best.postedAt } : {}),
     release: target.next === 'description',
+    ...(target.descriptionPurged ? { clearPurged: true as const } : {}),
   };
 }
 

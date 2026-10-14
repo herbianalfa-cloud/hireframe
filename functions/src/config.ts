@@ -432,6 +432,30 @@ export const SHORT_LOCK = {
   scheduledWaitMaxMs: 4 * 60_000,
   /** A Lookup create step takes seconds; a killed one blocks scans for this long (ADR-049). */
   lookupStaleMs: 2 * 60_000,
+  /** One wipe call is at most 120 s and the client repeats it at once (ADR-057). */
+  wipeStaleMs: 3 * 60_000,
+} as const;
+
+/**
+ * Delete all my data (ADR-057). One call is bounded in documents, Storage pages and time; the
+ * client repeats it until a pass finds everything empty.
+ */
+export const WIPE = {
+  /** Documents deleted per call (a description subdoc counts as one). */
+  maxDocuments: 3_000,
+  /** Storage listing pages of `storagePageSize` per call. */
+  maxStoragePages: 20,
+  storagePageSize: 200,
+  /** Concurrent file deletes within one Storage page. */
+  fileDeleteConcurrency: 20,
+  /** Ops per batch (Firestore's limit is 500). */
+  batchOps: 400,
+  /** Documents read per page of a collection step. */
+  pageSize: 200,
+  /** No new page or step starts after this much of the call. */
+  deadlineMs: 90_000,
+  /** The worst case of one page that started just before the deadline. */
+  pageWorstCaseMs: 20_000,
 } as const;
 
 /**
@@ -483,7 +507,7 @@ export const LOOKUP = {
   /** Watched boards one `add` may read to find postings (one request each, cached). */
   atsBoardsPerCall: 12,
   /** What `busy` tells the client, by who holds the lock (seconds). */
-  busyRetrySeconds: { scan: 240, rescore: 240, email: 60, lookup: 30 },
+  busyRetrySeconds: { scan: 240, rescore: 240, email: 60, lookup: 30, wipe: 60 },
   /** A claimed description older than this, still unfinished, may be claimed again. */
   describeClaimStaleMs: 10 * 60_000,
 } as const;
@@ -547,6 +571,26 @@ export const APPLICATIONS = {
   withdrawListLimit: 200,
   withdrawMaxVersions: 20,
   withdrawDeadlineMs: 60_000,
+} as const;
+
+/** The retention job (ADR-057): deletes the stored description of old skipped jobs. */
+export const RETENTION = {
+  /** A skipped job's description is kept this long after it was judged. */
+  skipAgeDays: 60,
+  /** Jobs read and considered per run. */
+  maxJobsPerRun: 500,
+  /** Jobs per transaction: at most 2 writes each, inside the 400-op limit. */
+  chunkJobs: 100,
+  /** No new transaction starts after this much of the run. */
+  deadlineMs: 240_000,
+  /** The worst case of one transaction that started just before the deadline. */
+  chunkWorstCaseMs: 30_000,
+} as const;
+
+/** The retention job's schedule: 03:30 every day, UK time; the third and last free Cloud Scheduler job. */
+export const RETENTION_SCHEDULE = {
+  cron: '30 3 * * *',
+  timeZone: 'Europe/London',
 } as const;
 
 /** The CV worker's schedule: every 10 minutes, 07:00 to 23:50, UK time (ADR-053). */

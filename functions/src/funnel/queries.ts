@@ -42,6 +42,7 @@ export const JOBS_BY_KEYS_SELECT = [
   'descriptionKind',
   'next',
   'postedAt',
+  'descriptionPurgedAt',
 ] as const;
 
 /**

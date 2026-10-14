@@ -1,7 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 import { describe, expect, it, vi } from 'vitest';
 
-import { watchGoneBoards, type BoardView } from './system';
+import { watchGoneBoards, watchSources, type BoardView, type SourceView } from './system';
 import type { LiveState } from './profile';
 
 /** `watchGoneBoards` lists only companies still being watched (ADR-056). */
@@ -63,5 +63,67 @@ describe('watchGoneBoards', () => {
     if (last?.status !== 'ready') throw new Error('not ready');
     expect(last.data.map((board) => board.id)).toEqual(['alpha', 'zeta']);
     expect(last.invalid).toBe(0);
+  });
+});
+
+describe('watchSources (ADR-057)', () => {
+  const health = {
+    status: 'ok',
+    lastRunAt: at,
+    consecutiveFailures: 0,
+    lastCounts: {
+      status: 'ok',
+      fetched: 40,
+      invalid: 0,
+      new: 12,
+      duplicate: 25,
+      merged: 3,
+      errors: 0,
+      requests: 6,
+      durationMs: 4000,
+    },
+    updatedAt: at,
+    schemaVersion: 1,
+  };
+
+  function read(docs: [string, Record<string, unknown>][]) {
+    let last: LiveState<SourceView[]> | undefined;
+    watchSources((state) => {
+      last = state;
+    });
+    return vi
+      .waitFor(() => {
+        if (!live.next) throw new Error('not subscribed');
+      })
+      .then(() => {
+        live.next?.(snapshotOf(docs));
+        if (last?.status !== 'ready') throw new Error('not ready');
+        return last;
+      });
+  }
+
+  it('shows a doc a wipe kept (quota, pauses) as having no scan, not as invalid', async () => {
+    const kept = {
+      quota: {
+        day: '2026-10-14',
+        dayCount: 2,
+        week: '2026-W42',
+        weekCount: 5,
+        month: '2026-10',
+        monthCount: 9,
+      },
+      updatedAt: at,
+      schemaVersion: 1,
+    };
+    const state = await read([
+      ['adzuna', kept],
+      ['greenhouse', health],
+      ['reed', { unexpected: true }],
+    ]);
+    expect(state.data.map((view) => [view.id, view.health === null])).toEqual([
+      ['greenhouse', false],
+      ['adzuna', true],
+    ]);
+    expect(state.invalid).toBe(1);
   });
 });

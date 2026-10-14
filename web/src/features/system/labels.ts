@@ -202,14 +202,14 @@ export interface SystemAlert {
  * latest run's outcome and its spend flags. Pure, so it is tested without Firestore.
  */
 export function systemAlerts(input: {
-  sources: readonly { id: ScanSourceId; health: SourceHealth }[];
+  sources: readonly { id: ScanSourceId; health: SourceHealth | null }[];
   /** Newest first. */
   runs: readonly { id: string; run: Run }[];
   now: Date;
 }): SystemAlert[] {
   const alerts: SystemAlert[] = [];
   for (const { id, health } of input.sources) {
-    if (health.status !== 'failing' && health.status !== 'degraded') continue;
+    if (!health || (health.status !== 'failing' && health.status !== 'degraded')) continue;
     const why = errorText(health.lastErrorCode);
     alerts.push({
       id: `source:${id}`,

@@ -9,6 +9,8 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   parseCv: 540,
   addFact: 120,
   resetProfile: 120,
+  /** Delete all my data: one bounded pass per call; the client repeats it (ADR-057). */
+  deleteAllData: 120,
   scanNow: 540,
   rescore: 540,
   /** Lookup judges a paste of up to 50 jobs on the spot (ADR-049). */
@@ -21,6 +23,8 @@ export const CALLABLE_TIMEOUT_SECONDS = {
   application: 120,
   /** The scheduled CV worker; an `onSchedule` function, so the table is where budgets are checked. */
   generateCvs: 540,
+  /** The scheduled retention job; an `onSchedule` function, so the table is where budgets are checked. */
+  purgeOldData: 300,
 } as const;
 
 export type CallableName = keyof typeof CALLABLE_TIMEOUT_SECONDS;

@@ -633,8 +633,7 @@ export const WATCHLIST_SEED: readonly CompanySeed[] = [
     name: 'Fresha',
     domain: 'fresha.com',
     ats: {
-      type: 'lever',
-      token: 'fresha',
+      type: 'none',
     },
     hq: 'London',
   },

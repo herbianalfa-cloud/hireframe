@@ -2,7 +2,50 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
-## [Unreleased]
+## [0.9.0] - Unreleased
+### Added
+- **M8 PR 8B, session 1: Delete all my data, server side** (ADR-057; plan `docs/plans/m8b-plan.md`).
+  - **`deleteAllData` (new callable, needs C10 after deploy):** owner only, App Check enforced and consumed, 120 s, 512 MiB, `maxInstances` 1 and `concurrency` 1. Input `{ confirm: 'DELETE', resetProfile }` (strict). Each call is one bounded pass (3,000 documents, 20 Storage pages of 200, no new page after 90 s) over `applications`, `cvs/` files, `cvs`, `jobs` with their descriptions, `runs`, `events`, `alertMessages`, `companies` and `sources`, then a reads-only check; `done: true` only from a call that deleted nothing and found every step empty. It never calls itself; the client repeats it. `config`, `criteria`, `usage`, `locks`, `nonces` and each source's `quota` and `pausedHosts` are kept; the profile goes only when ticked, and only from a pass that found the rest empty.
+  - **`wipe` lock holder:** a short holder on `locks/scan` (3 min stale, refreshed per call, released when done without starting the scan cooldown). Scans, re-scores, ingest and Lookup answer busy; the `application` callable refuses all seven actions with "Deleting your data, try again when it has finished."
+  - **Kept source docs:** the scan reads `pausedHosts` field by field, so a source doc holding only quota and pauses still carries its pauses; System shows it as "No scan since your data was deleted".
+  - `resetProfileCore` extracted from Reset profile (same behaviour and wording).
+  - Tests: wipe plan, run (fake clock: caps, deadline, retry after a store error, a document written mid-wipe, profile ordering) and callable; emulator wipe loop, held-lock `start`, and the worker's lost path (files removed when the application is deleted mid-write).
+
+- **M8 PR 8B, session 2: Delete all my data UI and retention.**
+  - **System → Danger zone → Delete all my data** (`DeleteAllData.tsx`, `services/wipe.ts`): a dialog with the preview counts (each its own aggregation read, "unavailable" on failure; the alert-message line has no count), what is kept, **Also reset profile** (off by default), the watchlist and 8-week backup notes and a typed `DELETE`. It calls `deleteAllData` in a loop of up to 20 passes with a progress line, then stops and offers **Continue** (20 more). An error or refusal stops the loop with the message and nothing retries. The profile counts are summed over calls.
+  - **`purgeOldData` (new scheduled function, needs C11, C12, C13 after deploy):** 03:30 UK time daily, 300 s, 512 MiB, `maxInstances` 1, `retryCount` 0, no secrets. Deletes the stored description of `skip` jobs judged more than 60 days ago whose status is `new` or `skipped` and that have no application, in a transaction per 100 jobs (re-checked on fresh reads), at most 500 a run and no new transaction after 240 s. The cursor `(judgedAt, id)` in `locks/retention` is saved after each commit. Logs `retention.done` and `retention.failed`.
+  - `JobSchema.descriptionPurgedAt`; the job sheet says "Description deleted after 60 days (skipped job)." for such a job. S3 already routes a job without a description document to wait for one (pinned by a test).
+  - New index `jobs (verdict ASC, judgedAt ASC)` in `firestore.indexes.json` (ADR-040 spec test).
+  - Tests: retention run (fake clock: 59/61 days, every status, application race, status race, ties, caps, deadline, cursor, store error), query spec, schedule options, config budget, emulator transaction run; wipe service and dialog; System Danger zone and kept-only source card; preview counts in `indexes.test.ts`.
+
+- **M8 PR 8B, session 3: load test** (ADR-032 addendum; plan `docs/plans/m8b-plan.md` B4).
+  - **`node scripts/load-test.ts [--jobs N] [--s1-passes N]`:** starts its own Firestore and Storage emulators (`demo-hireframe-load`), seeds 1,000 fake postings on 20 fake Greenhouse boards (105 pass S1 and about 30% of those pass S2), 12 alert jobs without text and 300 stale queued jobs, then runs the real scan and funnel twice and the wipe core to the end. Real deadlines, so about 6 to 10 minutes. It makes no network or live model call, refuses `LIVE=1`, any project that isn't `demo-*` and busy emulator ports (stop `npm run dev` first). It exits 1 if a pass criterion is missed and prints the stage table and the answer to "32 S3 calls + 12 board reads inside 450 s".
+  - **Funnel probe hook:** `FunnelDeps.probe` and `FunnelWiring.probe`, an optional `mark(name, detail)` at S1, sweep, S2 and S3 start and end and around each hydrator read. Production passes nothing; the funnel is identical without it (tested).
+  - **`functions/src/loadtest/`** (not imported by `index.ts`, so not in the deploy bundle): seeded data, a latency and cost-calibrated transport over the fake answers, a fake Greenhouse `fetch` that goes through the real HTTP client, a read and write counter, and the pure report.
+  - **Result (ADR-032 addendum):** the run takes 319 s at the approved peak and 345 s at twice the S1 passes, and no stage hits a deadline. S3 made 31 calls, not 32, and stopped at the 52p lease because S2 made 111 calls (the approved plan assumes 99). The owner kept the 52p lease; nothing was changed.
+  - Tests (fake clock and injected sleep): the data mix against the real S1 rules and the fake S2, transport latency and token calibration, the counting proxy, the report's criteria (pass and fail each), the fake fetch, the argument parser, and the probe's marks in order.
+
+- **M8 PR 8B, session 4: docs.** ADR-057 (wipe and 60-day purge), ADR-058 (managed backups and the restore drill), the ADR-032 addendum records the owner's decision to keep the 52p lease (no `runBudgetPence` 54: 46 × 54p = 2,484p would break the 75% scanning share), ARCHITECTURE, SECURITY (Data loss, destructive callable, Data retention), RUNBOOK Part J (steps 98 to 103) and four Recovery entries, ROADMAP.
+
+### Fixed (PR #37 review, `docs/plans/m8b-review.md`)
+- **Delete all my data:** the profile step no longer starts after 90 s, and a ticked call that skipped it is never `done`; a call can no longer pass the 3,000-document cap (the jobs step needs room for a job and its description); the file-delete concurrency is `WIPE.fileDeleteConcurrency`. A pass that deletes the last jobs may still run the profile step, and `done` still needs a later clean pass (pinned by a test, ADR-057 unchanged). A second tab's call may be refused rather than queued (comment corrected).
+- **Re-score** says "Deleting your data, try again when it has finished." while a wipe holds the lock.
+- **Scan:** a job whose description retention purged is no longer given a description back by a later full-text match, unless it is waiting for one (then `descriptionPurgedAt` is cleared and its re-judgement re-stamps `judgedAt`).
+- **Retention** parses its cursor and job reads with zod: a malformed one is skipped (a malformed cursor starts afresh), never a failed night.
+- **Wipe dialog** ignores Escape, the X and outside clicks while passes run, says "Keep this open until it finishes", and shows the profile counts on their own line.
+- **Hardening:** the load test sets `FIREBASE_CONFIG` itself and refuses a non-demo `GOOGLE_CLOUD_PROJECT` or `FIREBASE_CONFIG`; the kept-only source shape lives in `packages/shared`, and the first scan after a wipe no longer logs `store.invalid_doc` for it.
+- **Docs:** RUNBOOK Part J has each command and its expected output (C10 to C16, with the backup schedule moved before the tag), the Storage soft-delete clause in SECURITY, the RUNBOOK and the dialog, the ARCHITECTURE model lines, and a ROADMAP parking-lot line for the disabled-source quota.
+- Tests: the owner check before input, the lock race, the profile deadline and exact cap, the wipe wording on re-score, the purged-description dedupe, retention ties across a page boundary with mixed-case IDs and malformed docs, the dialog closing mid-run, the import walk from `index.ts` away from `loadtest/`, and a post-wipe scan at Adzuna's kept daily limit.
+
+
+### Fixed (PR #37 fix-commit review, `docs/plans/m8b-review-2.md`)
+- **RUNBOOK Part J:** step 98 now has the merge, tag and deploy approval, and a required soft-delete window check (C20c, expecting `retentionDurationSeconds` 604800); `deleteAllData` is in Part C step 28's invoker list; every `gcloud` line carries `--project`; expected outputs for C14 and C16 and a re-check after C13b.
+- **Retention** logs `retention.invalid_doc` with `{ count }`, not a job ID. The wipe dialog hides its X while passes run.
+- Tests: emulator cover for the purged-description mapping and the S1 restore path.
+
+### Changed
+- `weeklyBackup` (never built) is replaced by Firestore managed backups (ADR-058).
+- Fresha's seed row is `keep-none` (moved to Teamtailor, which isn't supported); ROADMAP parks a Teamtailor source.
 
 ## [0.8.1] - Unreleased
 ### Changed

@@ -165,11 +165,11 @@ Before the first deploy with Cloud Functions (`v0.2.0`). Design: ADR-016 (`llm.c
 27. **Deploy.** Merge the PR, push the tag, then **Actions → Deploy → Review deployments → Approve**. If it fails with a 403, see Recovery.
 28. **Let the browser call each new callable** (once per callable, after its first deploy). The Firebase CLI tries to make a new callable publicly invocable, but the deploy account can't set IAM, so the function stays private. The browser then gets a 403, which shows as a CORS error. Public invocation is safe: every callable still enforces App Check and checks the owner UID.
     ```bash
-    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs lookup getDigest application; do
+    for FN in parseCv addFact resetProfile scanNow rescore ingestEmailJobs lookup getDigest application deleteAllData; do
       gcloud functions add-invoker-policy-binding $FN --region=europe-west2 --member=allUsers --project=hireframe-f6b03
     done
     ```
-    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `lookup` (M6, 6B) is a callable like the others. `application` (M7, 7D) is a callable like the others. `ingestEmailJobs` (M6) and `getDigest` (M7B) are HTTPS functions, not callables: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
+    Running it again for an existing callable changes nothing. When a later milestone adds a callable, add its name to this list. `lookup` (M6, 6B) is a callable like the others. `application` (M7, 7D) is a callable like the others. `deleteAllData` (M8, 8B) is a callable like the others (Part J step 99). `ingestEmailJobs` (M6) and `getDigest` (M7B) are HTTPS functions, not callables: Apps Script gets a 403 without this binding. Public invocation is safe, because the request's HMAC is checked first (Part G).
 29. **Check the functions.** Firebase console → **Build → Functions**: `parseCv`, `addFact` and `resetProfile` (and `scanNow` from M3) are listed in `europe-west2`.
 30. **Seed your criteria.** Open the app → **Criteria** → **Start from default criteria**. Change one value and save: it should say "Saved as version 2".
 31. **Read your CV.** **Profile** → upload your master CV (PDF or .docx, up to 5 MB) and wait for the summary. You should see **at least 60 facts**, each stating one claim and showing where it came from.
@@ -440,6 +440,58 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
 
 97. **Speed on your phone** (R7, `v0.8.1`, ADR-061). This is the pass or fail for R7. On your own phone, **Wi-Fi off**, on mobile data, no throttling, signed in, open Today in the browser and reload it 5 times. After each reload read `performance.getEntriesByName('hf:usable')[0].duration` through remote inspection: on Android, USB debugging and `chrome://inspect` on the laptop; on iPhone, Settings → Safari → Advanced → Web Inspector, then Safari → Develop → your phone. The **median of the 5 must be 2000 ms or less**. Paste the 5 numbers in the chat, with the lab median from step 89 beside them (recorded, not gating). If the phone median is over 2000 ms, stop and report it with the marks table (`console.table` from step 89).
 
+### Part J: Data lifecycle and backups (M8 8B, `v0.9.0`)
+Design: `docs/plans/m8b-plan.md`, ADR-057 (wipe and retention), ADR-058 (backups). Cloud Shell, project `P=hireframe-f6b03`, region `R=europe-west2`. Each command is checked in chat first. There is no new non-callable HTTPS function, so no temporary `cloudfunctions.admin` grant is needed.
+
+98. **Before the tag** (J1). Repeat the invoker check on `scheduledScan` (Part G step 77, C1 and C2). Release in a quiet window with nothing Generating. Then create the backup schedule now, so a backup exists before the wipe goes live (it has no code dependency):
+    ```bash
+    P=hireframe-f6b03
+    gcloud firestore backups schedules create --database='(default)' --recurrence=weekly --day-of-week=SUN --retention=8w --project=$P   # C15
+    gcloud firestore backups schedules list --database='(default)' --project=$P   # C16
+    ```
+    C16 must list one weekly schedule with `weeklyRecurrence: day: SUNDAY` and `retention: 4838400s` (8 weeks).
+    Then read the bucket's soft-delete window (C20c). SECURITY, this runbook and the wipe dialog all say deleted files stay restorable for 7 days:
+    ```bash
+    gcloud storage buckets describe gs://hireframe-f6b03.firebasestorage.app --format='value(soft_delete_policy)'   # C20c
+    ```
+    It must show `retentionDurationSeconds` 604800. If it differs, fix the "7 days" wording in SECURITY, this runbook and the wipe dialog before the tag.
+    Then merge the PR, push the `v0.9.0` tag and approve the deploy (**Actions → Deploy → Review deployments → Approve**, Part C step 27). Steps 99 onwards run after it.
+99. **After the deploy: `deleteAllData`** (J2, C10). Give the callable its public invoker as in Part C step 28 (`allUsers`; App Check and the owner check are the protection):
+    ```bash
+    P=hireframe-f6b03; R=europe-west2
+    gcloud functions add-invoker-policy-binding deleteAllData --region=$R --member=allUsers --project=$P   # C10
+    ```
+    Then, in the app, open System → Danger zone and check the preview shows counts. Do not run a wipe on live data to test it, and do not run a real wipe at all until C17 (step 102) shows a READY backup.
+100. **After the deploy: `purgeOldData`** (J3, C11 to C13). Its invoker must be **only** `hireframe-fns`, and it follows the step 94.4 pattern. In Cloud Shell:
+    ```bash
+    P=hireframe-f6b03; R=europe-west2
+    FNS=hireframe-fns@$P.iam.gserviceaccount.com
+    gcloud functions add-invoker-policy-binding purgeOldData --region=$R --member=serviceAccount:$FNS --project=$P   # C11
+    gcloud scheduler jobs describe firebase-schedule-purgeOldData-europe-west2 --location=$R --project=$P --format='value(schedule,timeZone,httpTarget.oidcToken.serviceAccountEmail)'   # C12
+    gcloud run services get-iam-policy purgeolddata --region=$R --project=$P --flatten='bindings[].members' --filter='bindings.role:roles/run.invoker' --format='value(bindings.members)'   # C13
+    ```
+    C12 must print `30 3 * * *`, `Europe/London` and `hireframe-fns@…`. C13 must print **only** `serviceAccount:hireframe-fns@…`: any other member makes later deploys that change the function fail. If the deploy said "Failed to set invoker function purgeOldData" and C12 finds no job, use the Recovery entry below (C13b). Optionally run the job once (`gcloud scheduler jobs run firebase-schedule-purgeOldData-europe-west2 --location=$R --project=$P`) and read the `purgeOldData` log for `retention.done`. Re-check `retention.done` a month after the first purge: `full: true` every day means a backlog.
+101. **Check the scheduler and indexes** (J4, C3, C14). In Cloud Shell:
+    ```bash
+    P=hireframe-f6b03; R=europe-west2
+    gcloud scheduler jobs list --location=$R --project=$P --format='table(name,schedule,timeZone,state,httpTarget.oidcToken.serviceAccountEmail)'   # C3
+    for FN in deleteAllData purgeOldData; do gcloud functions describe $FN --region=$R --gen2 --project=$P --format='value(serviceConfig.maxInstanceCount,serviceConfig.timeoutSeconds,serviceConfig.availableMemory,serviceConfig.serviceAccountEmail,serviceConfig.maxInstanceRequestConcurrency)'; done   # C14
+    ```
+    C3 must list exactly three jobs (`scheduledScan`, `generateCvs`, `purgeOldData`), all ENABLED. C14 must show `maxInstanceCount` 1 for both, timeout 120 for `deleteAllData` and 300 for `purgeOldData`, memory `512MiB` and service account `hireframe-fns@…` for both, and, for `deleteAllData`, `maxInstanceRequestConcurrency` 1. In **Firestore → Indexes**, `jobs (verdict, judgedAt ascending)` must be **Enabled** before the first 03:30 run, or the run logs `retention.failed` and tries again the next day.
+102. **Confirm the backup** (J5; the schedule was created in step 98). After the first Sunday (C17): `gcloud firestore backups list --location=europe-west2 --project=hireframe-f6b03`. Note the newest `<BACKUP_ID>` and that its state is READY.
+103. **Restore drill** (J6, once, a quiet weekend afternoon). First run `gcloud firestore databases restore --help` once to confirm the flags. Never restore over `(default)`.
+    ```bash
+    P=hireframe-f6b03; R=europe-west2
+    gcloud firestore databases restore --source-backup=projects/$P/locations/$R/backups/<BACKUP_ID> --destination-database=restore-drill --project=$P   # C18
+    gcloud firestore operations list --database=restore-drill --project=$P   # C18a: repeat until done
+    gcloud firestore databases describe --database=restore-drill --project=$P   # C19
+    ```
+    In the Firebase console pick database `restore-drill`: **Rules** must deny everything (publish `allow read, write: if false;` there first if not), and `jobs`, `runs`, `profile/main/facts` and `criteria` must have documents with counts close to `(default)`. Then delete it and confirm only `(default)` remains:
+    ```bash
+    gcloud firestore databases delete --database=restore-drill --project=$P   # C20
+    gcloud firestore databases list --project=$P --format='value(name)'
+    ```
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -496,6 +548,19 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
 - **Runs keep stopping early with "run budget used":** System shows a reason per stage (Triage, Deep reads). A stage stops on the budget only when its next call can't fit even with nothing in flight, so the backlog is larger than one run's lease. It catches up over a few runs. To go faster, raise `config/app.monthlyCapPence` or set `config/app.funnel.runBudgetPence` (Part E step 72).
 - **CI fails with "recordings stale":** a prompt, schema or golden case changed. Run `LIVE=1 npm run eval` locally and commit `evals/recordings.jsonl` (`evals/README.md`).
 - **"The monthly AI spend cap has been reached":** check `usage/{yyyy-mm}` in Firestore. Raise `config/app.monthlyCapPence` deliberately, or wait for next month. Stale `reservations` entries expire on their own after 15 minutes.
+- **`purgeOldData` has no schedule after its first deploy** (C13b; "Failed to set invoker function purgeOldData"). The same cause and fix as `generateCvs`. In Cloud Shell:
+  ```bash
+  P=hireframe-f6b03; R=europe-west2; FN=purgeOldData
+  FNS=hireframe-fns@$P.iam.gserviceaccount.com
+  gcloud functions add-invoker-policy-binding $FN --region=$R --member=serviceAccount:$FNS --project=$P
+  gcloud scheduler jobs create http firebase-schedule-$FN-$R --location=$R --schedule='30 3 * * *' --time-zone='Europe/London' --uri="$(gcloud functions describe $FN --region=$R --gen2 --project=$P --format='value(serviceConfig.uri)')" --http-method=POST --oidc-service-account-email=$FNS --attempt-deadline=300s --max-retry-attempts=0 --project=$P   # C13b
+  gcloud scheduler jobs run firebase-schedule-$FN-$R --location=$R --project=$P
+  ```
+  - Use exactly this job name; the invoker must be **only** `hireframe-fns`.
+  - Then re-run C12 and C13 and expect step 100's output.
+- **Delete all my data stopped part-way:** reopen the dialog and press **Continue**; every pass is safe to rerun. The scan lock (`wipe` holder) goes stale after 3 minutes if the page was closed, so scans resume by themselves.
+- **Full erase after a wipe:** backups keep the old data for 8 weeks, and Storage soft delete keeps deleted CV files (and uploads, when ticked) restorable for 7 days. To erase the backups now, list them (C17) and delete each (C20b): `gcloud firestore backups delete --location=europe-west2 --backup=<BACKUP_ID> --project=hireframe-f6b03`. This runbook can't erase soft-deleted files early (`gcloud storage ls --soft-deleted` lists them); they expire by themselves after 7 days.
+- **Data lost:** restore the newest READY backup into a new database named `restore-<date>` (step 103, C18 with that name), read what is needed there, then stop and decide with Claude how to bring it back. No automated path back is built.
 
 ## Local setup (per machine)
 1. **Node 22:** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.

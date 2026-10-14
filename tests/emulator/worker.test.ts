@@ -30,6 +30,7 @@ import { cvWorkerDeps } from '../../functions/src/applications/worker-wiring.js'
 import { FAKE_CV_FACTS } from '../../functions/src/fixtures/fake-cv-response.js';
 import { llmCall } from '../../functions/src/llm/call.js';
 import { fakeTransport } from '../../functions/src/llm/fake-transport.js';
+import { liveLockHolder } from '../../functions/src/scan/store.js';
 import type { LlmTransport } from '../../functions/src/llm/transport.js';
 import { firestoreUsageStore } from '../../functions/src/llm/usage-store.js';
 import {
@@ -152,6 +153,7 @@ function applicationDeps() {
     llm: <T>(input: Parameters<typeof llmCall<T>>[1]) => llmCall(llm, input),
     deleteFiles: bucketFileDeleter(bucket()),
     listFiles: bucketFileLister(bucket()),
+    lockHolder: () => liveLockHolder(db, NOW),
     now: () => NOW,
   };
 }
@@ -327,6 +329,24 @@ describe('the CV worker on the emulator', () => {
     const summary = await runCvWorker(workerDeps(transport));
     expect(summary.read).toBe(0);
     expect(transport.sends()).toBe(0);
+    expect((await bucket().getFiles({ prefix: 'cvs/' }))[0]).toHaveLength(0);
+  });
+
+  it('ends lost and removes its files when the application is deleted while the model writes (a wipe, ADR-057)', async () => {
+    await startGenerating();
+    const inner = countingTransport();
+    const wiping: LlmTransport = {
+      countTokens: (request) => inner.countTokens(request),
+      async send(request) {
+        // The wipe's first step deletes the application while the CV is being written.
+        await db.doc(PATHS.application(JOB_ID)).delete();
+        return inner.send(request);
+      },
+    };
+    const summary = await runCvWorker(workerDeps(wiping));
+    expect(summary).toMatchObject({ read: 1, ready: 0, lost: 1 });
+    expect((await db.doc(PATHS.application(JOB_ID)).get()).exists).toBe(false);
+    expect((await db.collection(COLLECTIONS.cvs).count().get()).data().count).toBe(0);
     expect((await bucket().getFiles({ prefix: 'cvs/' }))[0]).toHaveLength(0);
   });
 });
