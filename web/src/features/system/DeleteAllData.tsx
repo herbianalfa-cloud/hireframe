@@ -212,7 +212,8 @@ function Form({ onFinished }: { onFinished: () => void }) {
           lost.
         </li>
         <li>
-          Backups keep data for up to 8 weeks. The runbook&apos;s full-erase step removes those too.
+          Backups keep data for up to 8 weeks, and deleted files stay restorable for 7 days. The
+          runbook&apos;s full-erase step removes the backups.
         </li>
         <li>This can&apos;t be undone.</li>
       </ul>
