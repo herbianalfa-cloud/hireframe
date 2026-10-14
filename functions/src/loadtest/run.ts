@@ -134,7 +134,7 @@ async function seedQueuedJobs(db: Firestore, data: LoadData, now: Date): Promise
       pass: true,
       triageScore: state === 'alert' ? 9 : 7,
     };
-    const s2 = s2PassPatch({ triage, fingerprint: 'load-test', costPence: 0 }, {});
+    const s2 = s2PassPatch({ triage, fingerprint: 'a'.repeat(64), costPence: 0 }, {});
     const merged = { set: { ...s1.set, ...s2.set }, clear: [] as typeof s1.clear };
     updates.push({
       jobId,
