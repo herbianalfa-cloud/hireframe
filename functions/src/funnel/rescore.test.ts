@@ -136,4 +136,18 @@ describe('rescoreHandler', () => {
     expect(error).toBeInstanceOf(HttpsError);
     expect(error).toMatchObject({ code: 'failed-precondition' });
   });
+
+  it('says the wipe wording while a wipe holds the lock, and keeps the scan wording for a scan', async () => {
+    const wipe: unknown = await rescoreHandler({}, () =>
+      Promise.resolve({ status: 'busy', holder: 'wipe' }),
+    ).catch((e: unknown) => e);
+    expect(wipe).toMatchObject({
+      code: 'failed-precondition',
+      message: 'Deleting your data, try again when it has finished.',
+    });
+    const scan: unknown = await rescoreHandler({}, () =>
+      Promise.resolve({ status: 'busy', holder: 'scan' }),
+    ).catch((e: unknown) => e);
+    expect(scan).toMatchObject({ message: 'A scan is running. Try again when it finishes.' });
+  });
 });
