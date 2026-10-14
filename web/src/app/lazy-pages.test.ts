@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { prefetchToday } from '@/services/dashboard';
 
-import { loadDashboardService, loadTodayPage, startTodayPrefetch } from './lazy-pages';
+import {
+  loadDashboardService,
+  loadedTodayPage,
+  loadTodayPage,
+  startTodayPrefetch,
+} from './lazy-pages';
 
 vi.mock('@/services/dashboard', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -14,6 +19,11 @@ describe('loadTodayPage', () => {
     const first = loadTodayPage();
     expect(loadTodayPage()).toBe(first);
     expect(await first).toHaveProperty('TodayPage');
+  });
+
+  it('exposes the module once the chunk has loaded', async () => {
+    const module = await loadTodayPage();
+    expect(loadedTodayPage()).toBe(module);
   });
 });
 

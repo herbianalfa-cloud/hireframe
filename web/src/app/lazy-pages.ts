@@ -1,14 +1,27 @@
 const importToday = () => import('@/features/today/TodayPage');
 
 let todayPage: ReturnType<typeof importToday> | undefined;
+let todayModule: Awaited<ReturnType<typeof importToday>> | undefined;
 
 /**
  * Loads the Today screen's chunk once. `lazy()` and the sign-in prefetch (ADR-050) both call
  * this, so there is one import promise and the chunk is fetched while the owner check runs.
  */
 export function loadTodayPage(): ReturnType<typeof importToday> {
-  todayPage ??= importToday();
+  todayPage ??= importToday().then((module) => {
+    todayModule = module;
+    return module;
+  });
   return todayPage;
+}
+
+/**
+ * The Today module once its chunk has loaded, else undefined. `lazy()` always suspends on its
+ * first render, and React holds the reveal for 300 ms after a fallback was shown, so Today
+ * renders this component directly when it is already here (ADR-061).
+ */
+export function loadedTodayPage(): Awaited<ReturnType<typeof importToday>> | undefined {
+  return todayModule;
 }
 
 const importDashboard = () => import('@/services/dashboard');
