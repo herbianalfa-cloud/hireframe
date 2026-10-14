@@ -37,6 +37,12 @@ All notable changes. Format: Keep a Changelog, SemVer.
 - **Docs:** RUNBOOK Part J has each command and its expected output (C10 to C16, with the backup schedule moved before the tag), the Storage soft-delete clause in SECURITY, the RUNBOOK and the dialog, the ARCHITECTURE model lines, and a ROADMAP parking-lot line for the disabled-source quota.
 - Tests: the owner check before input, the lock race, the profile deadline and exact cap, the wipe wording on re-score, the purged-description dedupe, retention ties across a page boundary with mixed-case IDs and malformed docs, the dialog closing mid-run, the import walk from `index.ts` away from `loadtest/`, and a post-wipe scan at Adzuna's kept daily limit.
 
+
+### Fixed (PR #37 fix-commit review, `docs/plans/m8b-review-2.md`)
+- **RUNBOOK Part J:** step 98 now has the merge, tag and deploy approval, and a required soft-delete window check (C20c, expecting `retentionDurationSeconds` 604800); `deleteAllData` is in Part C step 28's invoker list; every `gcloud` line carries `--project`; expected outputs for C14 and C16 and a re-check after C13b.
+- **Retention** logs `retention.invalid_doc` with `{ count }`, not a job ID. The wipe dialog hides its X while passes run.
+- Tests: emulator cover for the purged-description mapping and the S1 restore path.
+
 ### Changed
 - `weeklyBackup` (never built) is replaced by Firestore managed backups (ADR-058).
 - Fresha's seed row is `keep-none` (moved to Teamtailor, which isn't supported); ROADMAP parks a Teamtailor source.
