@@ -8,14 +8,14 @@ import { z } from 'zod';
 export const BudgetMessageSchema = z
   .object({
     budgetDisplayName: z.string().min(1),
-    costAmount: z.number().finite().nonnegative(),
-    budgetAmount: z.number().finite().positive(),
+    costAmount: z.number().nonnegative(),
+    budgetAmount: z.number().positive(),
     currencyCode: z.string().min(1),
     costIntervalStart: z.string().min(1),
-    alertThresholdExceeded: z.number().finite().optional(),
-    forecastThresholdExceeded: z.number().finite().optional(),
+    alertThresholdExceeded: z.number().optional(),
+    forecastThresholdExceeded: z.number().optional(),
   })
-  .passthrough();
+  .loose();
 
 export type BudgetMessage = z.infer<typeof BudgetMessageSchema>;
 

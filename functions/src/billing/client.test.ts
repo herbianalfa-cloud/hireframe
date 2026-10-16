@@ -30,7 +30,7 @@ describe('billing client (ADR-059)', () => {
     const g = fakeGoogle(okRoutes(true));
     await createBillingClient(g.deps).billingEnabled(PROJECT);
     for (const call of g.calls) {
-      const sent = call.headers['Authorization'];
+      const sent = call.headers.Authorization;
       if (call.url.startsWith('https://cloudbilling.googleapis.com/')) {
         expect(sent).toBe(`Bearer ${TOKEN}`);
       } else {

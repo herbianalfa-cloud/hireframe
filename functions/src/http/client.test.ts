@@ -385,7 +385,7 @@ describe('http client: PUT and plain http (ADR-059)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ method: 'PUT', body: '{"a":""}' });
     expect(calls[0]?.headers['Content-Type']).toBe('application/json');
-    expect(calls[0]?.headers['Authorization']).toBe('Bearer t');
+    expect(calls[0]?.headers.Authorization).toBe('Bearer t');
   });
 
   it('retries a failed PUT at most 3 times, then gives up', async () => {

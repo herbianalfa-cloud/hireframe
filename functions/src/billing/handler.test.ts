@@ -71,10 +71,7 @@ describe('runGuard: decisions that need no network, armed or not', () => {
     await runGuard(data({ budgetDisplayName: 'hireframe-5' }), deps);
     await runGuard(data({ currencyCode: 'USD' }), deps);
     expect(events()).toEqual(['billing_guard.ignored', 'billing_guard.ignored']);
-    expect(logged.map((entry) => entry.fields['reason'])).toEqual([
-      'wrong_budget',
-      'wrong_currency',
-    ]);
+    expect(logged.map((entry) => entry.fields.reason)).toEqual(['wrong_budget', 'wrong_currency']);
     expect(g.calls).toHaveLength(0);
   });
 
@@ -112,15 +109,17 @@ describe('runGuard: armed', () => {
   });
 
   it('uses only the injected client, so no project literal can be touched', async () => {
+    const billingEnabled = vi.fn(() => Promise.resolve(true));
+    const disableBilling = vi.fn(() => Promise.resolve({ stillEnabled: false }));
     const client: BillingClient = {
-      projectId: vi.fn(() => Promise.resolve('some-other-proj')),
-      billingEnabled: vi.fn(() => Promise.resolve(true)),
-      disableBilling: vi.fn(() => Promise.resolve({ stillEnabled: false })),
+      projectId: () => Promise.resolve('some-other-proj'),
+      billingEnabled,
+      disableBilling,
     };
     await runGuard(data(), { mode: 'armed', billing: () => client });
-    expect(client.billingEnabled).toHaveBeenCalledWith('some-other-proj');
-    expect(client.disableBilling).toHaveBeenCalledTimes(1);
-    expect(client.disableBilling).toHaveBeenCalledWith('some-other-proj');
+    expect(billingEnabled).toHaveBeenCalledWith('some-other-proj');
+    expect(disableBilling).toHaveBeenCalledTimes(1);
+    expect(disableBilling).toHaveBeenCalledWith('some-other-proj');
   });
 
   it('logs failed with code permission_denied on a 403', async () => {

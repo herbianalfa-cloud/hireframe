@@ -97,7 +97,7 @@ describe('parseBudgetMessage', () => {
   it.each(['budgetDisplayName', 'costAmount', 'budgetAmount', 'currencyCode', 'costIntervalStart'])(
     'rejects a message without %s',
     (field) => {
-      const { [field]: _removed, ...rest } = message() as Record<string, unknown>;
+      const rest = Object.fromEntries(Object.entries(message()).filter(([key]) => key !== field));
       expect(parseBudgetMessage(encode(rest))).toBeNull();
     },
   );

@@ -17,14 +17,14 @@ import { createHttpClient, type HttpLog } from '../http/client.js';
 const METADATA = 'http://metadata.google.internal/computeMetadata/v1';
 const BILLING_API = 'https://cloudbilling.googleapis.com/v1';
 
-const ProjectSchema = z.object({ projectId: z.string() }).passthrough();
-const TokenSchema = z.object({ access_token: z.string().min(1) }).passthrough();
+const ProjectSchema = z.object({ projectId: z.string() }).loose();
+const TokenSchema = z.object({ access_token: z.string().min(1) }).loose();
 const BillingInfoSchema = z
   .object({
     billingAccountName: z.string().optional(),
     billingEnabled: z.boolean().optional(),
   })
-  .passthrough();
+  .loose();
 
 /** A GCP project ID: 6 to 30 characters, lower case, digits, hyphens. Checked before it enters a URL. */
 const PROJECT_ID = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
