@@ -12,6 +12,7 @@ import { collection, getCountFromServer } from 'firebase/firestore';
 import { callOwnerCallable } from './callable';
 import { getFirebase } from './firebase';
 import { isTransient, withRetry, withTimeout } from './resilience';
+import { tally } from './reads';
 
 /**
  * Delete all my data (ADR-057). One call is one bounded server pass; `runWipe` repeats it until
@@ -115,7 +116,12 @@ export const PROFILE_PREVIEW_COUNTS = [
 export async function previewCount(path: string): Promise<number> {
   const { db } = await getFirebase();
   const snapshot = await withRetry(
-    () => withTimeout(getCountFromServer(collection(db, path)), 10_000, `count ${path}`),
+    () =>
+      withTimeout(
+        tally(getCountFromServer(collection(db, path)), 'wipe:getCountFromServer'),
+        10_000,
+        `count ${path}`,
+      ),
     { label: 'wipe.count', isRetryable: isTransient },
   );
   return snapshot.data().count;

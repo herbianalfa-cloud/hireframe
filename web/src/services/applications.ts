@@ -16,15 +16,7 @@ import {
   type CvFileKind,
   type QuerySpec,
 } from '@hireframe/shared';
-import {
-  collection,
-  doc,
-  getCountFromServer,
-  getDoc,
-  limit,
-  onSnapshot,
-  query,
-} from 'firebase/firestore';
+import { collection, doc, getCountFromServer, getDoc, limit, query } from 'firebase/firestore';
 
 import { summarySpecs } from './dashboard';
 import { callOwnerCallable, isAppCheckReplay } from './callable';
@@ -34,6 +26,7 @@ import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints } from './query-spec';
 import { isTransient, TimeoutError, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { tally, watchSnapshot } from './reads';
 
 /**
  * Application pipeline services (M7 7D.3, PRD R10). Components use these, never Firebase.
@@ -87,7 +80,7 @@ export function watchStage(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         query(
           collection(db, COLLECTIONS.applications),
           ...specConstraints(stageSpec(stage)),
@@ -127,7 +120,7 @@ export function watchApplication(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         doc(db, PATHS.application(jobId)),
         (snapshot) => {
           if (!snapshot.exists()) {
@@ -166,7 +159,10 @@ export async function loadAppliedThisWeek(now: Date): Promise<number> {
   const snapshot = await withRetry(
     () =>
       withTimeout(
-        getCountFromServer(query(collection(db, spec.collection), ...specConstraints(spec))),
+        tally(
+          getCountFromServer(query(collection(db, spec.collection), ...specConstraints(spec))),
+          'applications:getCountFromServer',
+        ),
         READ_TIMEOUT_MS,
         'applied this week',
       ),
@@ -291,7 +287,12 @@ function storagePathFor(cv: CvDoc, kind: CvFileKind, format: CvFileFormat): stri
 export async function loadCvDoc(cvId: string): Promise<CvDoc | null> {
   const { db } = await getFirebase();
   const snapshot = await withRetry(
-    () => withTimeout(getDoc(doc(db, PATHS.cv(cvId))), READ_TIMEOUT_MS, 'cv doc'),
+    () =>
+      withTimeout(
+        tally(getDoc(doc(db, PATHS.cv(cvId))), 'applications:getDoc'),
+        READ_TIMEOUT_MS,
+        'cv doc',
+      ),
     { label: 'applications.cv_doc', isRetryable: isTransient },
   );
   if (!snapshot.exists()) return null;

@@ -17,7 +17,6 @@ import {
   doc,
   getCountFromServer,
   limit,
-  onSnapshot,
   orderBy,
   query,
   where,
@@ -30,6 +29,7 @@ import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints, type QuerySpec } from './query-spec';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { tally, watchSnapshot } from './reads';
 
 /**
  * System screen services (PRD R4, R12; ADR-029): source health, recent runs, job boards that no longer exist,
@@ -65,7 +65,7 @@ export function watchSources(callback: (state: LiveState<SourceView[]>) => void)
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         collection(db, COLLECTIONS.sources),
         (snapshot) => {
           const sources: SourceView[] = [];
@@ -101,7 +101,7 @@ export function watchRecentRuns(callback: (state: LiveState<RunView[]>) => void)
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         query(collection(db, COLLECTIONS.runs), orderBy('startedAt', 'desc'), limit(5)),
         (snapshot) => {
           const runs: RunView[] = [];
@@ -136,7 +136,7 @@ export function watchGoneBoards(callback: (state: LiveState<BoardView[]>) => voi
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         query(collection(db, COLLECTIONS.companies), where('lastScan.status', '==', 'not_found')),
         (snapshot) => {
           const boards: BoardView[] = [];
@@ -169,7 +169,7 @@ export function watchEmailHealth(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         doc(db, COLLECTIONS.sources, EMAIL_SOURCE),
         (snapshot) => {
           if (!snapshot.exists()) {
@@ -207,8 +207,11 @@ export async function countWaitingForDescription(): Promise<number> {
   const snapshot = await withRetry(
     () =>
       withTimeout(
-        getCountFromServer(
-          query(collection(db, COLLECTIONS.jobs), ...specConstraints(needsDescriptionCountSpec)),
+        tally(
+          getCountFromServer(
+            query(collection(db, COLLECTIONS.jobs), ...specConstraints(needsDescriptionCountSpec)),
+          ),
+          'system:getCountFromServer',
         ),
         10_000,
         'waiting for description',
@@ -222,7 +225,12 @@ export async function countWaitingForDescription(): Promise<number> {
 export async function countJobs(): Promise<number> {
   const { db } = await getFirebase();
   const snapshot = await withRetry(
-    () => withTimeout(getCountFromServer(collection(db, COLLECTIONS.jobs)), 10_000, 'job count'),
+    () =>
+      withTimeout(
+        tally(getCountFromServer(collection(db, COLLECTIONS.jobs)), 'system:getCountFromServer'),
+        10_000,
+        'job count',
+      ),
     { label: 'system.count_jobs', isRetryable: isTransient },
   );
   return snapshot.data().count;

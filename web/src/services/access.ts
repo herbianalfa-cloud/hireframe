@@ -7,6 +7,7 @@ import { getFirebase } from './firebase';
 import { errorCode, logError } from './log';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { tally } from './reads';
 
 /**
  * Owner check for the UI (ADR-011). Firestore rules are the real guard; this decides
@@ -32,7 +33,7 @@ export function evaluateAccess(uid: string, read: AppConfigRead): Access {
 
 async function readAppConfigFromFirestore(): Promise<AppConfigRead> {
   const { db } = await getFirebase();
-  const snapshot = await getDoc(doc(db, DOCS.appConfig));
+  const snapshot = await tally(getDoc(doc(db, DOCS.appConfig)), 'access:getDoc');
   return snapshot.exists() ? { exists: true, data: snapshot.data() } : { exists: false };
 }
 

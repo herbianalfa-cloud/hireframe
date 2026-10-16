@@ -28,7 +28,6 @@ import {
   collection,
   doc,
   limit,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -54,6 +53,7 @@ import { getFirebase, getStorageClient } from './firebase';
 import { errorCode, logError } from './log';
 import { withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { watchSnapshot } from './reads';
 
 /**
  * Profile brain services (PRD R2). Components use these, never Firebase directly.
@@ -108,7 +108,7 @@ export function watchFacts(callback: (state: LiveState<FactView[]>) => void): Un
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         query(collection(db, PATHS.facts), orderBy('createdAt', 'desc')),
         (snapshot) => {
           const facts: FactView[] = [];
@@ -145,7 +145,7 @@ export function watchDocuments(callback: (state: LiveState<DocumentView[]>) => v
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         query(collection(db, PATHS.documents), orderBy('createdAt', 'desc'), limit(10)),
         (snapshot) => {
           const documents: DocumentView[] = [];
@@ -186,7 +186,7 @@ export function watchFactVersions(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         collection(db, PATHS.factVersions(factId)),
         (snapshot) => {
           const versions: VersionView[] = [];
@@ -370,7 +370,7 @@ export function watchWorkRights(callback: (state: LiveState<WorkRightsView>) => 
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         doc(db, DOCS.profileMain),
         (snapshot) => {
           if (!snapshot.exists()) {
@@ -442,7 +442,7 @@ export function watchCvHeader(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         doc(db, DOCS.cvHeader),
         (snapshot) => {
           if (!snapshot.exists()) {

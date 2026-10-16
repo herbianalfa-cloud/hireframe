@@ -13,7 +13,6 @@ import {
   getDoc,
   getDocs,
   limit,
-  onSnapshot,
   query,
   serverTimestamp,
   startAfter,
@@ -36,6 +35,7 @@ import { specConstraints, type QuerySpec } from './query-spec';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { tally, watchSnapshot } from './reads';
 
 /**
  * Job services (PRD R7, ADR-038). Components use these, never Firebase directly.
@@ -128,7 +128,7 @@ export async function loadJobsPage(
   const snapshot = await withRetry(
     () =>
       withTimeout(
-        getDocs(query(collection(db, COLLECTIONS.jobs), ...constraints)),
+        tally(getDocs(query(collection(db, COLLECTIONS.jobs), ...constraints)), 'jobs:getDocs'),
         READ_TIMEOUT_MS,
         'jobs page',
       ),
@@ -160,7 +160,7 @@ export async function loadJobsWindow(filters: JobFilters): Promise<JobsWindow> {
   const snapshot = await withRetry(
     () =>
       withTimeout(
-        getDocs(query(collection(db, COLLECTIONS.jobs), ...constraints)),
+        tally(getDocs(query(collection(db, COLLECTIONS.jobs), ...constraints)), 'jobs:getDocs'),
         READ_TIMEOUT_MS,
         'jobs window',
       ),
@@ -179,7 +179,7 @@ export function watchJob(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         doc(db, PATHS.job(jobId)),
         (snapshot) => {
           if (!snapshot.exists()) {
@@ -211,7 +211,11 @@ export async function loadJobDescription(jobId: string): Promise<JobDescription 
   const { db } = await getFirebase();
   const snapshot = await withRetry(
     () =>
-      withTimeout(getDoc(doc(db, PATHS.jobDescription(jobId))), READ_TIMEOUT_MS, 'job description'),
+      withTimeout(
+        tally(getDoc(doc(db, PATHS.jobDescription(jobId))), 'jobs:getDoc'),
+        READ_TIMEOUT_MS,
+        'job description',
+      ),
     { label: 'jobs.description', isRetryable: isTransient },
   );
   if (!snapshot.exists()) return null;
@@ -244,7 +248,12 @@ async function commitAction(jobId: string, write: JobActionWrite): Promise<void>
 async function loadApplicationRaw(jobId: string): Promise<DocumentData | undefined> {
   const { db } = await getFirebase();
   const snapshot = await withRetry(
-    () => withTimeout(getDoc(doc(db, PATHS.application(jobId))), READ_TIMEOUT_MS, 'application'),
+    () =>
+      withTimeout(
+        tally(getDoc(doc(db, PATHS.application(jobId))), 'jobs:getDoc'),
+        READ_TIMEOUT_MS,
+        'application',
+      ),
     { label: 'jobs.application', isRetryable: isTransient },
   );
   return snapshot.exists() ? snapshot.data() : undefined;

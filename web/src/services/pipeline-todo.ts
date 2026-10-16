@@ -1,9 +1,10 @@
 import { COLLECTIONS, TODO_COUNT_LIMIT, todoApplicationsSpec } from '@hireframe/shared';
-import { collection, limit, onSnapshot, query } from 'firebase/firestore';
+import { collection, limit, query } from 'firebase/firestore';
 
 import { getFirebase } from './firebase';
 import { errorCode, logError } from './log';
 import { specConstraints } from './query-spec';
+import { watchSnapshot } from './reads';
 
 /**
  * The pipeline's "things to do" count (M7 7D.4): applications waiting on the owner (a question to
@@ -33,7 +34,7 @@ function start(): () => void {
   getFirebase().then(
     ({ db }) => {
       if (cancelled) return;
-      unsubscribe = onSnapshot(
+      unsubscribe = watchSnapshot(
         query(
           collection(db, COLLECTIONS.applications),
           ...specConstraints(todoApplicationsSpec),

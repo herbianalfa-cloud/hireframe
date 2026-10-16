@@ -17,7 +17,7 @@ import {
   type LookupTarget,
   type PasteLink,
 } from '@hireframe/shared';
-import { collection, getDocs, limit, onSnapshot, query, type Firestore } from 'firebase/firestore';
+import { collection, getDocs, limit, query, type Firestore } from 'firebase/firestore';
 
 import { callOwnerCallable } from './callable';
 import { getFirebase } from './firebase';
@@ -26,6 +26,7 @@ import { errorCode, logError } from './log';
 import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints, type QuerySpec } from './query-spec';
 import { isTransient, withRetry, withTimeout } from './resilience';
+import { tally, watchSnapshot } from './reads';
 
 /**
  * Lookup services (PRD R8, ADR-049). Matching is a plain read of `jobs` (the owner can read
@@ -96,7 +97,10 @@ async function readKeys(keys: readonly string[]): Promise<JobView[]> {
       withRetry(
         () =>
           withTimeout(
-            getDocs(query(jobsCollection(db), ...specConstraints(lookupKeysSpec(chunk)))),
+            tally(
+              getDocs(query(jobsCollection(db), ...specConstraints(lookupKeysSpec(chunk)))),
+              'lookup:getDocs',
+            ),
             READ_TIMEOUT_MS,
             'lookup keys',
           ),
@@ -112,7 +116,10 @@ async function readUrl(url: string): Promise<JobView | null> {
   const snapshot = await withRetry(
     () =>
       withTimeout(
-        getDocs(query(jobsCollection(db), ...specConstraints(lookupUrlSpec(url)), limit(1))),
+        tally(
+          getDocs(query(jobsCollection(db), ...specConstraints(lookupUrlSpec(url)), limit(1))),
+          'lookup:getDocs',
+        ),
         READ_TIMEOUT_MS,
         'lookup url',
       ),
@@ -156,7 +163,7 @@ export function watchWaitingJobs(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         query(jobsCollection(db), ...specConstraints(needsDescriptionSpec), limit(pageSize)),
         (snapshot) => {
           const { jobs, invalid } = parseJobs(snapshot.docs);

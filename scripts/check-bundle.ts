@@ -3,11 +3,14 @@
  * - no JS chunk over 500 kB minified (Vite's own warning threshold);
  * - the JS every visit loads (the entry script plus its modulepreloads) stays under the
  *   gzip budget. Lazy screens and the Functions/Storage SDKs don't count.
+ * - the dev-only Firestore read counter (C5) is tree-shaken: its warning text is in no chunk.
  * It prints each initial file's gzip size, largest first.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+
+import { READ_WARNING } from '../web/src/services/read-counter.ts';
 
 const DIST = 'web/dist';
 const MAX_CHUNK_BYTES = 500 * 1000;
@@ -20,6 +23,9 @@ const chunks = readdirSync(join(DIST, 'assets')).filter((name) => name.endsWith(
 for (const name of chunks) {
   const size = readFileSync(join(DIST, 'assets', name)).length;
   if (size > MAX_CHUNK_BYTES) failures.push(`${name} is ${kB(size)} (max ${kB(MAX_CHUNK_BYTES)})`);
+  if (readFileSync(join(DIST, 'assets', name), 'utf8').includes(READ_WARNING)) {
+    failures.push(`${name} contains the dev-only read counter's warning (C5)`);
+  }
 }
 
 const html = readFileSync(join(DIST, 'index.html'), 'utf8');
