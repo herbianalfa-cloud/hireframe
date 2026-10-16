@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-import { READ_WARNING } from '../web/src/services/read-counter.ts';
+import { READ_WARNING } from '../web/src/services/read-warning.ts';
 
 const DIST = 'web/dist';
 const MAX_CHUNK_BYTES = 500 * 1000;

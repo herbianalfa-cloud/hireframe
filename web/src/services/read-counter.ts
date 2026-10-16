@@ -6,9 +6,11 @@
  * for the warning text.
  */
 
+import { READ_WARNING } from './read-warning';
+
+export { READ_WARNING };
 export const READ_LIMIT_PER_MINUTE = 200;
 export const READ_WINDOW_MS = 60_000;
-export const READ_WARNING = 'Firestore reads above 200 a minute (dev only)';
 
 export interface ReadCounter {
   /** Records `count` document reads for `label`; warns when the minute's total passes the limit. */
