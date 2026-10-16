@@ -3,7 +3,7 @@
 Branch `feat/m8c1-billing-guard`, pushed. No PR yet. Plan: `docs/plans/m8c-plan.md` §2.
 
 ## Done (7 commits after the plan)
-1. `feat: billing guard config and mode`: `BILLING_GUARD`, `PLAIN_HTTP_HOSTS`-free; `guardMode(env)`; `billingGuard: 60` in the shared timeout table; `config.test.ts`.
+1. `feat: billing guard config and mode`: `BILLING_GUARD`, `guardMode(env)`; `billingGuard: 60` in the shared timeout table; `config.test.ts`.
 2. `feat: billing guard budget message schema and decision rule`: `billing/schema.ts` (`parseBudgetMessage`), `billing/decide.ts`, `decide.test.ts`.
 3. `feat: http client PUT and plain http for the metadata server only`: `putJson`, exact-host `plainHttpHosts` (default `PLAIN_HTTP_HOSTS` = `metadata.google.internal`), `insecure_url` error code; forbidden-host refusal runs first on every path; 10 new client tests.
 4. `feat: billing client and guard handler`: `billing/client.ts`, `billing/handler.ts` (`runGuard`), `billing/testing.ts` (test helpers), `client.test.ts`, `handler.test.ts`; seven `billing_guard.*` events added to `log.ts`.
