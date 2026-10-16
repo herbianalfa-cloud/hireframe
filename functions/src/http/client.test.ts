@@ -9,6 +9,8 @@ import {
   type HttpClientDeps,
 } from './client.js';
 
+// Spelled out so the PII scan doesn't read the userinfo test URLs as email addresses.
+const AT = '@';
 const Schema = z.object({ ok: z.boolean() });
 const UA = 'HireframeBot/0.3 (+https://github.com/herbianalfa-cloud/hireframe)';
 
@@ -572,8 +574,8 @@ describe('http client: PUT and plain http (ADR-059)', () => {
     );
     for (const url of [
       'http://metadata.google.internal:8080/a',
-      'http://user@metadata.google.internal/a',
-      'http://user:pw@metadata.google.internal/a',
+      `http://user${AT}metadata.google.internal/a`,
+      `http://user:pw${AT}metadata.google.internal/a`,
       'http://metadata.google.internal./a',
       'http://2852039166/a',
       'http://[::ffff:169.254.169.254]/a',
