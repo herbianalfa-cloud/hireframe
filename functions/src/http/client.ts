@@ -11,7 +11,7 @@ import { ALLOW_ALL, robotsFromResponse, type RobotsPolicy } from './robots.js';
  * - Times out every request, stops at the run deadline, and makes at most 3 attempts with
  *   exponential backoff on 429/5xx/timeouts/network errors (Retry-After honoured up to a cap).
  * - zod-parses every JSON response. 404s and schema errors are never retried.
- * Logging is injected (fixed event names, host + path label only, never a URL: Adzuna's key is
+ * Logging is injected (fixed event names; host, path and label only, never a URL or query: Adzuna's key is
  * in the query string), so the detect-ats script can use this without Firebase.
  */
 
@@ -234,7 +234,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
         throw new HttpError('http_status', response.status);
       }
       if (isForbidden(next.hostname)) {
-        deps.log('warn', 'http.forbidden_host', { host: next.host, label });
+        deps.log('warn', 'http.forbidden_host', { host: next.host, path: next.pathname, label });
         throw new HttpError('forbidden_host');
       }
       target = next;
@@ -307,7 +307,8 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   ) {
     const url = new URL(rawUrl);
     const policy = deps.hostPolicy(url.host);
-    const fields = { host: url.host, label: options.label };
+    // Host and path only: Adzuna's key is in the query, and headers carry tokens.
+    const fields = { host: url.host, path: url.pathname, label: options.label };
     if (isForbidden(url.hostname)) {
       deps.log('warn', 'http.forbidden_host', fields);
       throw new HttpError('forbidden_host');

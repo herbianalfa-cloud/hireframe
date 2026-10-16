@@ -284,6 +284,54 @@ describe('http client', () => {
     expect(logs[0]?.fields).toMatchObject({ host: 'api.example.com', label: 'test.endpoint' });
   });
 
+  it('logs host and path only: no query string, key, Authorization header or token (Adzuna-style URL)', async () => {
+    const adzuna =
+      'https://api.adzuna.com/v1/api/jobs/gb/search/1?app_id=ID123&app_key=KEY456&what=nurse';
+    const headers = { Authorization: 'Bearer TOKEN789' };
+    const secrets = ['app_id', 'app_key', 'ID123', 'KEY456', 'TOKEN789', 'Bearer', 'what=', '?'];
+    const leaks = (value: unknown) => secrets.filter((s) => JSON.stringify(value).includes(s));
+    const o = { label: 'adzuna.search', headers };
+    const robots = { '/robots.txt': NO_ROBOTS };
+    const path = '/v1/api/jobs/gb/search/1';
+
+    const cases: Record<string, Parameters<typeof harness>[0]> = {
+      success: { ...robots, [path]: [json({ ok: true })] },
+      retry: { ...robots, [path]: [json({}, 503), json({ ok: true })] },
+      http_status: { ...robots, [path]: [json({}, 403)] },
+      network: {
+        ...robots,
+        [path]: [new Error(`connect failed for ${adzuna} ${headers.Authorization}`)],
+      },
+      timeout: { ...robots, [path]: [Object.assign(new Error(adzuna), { name: 'TimeoutError' })] },
+      schema: { ...robots, [path]: [json({ nope: 1 })] },
+    };
+    for (const [name, replies] of Object.entries(cases)) {
+      const h = harness(replies);
+      const outcome = await h.client.getJson(adzuna, Schema, o).catch((e: unknown) => e);
+      expect(leaks(h.logs), name).toEqual([]);
+      if (outcome instanceof Error) expect(leaks(outcome.message), name).toEqual([]);
+      if (name !== 'success') {
+        expect(h.logs.at(-1)?.fields, name).toMatchObject({
+          host: 'api.adzuna.com',
+          path,
+          label: 'adzuna.search',
+        });
+      }
+    }
+
+    const blocked = harness({
+      '/robots.txt': [new Response('User-agent: *\nDisallow: /v1/', { status: 200 })],
+    });
+    await blocked.client.getJson(adzuna, Schema, o).catch(() => undefined);
+    expect(blocked.logs[0]?.event).toBe('http.robots_blocked');
+    expect(leaks(blocked.logs)).toEqual([]);
+
+    const forbidden = harness({}, { forbiddenHosts: ['adzuna.com'] });
+    await forbidden.client.getJson(adzuna, Schema, o).catch(() => undefined);
+    expect(forbidden.logs[0]?.event).toBe('http.forbidden_host');
+    expect(leaks(forbidden.logs)).toEqual([]);
+  });
+
   it('refuses a forbidden host and its subdomains before any fetch, robots.txt included', async () => {
     const h = harness({ '*': [json({ ok: true })] }, { forbiddenHosts: ['linkedin.com'] });
     for (const url of [
