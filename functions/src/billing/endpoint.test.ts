@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 
+import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setLogSink } from '../log.js';
@@ -98,27 +99,10 @@ describe('billingGuard wiring: a message with no data', () => {
   });
 });
 
-/** Removes comments but not string contents: a `/*` inside a string is not a comment. */
+/** Removes comments with the TypeScript parser, so strings and regex literals stay intact. */
 function stripComments(source: string): string {
-  let out = '';
-  for (let i = 0; i < source.length;) {
-    const char = source[i] ?? '';
-    if (char === '"' || char === "'" || char === '`') {
-      let j = i + 1;
-      while (j < source.length && source[j] !== char) j += source[j] === '\\' ? 2 : 1;
-      out += source.slice(i, j + 1);
-      i = j + 1;
-    } else if (source.startsWith('//', i)) {
-      while (i < source.length && source[i] !== '\n') i++;
-    } else if (source.startsWith('/*', i)) {
-      const end = source.indexOf('*/', i + 2);
-      i = end === -1 ? source.length : end + 2;
-    } else {
-      out += char;
-      i++;
-    }
-  }
-  return out;
+  const file = ts.createSourceFile('billing.ts', source, ts.ScriptTarget.Latest);
+  return ts.createPrinter({ removeComments: true }).printFile(file);
 }
 
 const ALLOWED_IMPORTS = new Set([
@@ -210,6 +194,8 @@ describe('billing source guard: no way to trigger or re-run itself (CLAUDE.md ha
     ['a fetch to the function itself', "await globalThis.fetch('https://x.run.app/');"],
     ['publishMessage', 'await topic.publishMessage({ data });'],
     ['code hidden after /* in a string', "const a = '/*'; topic.publish(x); const b = '*/';"],
+    ['code hidden after /* in a regex', 'const r = /[/*]/; topic.publish(x); const q = /[*/]/;'],
+    ['code hidden after // in a regex', 'const u = /https:\\/\\//; topic.publish(x);'],
     ['a project override', 'const p = process.env.GCLOUD_PROJECT;'],
   ])('the guard itself catches %s', (_label, snippet) => {
     expect(violations('client.ts', snippet).length).toBeGreaterThan(0);
