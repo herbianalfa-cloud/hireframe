@@ -113,6 +113,11 @@ export interface HttpClient {
    * redirects are not followed. Only for calls that are safe to repeat (the caller's rule).
    */
   putJson<T>(url: string, body: unknown, schema: z.ZodType<T>, options: RequestOptions): Promise<T>;
+  /**
+   * GET a small plain-text answer and return it untouched (the caller validates it). Same
+   * timeout, retry and size rules as `getJson`.
+   */
+  getText(url: string, options: RequestOptions): Promise<string>;
   /** Requests started through this client (each attempt counts; robots.txt fetches don't). */
   requests(): number;
   /** Hosts still paused, to carry into the next run. */
@@ -318,7 +323,27 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     body: unknown,
     schema: z.ZodType<T>,
     options: RequestOptions,
-  ) {
+  ): Promise<T> {
+    return request(method, rawUrl, body, options, (text, status) => {
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new HttpError('invalid_json', status);
+      }
+      const parsed = schema.safeParse(json);
+      if (!parsed.success) throw new HttpError('schema', status, parsed.error.issues.length);
+      return parsed.data;
+    });
+  }
+
+  async function request<T>(
+    method: 'GET' | 'PUT',
+    rawUrl: string,
+    body: unknown,
+    options: RequestOptions,
+    parseBody: (text: string, status: number) => T,
+  ): Promise<T> {
     const url = new URL(rawUrl);
     const policy = deps.hostPolicy(url.host);
     // Host and path only: Adzuna's key is in the query, and headers carry tokens.
@@ -353,18 +378,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       try {
         const response = await send(url, policy, intervalMs, headers, true, options.label, init);
         if (response.ok) {
-          const body = await readBody(response);
-          let json: unknown;
-          try {
-            json = JSON.parse(body);
-          } catch {
-            throw new HttpError('invalid_json', response.status);
-          }
-          const parsed = schema.safeParse(json);
-          if (!parsed.success) {
-            throw new HttpError('schema', response.status, parsed.error.issues.length);
-          }
-          return parsed.data;
+          return parseBody(await readBody(response), response.status);
         }
         // Not awaited: a cancelled body we don't need must never hold up the run.
         void response.body?.cancel().catch(() => undefined);
@@ -411,6 +425,14 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
 
   return {
     getJson: (rawUrl, schema, options) => requestJson('GET', rawUrl, undefined, schema, options),
+    getText: (rawUrl, options) =>
+      request(
+        'GET',
+        rawUrl,
+        undefined,
+        { ...options, headers: { Accept: 'text/plain', ...options.headers } },
+        (text) => text,
+      ),
     putJson: (rawUrl, body, schema, options) => requestJson('PUT', rawUrl, body, schema, options),
     requests: () => requestCount,
     pauses: () =>

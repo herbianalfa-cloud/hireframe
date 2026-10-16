@@ -9,7 +9,7 @@ describe('billing client (ADR-059)', () => {
     await expect(createBillingClient(g.deps).projectId()).resolves.toBe(PROJECT);
     expect(g.calls).toHaveLength(1);
     expect(g.calls[0]?.url).toBe(
-      'http://metadata.google.internal/computeMetadata/v1/project/?recursive=true',
+      'http://metadata.google.internal/computeMetadata/v1/project/project-id',
     );
     expect(g.calls[0]?.headers['Metadata-Flavor']).toBe('Google');
   });
@@ -69,8 +69,8 @@ describe('billing client (ADR-059)', () => {
 
   it('refuses a metadata answer whose project ID is not a project ID', async () => {
     const routes = okRoutes(true);
-    routes['GET metadata.google.internal/computeMetadata/v1/project/'] = new Response(
-      JSON.stringify({ projectId: '../../etc' }),
+    routes['GET metadata.google.internal/computeMetadata/v1/project/project-id'] = new Response(
+      '../../etc',
     );
     const g = fakeGoogle(routes);
     await expect(createBillingClient(g.deps).projectId()).rejects.toMatchObject({

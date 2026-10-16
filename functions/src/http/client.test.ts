@@ -542,10 +542,16 @@ describe('http client: PUT and plain http (ADR-059)', () => {
     const h = harness({
       '/robots.txt': NO_ROBOTS,
       '/a': [
-        new Response('', { status: 302, headers: { location: 'http://uk.linkedin.com/jobs/view/1' } }),
+        new Response('', {
+          status: 302,
+          headers: { location: 'http://uk.linkedin.com/jobs/view/1' },
+        }),
       ],
       '/b': [
-        new Response('', { status: 307, headers: { location: 'https://uk.linkedin.com/jobs/view/1' } }),
+        new Response('', {
+          status: 307,
+          headers: { location: 'https://uk.linkedin.com/jobs/view/1' },
+        }),
       ],
     });
     await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
@@ -603,6 +609,18 @@ describe('http client: PUT and plain http (ADR-059)', () => {
     expect(crossHop?.headers).not.toHaveProperty('Authorization');
     expect(crossHop?.headers).not.toHaveProperty('metadata-flavor');
     expect(crossHop?.headers['X-Keep']).toBe('1');
+  });
+
+  it('getText returns the body as text with the same retry rules', async () => {
+    const h = harness(
+      { '/t': [json({}, 503), new Response('plain-answer\n', { status: 200 })] },
+      keyed,
+    );
+    await expect(h.client.getText('https://api.example.com/t', opts)).resolves.toBe(
+      'plain-answer\n',
+    );
+    expect(h.calls).toHaveLength(2);
+    expect(h.calls[0]?.headers.Accept).toBe('text/plain');
   });
 
   it('maps a timeout while reading the body to a retried timeout error', async () => {

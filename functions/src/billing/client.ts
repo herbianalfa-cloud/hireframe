@@ -18,7 +18,6 @@ import { createHttpClient, type HttpLog } from '../http/client.js';
 const METADATA = 'http://metadata.google.internal/computeMetadata/v1';
 const BILLING_API = 'https://cloudbilling.googleapis.com/v1';
 
-const ProjectSchema = z.object({ projectId: z.string() }).loose();
 const TokenSchema = z.object({ access_token: z.string().min(1) }).loose();
 const BillingInfoSchema = z
   .object({
@@ -103,12 +102,15 @@ export function createBillingClient(deps: BillingClientDeps): BillingClient {
 
   return {
     async projectId() {
-      const answer = await http.getJson(`${METADATA}/project/?recursive=true`, ProjectSchema, {
-        label: 'metadata.project',
-        headers: metadata,
-      });
-      if (!PROJECT_ID.test(answer.projectId)) throw new BillingClientError('bad_project_id');
-      return answer.projectId;
+      // The documented plain-text leaf. Some servers add a trailing newline.
+      const projectId = (
+        await http.getText(`${METADATA}/project/project-id`, {
+          label: 'metadata.project',
+          headers: metadata,
+        })
+      ).trim();
+      if (!PROJECT_ID.test(projectId)) throw new BillingClientError('bad_project_id');
+      return projectId;
     },
 
     async billingEnabled(projectId) {

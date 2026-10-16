@@ -21,10 +21,11 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 export function okRoutes(billingEnabled: boolean): FakeGoogle['routes'] {
   return {
-    'GET metadata.google.internal/computeMetadata/v1/project/': json({
-      projectId: PROJECT,
-      numericProjectId: 1,
-    }),
+    // The documented leaf answers plain text, with a trailing newline some servers add.
+    'GET metadata.google.internal/computeMetadata/v1/project/project-id': new Response(
+      `${PROJECT}\n`,
+      { headers: { 'Content-Type': 'text/plain' } },
+    ),
     'GET metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token': json(
       {
         access_token: TOKEN,
