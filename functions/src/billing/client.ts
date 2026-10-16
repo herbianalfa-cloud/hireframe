@@ -9,7 +9,7 @@ import { createHttpClient, type HttpLog } from '../http/client.js';
  * - The target project is always the runtime project the metadata server reports, never a literal,
  *   so a copy of the guard in a throwaway project can only ever touch that project.
  * - The access token lives in this closure. It goes into one `Authorization` header and nowhere
- *   else: the http client logs hosts, labels and codes only, and its errors carry a code, not text.
+ *   else: the http client logs hosts, paths, labels and codes only, and its errors carry a code, not text.
  * - Every call goes through `createHttpClient`: timeout, at most 3 attempts with backoff, a run
  *   deadline, zod on every answer. Plain http is allowed for the metadata host only,
  *   for this client only, and never through a redirect.

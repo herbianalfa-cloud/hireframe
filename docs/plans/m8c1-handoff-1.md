@@ -5,7 +5,7 @@ Branch `feat/m8c1-billing-guard`, pushed. No PR yet. Plan: `docs/plans/m8c-plan.
 ## Done (7 commits after the plan)
 1. `feat: billing guard config and mode`: `BILLING_GUARD`, `guardMode(env)`; `billingGuard: 60` in the shared timeout table; `config.test.ts`.
 2. `feat: billing guard budget message schema and decision rule`: `billing/schema.ts` (`parseBudgetMessage`), `billing/decide.ts`, `decide.test.ts`.
-3. `feat: http client PUT and plain http for the metadata server only`: `putJson`, exact-host `plainHttpHosts` (default `PLAIN_HTTP_HOSTS` = `metadata.google.internal`), `insecure_url` error code; forbidden-host refusal runs first on every path; 10 new client tests.
+3. `feat: http client PUT and plain http for the metadata server only`: `putJson`, exact-host `plainHttpHosts` (default `PLAIN_HTTP_HOSTS` = `metadata.google.internal`; changed after the Opus review: the default is now empty and only the billing client passes it), `insecure_url` error code; forbidden-host refusal runs first on every path; 10 new client tests.
 4. `feat: billing client and guard handler`: `billing/client.ts`, `billing/handler.ts` (`runGuard`), `billing/testing.ts` (test helpers), `client.test.ts`, `handler.test.ts`; seven `billing_guard.*` events added to `log.ts`.
 5. `feat: billingGuard endpoint, wiring test and source guard`: `billing/endpoint.ts`, export in `index.ts`, `billing/endpoint.test.ts` (dry-run wiring through the real wrapper, source guard), `index.test.ts` (billingGuard endpoint checks, secrets table).
 6. `docs: ADR-059 and billingGuard rows`: ADR-059, ARCHITECTURE row, SECURITY "Billing" row.
@@ -25,7 +25,7 @@ Your three approval additions: plain http for the metadata host only (tests: oth
 | `npm run audit` | pass: 1 high advisory, allowlisted (braces via clasp and firebase-tools) |
 
 ## Differences from the plan
-- **`http/client.ts` was touched** (`putJson`, exact-host plain http, `insecure_url`). The plan allowed a minimal extension; you approved it with the metadata-host rule. A PUT never follows a redirect, and a redirect to plain http is refused for every host.
+- **`http/client.ts` was touched** (`putJson`, exact-host plain http, `insecure_url`). The plan allowed a minimal extension; you approved it with the metadata-host rule. A PUT never follows a redirect, and a redirect to plain http is refused for every host (changed after the Opus review: true only since `291818e`; at `b6681d9` a redirect to the metadata host over http was followed).
 - **Commit order:** config first (the decision rule needs the constants), then schema and decide.
 - **No `HOST_POLICIES` entries** for the Google hosts. The billing client passes its own policy from `BILLING_GUARD.requestTimeoutMs`, so `API_TERMS_HOSTS` is unchanged.
 - **Project ID** comes from the documented plain-text leaf `GET /computeMetadata/v1/project/project-id` through `getText` (changed after the Opus review; the first build used `?recursive=true`). It is checked against the GCP project-ID pattern before it enters a URL.
