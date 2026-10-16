@@ -243,6 +243,12 @@ export const FORBIDDEN_FETCH_HOSTS = [
   'glassdoor.fr',
 ] as const;
 
+/**
+ * The only hosts requested over plain `http:` (exact names). The GCE metadata server has no
+ * TLS; every other host is HTTPS-only (ADR-059).
+ */
+export const PLAIN_HTTP_HOSTS = ['metadata.google.internal'] as const;
+
 export interface HostPolicyConfig {
   robots: 'enforce' | 'api-terms';
   intervalMs: number;

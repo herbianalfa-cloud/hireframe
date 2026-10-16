@@ -16,6 +16,7 @@ import {
   hostPolicy,
   LLM,
   MODELS,
+  PLAIN_HTTP_HOSTS,
   PURPOSE_CALLABLE,
   RUNTIME_SERVICE_ACCOUNT,
   SCAN,
@@ -244,5 +245,11 @@ describe('guardMode (ADR-059)', () => {
   it('keeps the guard under the function timeout and in the shared table', () => {
     expect(BILLING_GUARD.deadlineMs).toBeLessThan(CALLABLE_TIMEOUT_SECONDS.billingGuard * 1000);
     expect(BILLING_GUARD.requestTimeoutMs).toBeLessThan(BILLING_GUARD.deadlineMs);
+  });
+});
+
+describe('plain http (ADR-059)', () => {
+  it('allows exactly the metadata server', () => {
+    expect([...PLAIN_HTTP_HOSTS]).toEqual(['metadata.google.internal']);
   });
 });

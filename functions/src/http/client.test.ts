@@ -16,6 +16,8 @@ interface Call {
   url: string;
   at: number;
   headers: Record<string, string>;
+  method: string | undefined;
+  body: string | undefined;
 }
 
 type Reply = Response | Error | ((url: string) => Response | Error);
@@ -29,7 +31,13 @@ function harness(
   const logs: { event: string; fields: Record<string, unknown> }[] = [];
   const fetchFake = (input: URL | string, init?: RequestInit) => {
     const url = input.toString();
-    calls.push({ url, at: clock, headers: { ...(init?.headers as Record<string, string>) } });
+    calls.push({
+      url,
+      at: clock,
+      headers: { ...(init?.headers as Record<string, string>) },
+      method: init?.method,
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    });
     const path = new URL(url).pathname;
     const queue = replies[path] ?? replies['*'] ?? [];
     const reply = queue.length > 1 ? queue.shift() : queue[0];
@@ -360,5 +368,111 @@ describe('http client', () => {
 
   it('builds a Basic auth header with an empty password', () => {
     expect(basicAuth('key')).toBe(`Basic ${Buffer.from('key:').toString('base64')}`);
+  });
+});
+
+describe('http client: PUT and plain http (ADR-059)', () => {
+  const keyed = { policy: { robots: 'api-terms' as const } };
+
+  it('PUTs a JSON body once and parses the answer', async () => {
+    const { client, calls } = harness({ '/b': [json({ ok: true })] }, keyed);
+    await expect(
+      client.putJson('https://api.example.com/b', { a: '' }, Schema, {
+        label: 'test.put',
+        headers: { Authorization: 'Bearer t' },
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ method: 'PUT', body: '{"a":""}' });
+    expect(calls[0]?.headers['Content-Type']).toBe('application/json');
+    expect(calls[0]?.headers['Authorization']).toBe('Bearer t');
+  });
+
+  it('retries a failed PUT at most 3 times, then gives up', async () => {
+    const { client, calls } = harness({ '/b': [json({}, 503)] }, keyed);
+    await expect(
+      client.putJson('https://api.example.com/b', {}, Schema, { label: 'test.put' }),
+    ).rejects.toMatchObject({ code: 'http_status', status: 503 });
+    expect(calls).toHaveLength(3);
+  });
+
+  it('does not follow a redirect on a PUT', async () => {
+    const { client, calls } = harness(
+      {
+        '/b': [
+          new Response('', { status: 307, headers: { location: 'https://api.example.com/c' } }),
+        ],
+      },
+      keyed,
+    );
+    await expect(
+      client.putJson('https://api.example.com/b', {}, Schema, { label: 'test.put' }),
+    ).rejects.toMatchObject({ code: 'http_status', status: 307 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refuses plain http to any host that is not on the list, before any fetch', async () => {
+    const h = harness({ '*': [json({ ok: true })] }, keyed);
+    for (const url of [
+      'http://api.example.com/a',
+      'http://metadata.google.internal.evil.com/a',
+      'http://evil.metadata.google.internal/a',
+      'http://169.254.169.254/a',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts), url).rejects.toMatchObject({
+        code: 'insecure_url',
+      });
+      await expect(h.client.putJson(url, {}, Schema, opts), url).rejects.toMatchObject({
+        code: 'insecure_url',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it('allows plain http to exactly the listed host', async () => {
+    const h = harness({ '/a': [json({ ok: true })] }, { ...keyed, plainHttpHosts: ['meta.test'] });
+    await expect(h.client.getJson('http://meta.test/a', Schema, opts)).resolves.toEqual({
+      ok: true,
+    });
+    await expect(h.client.getJson('http://other.test/a', Schema, opts)).rejects.toMatchObject({
+      code: 'insecure_url',
+    });
+  });
+
+  it('does not let a redirect downgrade to plain http', async () => {
+    const h = harness(
+      {
+        '/robots.txt': NO_ROBOTS,
+        '/a': [
+          new Response('', { status: 302, headers: { location: 'http://api.example.com/b' } }),
+        ],
+      },
+      {},
+    );
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      {
+        code: 'http_status',
+      },
+    );
+    expect(h.calls.map((call) => call.url)).not.toContain('http://api.example.com/b');
+  });
+
+  it('keeps refusing LinkedIn, Indeed, Wellfound and Glassdoor on the plain-http and PUT paths', async () => {
+    const h = harness({ '*': [json({ ok: true })] }, keyed);
+    for (const url of [
+      'http://www.linkedin.com/a',
+      'https://www.linkedin.com/a',
+      'http://uk.indeed.com/a',
+      'https://wellfound.com/a',
+      'http://www.glassdoor.co.uk/a',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts), url).rejects.toMatchObject({
+        code: 'forbidden_host',
+      });
+      await expect(h.client.putJson(url, {}, Schema, opts), url).rejects.toMatchObject({
+        code: 'forbidden_host',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
   });
 });

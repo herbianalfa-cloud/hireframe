@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 
-import { FORBIDDEN_FETCH_HOSTS } from '../config.js';
+import { FORBIDDEN_FETCH_HOSTS, PLAIN_HTTP_HOSTS } from '../config.js';
 import { ALLOW_ALL, robotsFromResponse, type RobotsPolicy } from './robots.js';
 
 /**
@@ -29,7 +29,9 @@ export type HttpErrorCode =
   /** The host asked us to stay away (a Retry-After beyond the cap); no request was made. */
   | 'host_paused'
   /** A host we never fetch (CLAUDE.md hard rule: LinkedIn and the other alert-only boards). */
-  | 'forbidden_host';
+  | 'forbidden_host'
+  /** A plain `http:` URL for a host that isn't on the plain-http list. */
+  | 'insecure_url';
 
 export class HttpError extends Error {
   override name = 'HttpError';
@@ -87,6 +89,11 @@ export interface HttpClientDeps {
    * `FORBIDDEN_FETCH_HOSTS`; a client can only be made laxer by passing a shorter list on purpose.
    */
   forbiddenHosts?: readonly string[];
+  /**
+   * The only hosts (exact names) that may be requested over plain `http:`, redirects included.
+   * Every other host is HTTPS-only. Defaults to `PLAIN_HTTP_HOSTS` (the metadata server).
+   */
+  plainHttpHosts?: readonly string[];
   /** Pauses carried over from earlier runs: no request goes to these hosts until then. */
   paused?: readonly HostPause[];
   log: HttpLog;
@@ -100,6 +107,11 @@ export interface RequestOptions {
 
 export interface HttpClient {
   getJson<T>(url: string, schema: z.ZodType<T>, options: RequestOptions): Promise<T>;
+  /**
+   * PUT a JSON body and parse the JSON answer. Same timeout, retry and zod rules as `getJson`;
+   * redirects are not followed. Only for calls that are safe to repeat (the caller's rule).
+   */
+  putJson<T>(url: string, body: unknown, schema: z.ZodType<T>, options: RequestOptions): Promise<T>;
   /** Requests started through this client (each attempt counts; robots.txt fetches don't). */
   requests(): number;
   /** Hosts still paused, to carry into the next run. */
@@ -175,6 +187,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     headers: Record<string, string>,
     counted: boolean,
     label: string,
+    init: { method: 'GET' | 'PUT'; body?: string } = { method: 'GET' },
   ): Promise<Response> {
     if (remaining() <= 0) throw new HttpError('deadline');
     await slot(url.host, intervalMs);
@@ -194,6 +207,8 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       let response: Response;
       try {
         response = await deps.fetch(target, {
+          method: init.method,
+          ...(init.body === undefined ? {} : { body: init.body }),
           headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...headers },
           redirect: 'manual',
           signal: AbortSignal.timeout(timeoutMs),
@@ -206,6 +221,8 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       }
       if (!REDIRECT_STATUS.has(response.status)) return response;
       void response.body?.cancel().catch(() => undefined);
+      // A write is never replayed against a new location.
+      if (init.method !== 'GET') throw new HttpError('http_status', response.status);
       const location = response.headers.get('location');
       let next: URL | null;
       try {
@@ -213,7 +230,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       } catch {
         next = null;
       }
-      if (!next || hop >= MAX_REDIRECTS || !/^https?:$/.test(next.protocol)) {
+      if (!next || hop >= MAX_REDIRECTS || !schemeAllowed(next)) {
         throw new HttpError('http_status', response.status);
       }
       if (isForbidden(next.hostname)) {
@@ -272,7 +289,22 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     );
   }
 
-  async function getJson<T>(rawUrl: string, schema: z.ZodType<T>, options: RequestOptions) {
+  /** HTTPS always; plain HTTP only for the exact hosts on the plain-http list. */
+  function schemeAllowed(url: URL): boolean {
+    if (url.protocol === 'https:') return true;
+    return (
+      url.protocol === 'http:' &&
+      (deps.plainHttpHosts ?? PLAIN_HTTP_HOSTS).includes(url.hostname.toLowerCase())
+    );
+  }
+
+  async function requestJson<T>(
+    method: 'GET' | 'PUT',
+    rawUrl: string,
+    body: unknown,
+    schema: z.ZodType<T>,
+    options: RequestOptions,
+  ) {
     const url = new URL(rawUrl);
     const policy = deps.hostPolicy(url.host);
     const fields = { host: url.host, label: options.label };
@@ -280,6 +312,15 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       deps.log('warn', 'http.forbidden_host', fields);
       throw new HttpError('forbidden_host');
     }
+    if (!schemeAllowed(url)) {
+      deps.log('warn', 'http.failed', { ...fields, attempt: 0, code: 'insecure_url' });
+      throw new HttpError('insecure_url');
+    }
+    const init = method === 'PUT' ? { method, body: JSON.stringify(body) } : ({ method } as const);
+    const headers =
+      method === 'PUT'
+        ? { 'Content-Type': 'application/json', ...options.headers }
+        : (options.headers ?? {});
     if ((pausedUntil.get(url.host) ?? 0) > deps.now()) {
       logPause(url.host, options.label);
       throw new HttpError('host_paused');
@@ -295,14 +336,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       let failure: HttpError;
       let waitMs = deps.backoffBaseMs * 2 ** (attempt - 1) * (1 + deps.random() * 0.25);
       try {
-        const response = await send(
-          url,
-          policy,
-          intervalMs,
-          options.headers ?? {},
-          true,
-          options.label,
-        );
+        const response = await send(url, policy, intervalMs, headers, true, options.label, init);
         if (response.ok) {
           const body = await readBody(response);
           let json: unknown;
@@ -361,7 +395,8 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   }
 
   return {
-    getJson,
+    getJson: (rawUrl, schema, options) => requestJson('GET', rawUrl, undefined, schema, options),
+    putJson: (rawUrl, body, schema, options) => requestJson('PUT', rawUrl, body, schema, options),
     requests: () => requestCount,
     pauses: () =>
       [...pausedUntil.entries()]
