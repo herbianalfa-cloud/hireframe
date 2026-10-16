@@ -36,7 +36,7 @@ export function failureCode(error: unknown): { code: string; status?: number } {
  * The billing kill switch (ADR-059). One budget message in, at most one write out.
  * Never throws and never re-publishes: the trigger is a message this function can't cause.
  */
-export async function runGuard(data: string, deps: GuardDeps): Promise<void> {
+export async function runGuard(data: unknown, deps: GuardDeps): Promise<void> {
   const { mode } = deps;
   const message = parseBudgetMessage(data);
   if (!message) {

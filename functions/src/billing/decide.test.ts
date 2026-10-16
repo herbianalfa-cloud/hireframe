@@ -90,6 +90,9 @@ describe('parseBudgetMessage', () => {
     ['JSON null', encode('null')],
     ['empty', ''],
     ['too large', 'A'.repeat(20_000)],
+    ['undefined (an attributes-only message)', undefined],
+    ['null', null],
+    ['a number', 42],
   ])('rejects %s', (_label, data) => {
     expect(parseBudgetMessage(data)).toBeNull();
   });
@@ -101,6 +104,16 @@ describe('parseBudgetMessage', () => {
       expect(parseBudgetMessage(encode(rest))).toBeNull();
     },
   );
+
+  it('rejects amounts that overflow to Infinity in raw JSON', () => {
+    const raw = (cost: string, budget: string) =>
+      encode(
+        `{"budgetDisplayName":"b","costAmount":${cost},"budgetAmount":${budget},"currencyCode":"GBP","costIntervalStart":"2026-10-01T00:00:00Z"}`,
+      );
+    expect(parseBudgetMessage(raw('1e999', '25'))).toBeNull();
+    expect(parseBudgetMessage(raw('1', '1e999'))).toBeNull();
+    expect(parseBudgetMessage(raw('1', '25'))).not.toBeNull();
+  });
 
   it.each([
     ['a negative cost', { costAmount: -1 }],

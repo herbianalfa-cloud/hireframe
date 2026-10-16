@@ -27,8 +27,9 @@ const MAX_MESSAGE_BYTES = 8_192;
  * budget message (bad base64, bad JSON, missing or wrong-typed fields); the caller logs a code,
  * never the message text.
  */
-export function parseBudgetMessage(base64: string): BudgetMessage | null {
-  if (base64.length > MAX_MESSAGE_BYTES * 2) return null;
+export function parseBudgetMessage(base64: unknown): BudgetMessage | null {
+  // A message published with attributes only has no data at all.
+  if (typeof base64 !== 'string' || base64.length > MAX_MESSAGE_BYTES * 2) return null;
   let json: unknown;
   try {
     json = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
