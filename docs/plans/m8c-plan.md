@@ -121,7 +121,7 @@
   - 5xx is retried 3 times, then `failed`;
   - a timeout and the deadline;
   - logs carry no message text.
-- **The dry-run wiring test:** call `billingGuard.run(cloudEvent)` (the real wrapper) with a base64 message at the threshold and env unset. It must log `would_disable` and never call `fetch`.
+- **The dry-run wiring test:** call the exported `billingGuard(cloudEvent)` itself (not `.run`, which skips the Pub/Sub wrapper) with a base64 message at the threshold and env unset. It must log `would_disable` and never call `fetch`. A second case sends an attributes-only message (no `data`): it logs `invalid`, resolves and makes no request.
 - `index.test.ts` for `billingGuard`'s `__endpoint`:
   - the Pub/Sub `messagePublished` event type, topic `billing-guard`;
   - `retry` false;
@@ -145,13 +145,14 @@
   - the `hireframe-kill` budget (£25, actual cost, this project only) publishes to the `billing-guard` topic;
   - `billingGuard` runs as `hireframe-billing-guard`, with no secrets and no Firestore access;
   - 1 instance, 60 s, no retry.
-- **Decision rule** as in `decide.ts`. Forecast is ignored. The target is the metadata project.
+- **Decision rule** as in `decide.ts`. Forecast is ignored. The target is the metadata project (read from the documented plain-text leaf `project/project-id`).
 - **Mode:** the env var `BILLING_GUARD_MODE`. Unset means dry run. Why not a param: finding 4.
 - **Prod holds no billing role while in dry run** (change from m8-plan C37b). Belt and braces: even a mode bug can't disable billing.
 - **Arming (later, separately approved, v1.0.1):**
   - grant `billing.projectManager` (C37b);
   - the build writes `functions/deploy/.env` with `armed`;
   - only if the throwaway proved `projectManager` is enough; otherwise it moves to the parking lot.
+  - **Arming check (ADR-059):** once armed, anyone who can publish to `billing-guard` can trip the kill with a forged message, because the guard can't authenticate messages. Before arming, `gcloud pubsub topics get-iam-policy billing-guard --project=$P` must show only the budget publisher, and the project Owners and Editors (the compute account keeps Editor until v1.0.0) are accepted as publishers until 8C2 removes Editor.
 - **The lag statement:**
   - budget notifications lag spend by hours, so this is a backstop;
   - the real limits are `llm.call()` caps and leases, `maxInstances: 1`, the locks and the card's limit.
@@ -170,6 +171,10 @@
   - Add a literal `maxInstances: 1` to the 7 call sites that only inherit it: `parseCv`, `addFact`, `resetProfile`, `rescore`, `lookup`, `scanNow`, `scheduledScan`.
   - `setGlobalOptions` stays.
   - Callables stay at 1, recorded in ADR-060's "instance audit" note.
+- **Scan and wipe locks (review item 12, moved from 8C1):** `scan/store.ts:67-69`, `:86-89` and `:140-143` hold three copies of the stale-lock rule.
+  - Add `export function lockLiveUntil(lock): Date | undefined`: undefined unless the lock has a `runId` and a `startedAt`, otherwise `staleAt ?? startedAt + SCAN.lockStaleMs`.
+  - Add `isLockLive(lock, now)` on top of it and use it at all three sites.
+  - Point the `store.test.ts` boundary table (±1 ms) at `isLockLive`, and keep the `liveLockHolder` cases. Today only `liveLockHolder` has ±1 ms tests; `acquireLock` and `acquireOrRefreshWipe` are tested only at ±1–2 minutes in the emulator.
 - `functions/src/index.test.ts`: one table test over every export:
   - `maxInstances` 1, `timeoutSeconds` and `availableMemoryMb` present;
   - scheduled functions have `retryCount: 0`, event functions `retry` false;
@@ -282,8 +287,8 @@ flat() { gcloud projects get-iam-policy $P --flatten='bindings[].members' --form
 | C27b (bundle, read) | `node -p "const p=require('./functions/deploy/package.json'); [p.main, p.type, p.engines.node, Object.keys(p.dependencies).sort().join(',')].join(' ')" && test -f functions/deploy/index.js && echo index.js present` | `index.js module 22 firebase-admin,firebase-functions` and `index.js present`. Otherwise run `npm run build` again (not the dev build) | — |
 | C28 | `gcloud functions deploy billingGuard --gen2 --project=$T --region=$R --runtime=nodejs22 --source=functions/deploy --entry-point=billingGuard --trigger-topic=billing-guard --trigger-service-account=$TGUARD --service-account=$TGUARD --set-env-vars=BILLING_GUARD_MODE=armed --max-instances=1 --timeout=60s --memory=256Mi` (answer **n** if it offers to grant roles) | build SUCCESS: `gcloud builds list --region=$R --project=$T --limit=1 --format='value(status,serviceAccount)'` → SUCCESS, `$TCOMPUTE`. **This proves Path F roles and quota 0 don't block builds.** If the storage condition fails (403 on `gcf-v2-*`), grant per bucket and redeploy; record which one worked | C31 |
 | C28a | `gcloud functions add-invoker-policy-binding billingGuard --region=$R --member=serviceAccount:$TGUARD --project=$T` | C14b with `--project=$T` | C31 |
-| C29a | `gcloud pubsub topics publish billing-guard --project=$T --message='{"budgetDisplayName":"hireframe-kill","costAmount":1,"budgetAmount":25,"currencyCode":"GBP","costIntervalStart":"2026-10-01T00:00:00Z"}'` | `gcloud functions logs read billingGuard --region=$R --gen2 --project=$T --limit=10` → `billing_guard.below`, `mode: armed` | — |
-| C29b | the same with `"costAmount":30` | logs → `billing_guard.disabled` | — |
+| C29a | `gcloud pubsub topics publish billing-guard --project=$T --message='{"budgetDisplayName":"hireframe-kill","costAmount":1,"budgetAmount":25,"currencyCode":"GBP","costIntervalStart":"2026-10-01T00:00:00Z"}'` | `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$T --freshness=10m --limit=10 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'` → `billing_guard.below`, `mode: armed`. This is also the first real use of the project-id leaf (`step: project` would show in `jsonPayload.step`) | — |
+| C29b | the same with `"costAmount":30` | the same logging read → `billing_guard.disabled` | — |
 | C30 | `gcloud billing projects describe $T --format='value(billingEnabled)'` | **`False`**. If `failed: permission_denied`: `projectManager` isn't enough, so arming leaves M8 (decision 2) | — |
 | C31 | `gcloud projects delete $T` | `describe` → DELETE_REQUESTED | — |
 | C31b (config) | `gcloud config configurations activate default && gcloud config configurations delete guard-test` | `gcloud config configurations list` → only `default`, active; `gcloud config get-value project` → `hireframe-f6b03` | — |
@@ -291,6 +296,7 @@ flat() { gcloud projects get-iam-policy $P --flatten='bindings[].members' --form
 ### Phase 2: v0.9.1 (Mon 19 Oct, 10:00–16:00, nothing Generating; after Fri 16 was clean on v0.9.0 and the spike passed)
 
 **K1. Step 77 and the scheduler list (C1, C2, C3).**
+- Repeat Part G step 77 (C1, C2) and the C3 line of Part J step 101.
 - Check:
   - C1: `30 7,17 * * 1-5`, `Europe/London`, `hireframe-fns@…`;
   - C2: only `hireframe-fns`;
@@ -329,38 +335,47 @@ flat() { gcloud projects get-iam-policy $P --flatten='bindings[].members' --form
 - Check: the read prints 3 lines.
 - Rollback: K9.
 
-**K7 (C4). Tag v0.9.1.** Merge 8C1, then `git checkout main && git pull && git log -1 && git tag v0.9.1 && git push origin v0.9.1`, then approve.
+**K7 (C4). Tag v0.9.1.** Merge 8C1, then run `git checkout main && git pull && git log -1`. The log must show the PR's merge commit. Only then run `git tag v0.9.1 && git push origin v0.9.1`, then approve.
 - Check: the log shows `functions[billingGuard(europe-west2)] Successful create operation` and no "We failed to modify the IAM policy".
 - If prepare fails with that message: nothing was deployed. Grant only the bindings the CLI printed (shown in chat first), then **Re-run failed jobs**.
 - If the create fails on an Eventarc permission: C38b, `gcloud projects add-iam-policy-binding $P --member=serviceAccount:$SA --role=roles/eventarc.developer --condition=None`. It stays, because later updates need it too, and it's recorded in ADR-059. Then re-run.
+- Rollback: none needed for safety (no billing role). To remove the function, revert the export in a PR and release a patch.
 
 **K8 (C38). Bind the trigger account as invoker.**
 - Command: `gcloud functions add-invoker-policy-binding billingGuard --region=$R --member=serviceAccount:$GUARD --project=$P`
 - Check (C46): `gcloud run services get-iam-policy billingguard --region=$R --project=$P --flatten='bindings[].members' --filter='bindings.role:roles/run.invoker' --format='value(bindings.members)'` prints **only** `serviceAccount:hireframe-billing-guard@…`.
-- Rollback: `remove-invoker-policy-binding`.
+- Rollback: `gcloud functions remove-invoker-policy-binding billingGuard --region=$R --member=serviceAccount:$GUARD --project=$P`.
 
 **K9 (C45r). Remove the K6 grants.**
 - The same three commands with `remove-iam-policy-binding`, only for the ones K6 added.
 - Check:
-  - `cd ~ && flat > ~/iam-after-091.txt && diff ~/iam-before-091.txt ~/iam-after-091.txt` prints **nothing** (every 8C1 grant is resource-level);
+  - `cd ~ && flat > ~/iam-after-091.txt && diff ~/iam-before-091.txt ~/iam-after-091.txt` prints nothing, or only `roles/eventarc.developer serviceAccount:$SA` if K7 needed C38b (record it);
+  - a `roles/pubsub.serviceAgent serviceAccount:$PSA` line, if K6 created the agent, is Google's own binding: record it and never remove it;
+  - any other line: stop;
   - C43 again shows 7 roles (or 8 with C38b, recorded).
 
 **K10. Checks on `billingGuard` (C14b, C39a, C39b).**
 - C14b must show `1 60 256Mi hireframe-billing-guard@… hireframe-billing-guard@… projects/hireframe-f6b03/topics/billing-guard RETRY_POLICY_DO_NOT_RETRY`.
-- C39a must show no compute account, and `billingGuard`'s trigger on `hireframe-billing-guard`.
-- C39b: every function on `hireframe-fns`, except `billingGuard`.
+- C39a and C39b:
+  ```bash
+  for L in $R global; do gcloud eventarc triggers list --location=$L --project=$P --format='table(name,serviceAccount,destination.cloudRun.service,transport.pubsub.topic)'; done
+  gcloud functions list --regions=$R --project=$P --format='table(name,serviceConfig.serviceAccountEmail,eventTrigger.serviceAccountEmail)'
+  ```
+  - No row shows `$COMPUTE`.
+  - The `billingguard` trigger shows `hireframe-billing-guard@…`.
+  - Every function shows `hireframe-fns@…`, except `billingGuard`.
 
 **K11. Step 77 again (C1, C2, C3).** The bundle changed, so the deploy rewrote the invokers.
 
 **K12 (C35). Dry run.**
 - Read: `gcloud functions describe billingGuard --region=$R --gen2 --project=$P --format='value(serviceConfig.environmentVariables)'` must **not** contain `BILLING_GUARD_MODE`.
-- Below the threshold: publish `costAmount 1` (C29a's message, `--project=$P`). **Within 2 minutes** the logs (`gcloud functions logs read billingGuard --region=$R --gen2 --project=$P --limit=10`) must show `billing_guard.below`, `mode: dry_run`.
+- Below the threshold: publish `costAmount 1` (C29a's message, `--project=$P`). **Within 2 minutes** the logs (`gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$P --freshness=10m --limit=10 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'`; the plain `functions logs read` doesn't print `mode`) must show `billing_guard.below`, `mode: dry_run`.
 - **Only after that line shows `dry_run`**, at the threshold: publish `costAmount 30`. **Within 2 minutes:** `billing_guard.would_disable`.
 - Check: `gcloud billing projects describe $P --format='value(billingEnabled)'` → `True`.
 - **No log line within 2 minutes of a publish:** push delivery is broken, most likely by K9 removing the Pub/Sub agent's project-level `tokenCreator`.
   - Fallback (resource level, shown in chat first): `gcloud iam service-accounts add-iam-policy-binding $GUARD --member=serviceAccount:$PSA --role=roles/iam.serviceAccountTokenCreator --project=$P`.
   - Check: `gcloud iam service-accounts get-iam-policy $GUARD --project=$P --format='value(bindings.role,bindings.members)'` shows it beside the deployer's `serviceAccountUser`. Then publish below the threshold again and expect the log within 2 minutes.
-  - The K9 project diff stays empty, because the grant is resource level.
+  - The K9 project diff is unchanged by this fallback, because the grant is resource level.
   - Rollback: the same command with `remove-iam-policy-binding`.
 - Rollback for the dry run itself: none needed. Prod has no billing role, so it can't disable.
 
@@ -368,7 +383,7 @@ flat() { gcloud projects get-iam-policy $P --flatten='bindings[].members' --form
 - Billing → Budgets & alerts:
   - £2, £5 and £10 at 100%, actual and forecast, emails on;
   - `hireframe-kill` £25, scope this project, connected to topic `projects/hireframe-f6b03/topics/billing-guard`.
-- Check C47: within 24 h the logs show a real message as `billing_guard.below` (never `.invalid`). An `.invalid` is fixed in 8C2.
+- Check C47: within 24 h the logs (`gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$P --freshness=1d --limit=10 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'`) show a real message as `billing_guard.below` (never `.invalid`). An `.invalid` is fixed in 8C2.
 - Rollback: delete the budget.
 
 ### Phase 3: stolen-account guards (a separate weekday window before v1.0.0, each approved alone)
