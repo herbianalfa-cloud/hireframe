@@ -8,6 +8,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 3. A milestone is done only when: acceptance criteria in PRD pass, tests pass, `npm run check` is clean, docs + `CHANGELOG.md` are updated.
 4. Any non-obvious technical choice → add an ADR to `docs/DECISIONS.md`.
 5. Never widen scope silently. New ideas go to `docs/ROADMAP.md` under "Parking lot".
+6. Before every PR, check the diff against the no-self-triggering rule (Hard rules, last item): no function triggered by an event it can itself cause, no function that reschedules or re-enqueues itself, every loop over external calls or writes bounded by a count and a deadline, and `maxInstances` set on every new function. Say in the PR body what you checked.
 
 ## Code standards
 - TypeScript strict, no `any`. Zod schemas at every boundary (API responses, LLM output, Firestore reads, form input).
@@ -38,7 +39,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `node scripts/sign-test-alert.ts [waas] [--twice] [--id <id>]` — post a fake alert email, signed with the local placeholder secret, to the emulator's `ingestEmailJobs` (local only; `--twice` shows a replay refused)
 - `node scripts/sign-test-alert.ts digest [--kind fallback]` — post a signed digest request (`digest.v1.`) to the emulator's `getDigest` and print the state and text; against `npm run dev` it returns `ready` (local only)
 - `npm run audit` — dependency audit gate: fails on any high or critical advisory not in `audit-allowlist.json` (entries expire; ADR-013 addendum, M8). Same command as CI
-- `npm run check:bundle` — web bundle budget after `build`: no chunk over 500 kB, initial JS under the gzip budget (prints each initial file's size)
+- `npm run check:bundle` — web bundle budget after `build`: no chunk over 500 kB, initial JS under the gzip budget (prints each initial file's size), and the dev-only read counter's warning text in no chunk
 - `node scripts/dev-worker.ts` — one `generateCvs` pass against the emulator (the emulator doesn't fire schedules): turns `generating` applications into `ready` with the fake model and the real renderer; with the project and emulator hosts unset it uses `npm run dev`'s (`demo-hireframe`, never overriding a set one); refuses any project that isn't `demo-*`
 - `node scripts/smoke-functions-bundle.ts` — after `build`: the functions bundle imports (every file in `functions/deploy/`, chunks included), every function is in europe-west2, the renderer isn't on the cold-start path, and it prints the bundle sizes
 - `node scripts/load-test.ts [--jobs N] [--s1-passes N]` — 1,000-job scan and funnel run plus a wipe, against its own emulators with fake data (needs Java 21; about 10 minutes; stop `npm run dev` first; never live). Prints the stage table and exits 1 on a missed criterion (ADR-032 addendum)
