@@ -512,6 +512,77 @@ describe('http client: PUT and plain http (ADR-059)', () => {
     expect(h.calls.map((call) => call.url)).not.toContain('http://api.example.com/b');
   });
 
+  it('gives a default client no plain http at all, the metadata host included', async () => {
+    const h = harness({ '*': [json({ ok: true })] }, keyed);
+    await expect(
+      h.client.getJson('http://metadata.google.internal/x', Schema, opts),
+    ).rejects.toMatchObject({ code: 'insecure_url' });
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it('never follows a redirect to plain http, even to a host on the plain-http list', async () => {
+    const h = harness(
+      {
+        '/a': [
+          new Response('', {
+            status: 302,
+            headers: { location: 'http://metadata.google.internal/computeMetadata/v1/x' },
+          }),
+        ],
+      },
+      { ...keyed, plainHttpHosts: ['metadata.google.internal'] },
+    );
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      { code: 'http_status' },
+    );
+    expect(h.calls.map((call) => new URL(call.url).host)).toEqual(['api.example.com']);
+  });
+
+  it('refuses a forbidden redirect target first, with a log line, over plain http and on a PUT', async () => {
+    const h = harness({
+      '/robots.txt': NO_ROBOTS,
+      '/a': [
+        new Response('', { status: 302, headers: { location: 'http://uk.linkedin.com/jobs/view/1' } }),
+      ],
+      '/b': [
+        new Response('', { status: 307, headers: { location: 'https://uk.linkedin.com/jobs/view/1' } }),
+      ],
+    });
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      { code: 'forbidden_host' },
+    );
+    expect(h.logs.filter((entry) => entry.event === 'http.forbidden_host')).toHaveLength(1);
+    await expect(
+      h.client.putJson('https://api.example.com/b', {}, Schema, opts),
+    ).rejects.toMatchObject({ code: 'forbidden_host' });
+    expect(h.logs.filter((entry) => entry.event === 'http.forbidden_host')).toHaveLength(2);
+    expect(h.calls.map((call) => new URL(call.url).host)).not.toContain('uk.linkedin.com');
+  });
+
+  it('matches the plain-http list on the exact host: port, userinfo and look-alike forms are refused', async () => {
+    const h = harness(
+      { '*': [json({ ok: true })] },
+      { ...keyed, plainHttpHosts: ['metadata.google.internal'] },
+    );
+    for (const url of [
+      'http://metadata.google.internal:8080/a',
+      'http://user@metadata.google.internal/a',
+      'http://user:pw@metadata.google.internal/a',
+      'http://metadata.google.internal./a',
+      'http://2852039166/a',
+      'http://[::ffff:169.254.169.254]/a',
+      'http://metadata.google.internal%2eevil.com/a',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts), url).rejects.toMatchObject({
+        code: 'insecure_url',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
+    await expect(
+      h.client.getJson('http://METADATA.Google.Internal/a', Schema, opts),
+    ).resolves.toEqual({ ok: true });
+  });
+
   it('keeps refusing LinkedIn, Indeed, Wellfound and Glassdoor on the plain-http and PUT paths', async () => {
     const h = harness({ '*': [json({ ok: true })] }, keyed);
     for (const url of [

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { BILLING_GUARD } from '../config.js';
+import { BILLING_GUARD, PLAIN_HTTP_HOSTS } from '../config.js';
 import { createHttpClient, type HttpLog } from '../http/client.js';
 
 /**
@@ -11,7 +11,8 @@ import { createHttpClient, type HttpLog } from '../http/client.js';
  * - The access token lives in this closure. It goes into one `Authorization` header and nowhere
  *   else: the http client logs hosts, labels and codes only, and its errors carry a code, not text.
  * - Every call goes through `createHttpClient`: timeout, at most 3 attempts with backoff, a run
- *   deadline, zod on every answer. Plain http is allowed for the metadata host only.
+ *   deadline, zod on every answer. Plain http is allowed for the metadata host only,
+ *   for this client only, and never through a redirect.
  */
 
 const METADATA = 'http://metadata.google.internal/computeMetadata/v1';
@@ -75,6 +76,7 @@ export function createBillingClient(deps: BillingClientDeps): BillingClient {
     retryAfterCapMs: 10_000,
     maxBodyBytes: 64_000,
     deadline: deps.deadline,
+    plainHttpHosts: PLAIN_HTTP_HOSTS,
     log: deps.log,
   });
   const metadata = { 'Metadata-Flavor': 'Google' };

@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 
-import { FORBIDDEN_FETCH_HOSTS, PLAIN_HTTP_HOSTS } from '../config.js';
+import { FORBIDDEN_FETCH_HOSTS } from '../config.js';
 import { ALLOW_ALL, robotsFromResponse, type RobotsPolicy } from './robots.js';
 
 /**
@@ -90,8 +90,9 @@ export interface HttpClientDeps {
    */
   forbiddenHosts?: readonly string[];
   /**
-   * The only hosts (exact names) that may be requested over plain `http:`, redirects included.
-   * Every other host is HTTPS-only. Defaults to `PLAIN_HTTP_HOSTS` (the metadata server).
+   * The only hosts (exact host, port included) that may be requested over plain `http:`, for a
+   * direct request only: a redirect is always HTTPS-only. Defaults to none; only the billing
+   * client passes `PLAIN_HTTP_HOSTS` (the metadata server, ADR-059).
    */
   plainHttpHosts?: readonly string[];
   /** Pauses carried over from earlier runs: no request goes to these hosts until then. */
@@ -221,8 +222,6 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       }
       if (!REDIRECT_STATUS.has(response.status)) return response;
       void response.body?.cancel().catch(() => undefined);
-      // A write is never replayed against a new location.
-      if (init.method !== 'GET') throw new HttpError('http_status', response.status);
       const location = response.headers.get('location');
       let next: URL | null;
       try {
@@ -230,12 +229,16 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       } catch {
         next = null;
       }
-      if (!next || hop >= MAX_REDIRECTS || !schemeAllowed(next)) {
-        throw new HttpError('http_status', response.status);
-      }
-      if (isForbidden(next.hostname)) {
+      // The forbidden-host refusal comes first, on every path (ADR-049, ADR-059).
+      if (next && isForbidden(next.hostname)) {
         deps.log('warn', 'http.forbidden_host', { host: next.host, path: next.pathname, label });
         throw new HttpError('forbidden_host');
+      }
+      // A write is never replayed against a new location.
+      if (init.method !== 'GET') throw new HttpError('http_status', response.status);
+      // Redirects are https-only for every client, plain-http hosts included.
+      if (!next || hop >= MAX_REDIRECTS || next.protocol !== 'https:') {
+        throw new HttpError('http_status', response.status);
       }
       target = next;
       await slot(target.host, Math.max(intervalMs, deps.hostPolicy(target.host).intervalMs));
@@ -294,7 +297,9 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     if (url.protocol === 'https:') return true;
     return (
       url.protocol === 'http:' &&
-      (deps.plainHttpHosts ?? PLAIN_HTTP_HOSTS).includes(url.hostname.toLowerCase())
+      url.username === '' &&
+      url.password === '' &&
+      (deps.plainHttpHosts ?? []).includes(url.host)
     );
   }
 
