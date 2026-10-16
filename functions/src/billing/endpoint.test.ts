@@ -98,6 +98,81 @@ describe('billingGuard wiring: a message with no data', () => {
   });
 });
 
+/** Removes comments but not string contents: a `/*` inside a string is not a comment. */
+function stripComments(source: string): string {
+  let out = '';
+  for (let i = 0; i < source.length;) {
+    const char = source[i] ?? '';
+    if (char === '"' || char === "'" || char === '`') {
+      let j = i + 1;
+      while (j < source.length && source[j] !== char) j += source[j] === '\\' ? 2 : 1;
+      out += source.slice(i, j + 1);
+      i = j + 1;
+    } else if (source.startsWith('//', i)) {
+      while (i < source.length && source[i] !== '\n') i++;
+    } else if (source.startsWith('/*', i)) {
+      const end = source.indexOf('*/', i + 2);
+      i = end === -1 ? source.length : end + 2;
+    } else {
+      out += char;
+      i++;
+    }
+  }
+  return out;
+}
+
+const ALLOWED_IMPORTS = new Set([
+  'zod',
+  'node:timers/promises',
+  'firebase-functions/pubsub',
+  '@hireframe/shared',
+  '../options.js',
+  '../config.js',
+  '../log.js',
+  '../http/client.js',
+  './client.js',
+  './decide.js',
+  './handler.js',
+  './schema.js',
+]);
+const ALLOWED_URLS = new Set([
+  'http://metadata.google.internal/computeMetadata/v1',
+  'https://cloudbilling.googleapis.com/v1',
+]);
+
+const FORBIDDEN: [string, RegExp][] = [
+  ['firebase-admin', /firebase-admin/i],
+  ['Firestore', /getFirestore|Firestore|\bdb\(\)/i],
+  ['Storage', /getStorage|\bStorage\b/i],
+  ['publishing', /\bpublish(Message)?\(|\bPubSub\b|@google-cloud\/pubsub/],
+  ['calling a callable', /httpsCallable/],
+  ['Cloud Tasks', /CloudTasks|@google-cloud\/tasks|getFunctions|enqueue/],
+  ['a timer re-run', /\bsetTimeout\b|\bsetInterval\b|\bsetImmediate\b/],
+  ['a schedule', /onSchedule|onDocument|onObject|onCall|onRequest/],
+  ['secrets', /defineSecret|secrets:/],
+  ['a project override', /GCLOUD_PROJECT|GOOGLE_CLOUD_PROJECT|firebase-functions\/params/],
+];
+
+/** Everything a billing source file must not do; empty means clean. */
+function violations(name: string, source: string): string[] {
+  const code = stripComments(source);
+  const found: string[] = [];
+  for (const [what, pattern] of FORBIDDEN) if (pattern.test(code)) found.push(what);
+  for (const match of code.matchAll(/(?:\bfrom\s+|\bimport\s+)['"]([^'"]+)['"]/g)) {
+    if (!ALLOWED_IMPORTS.has(match[1] ?? '')) found.push(`import ${match[1]}`);
+  }
+  if (/\bimport\s*\(|\brequire\s*\(/.test(code)) found.push('a dynamic import');
+  for (const match of code.matchAll(/https?:\/\/[^\s'"`]+/g)) {
+    if (!ALLOWED_URLS.has(match[0])) found.push(`url ${match[0]}`);
+  }
+  const fetches = code.match(/(?<![\w.])fetch\(|\.fetch\(/g) ?? [];
+  const allowedFetch = name === 'endpoint.ts' ? 1 : 0;
+  if (fetches.length > allowedFetch || (allowedFetch && !code.includes('globalThis.fetch('))) {
+    found.push('a direct fetch');
+  }
+  return found;
+}
+
 describe('billing source guard: no way to trigger or re-run itself (CLAUDE.md hard rule)', () => {
   const dir = new URL('./', import.meta.url);
   const sources = readdirSync(dir)
@@ -114,31 +189,29 @@ describe('billing source guard: no way to trigger or re-run itself (CLAUDE.md ha
     ]);
   });
 
-  const forbidden: [string, RegExp][] = [
-    ['firebase-admin', /firebase-admin/],
-    ['Firestore', /getFirestore|Firestore|\bdb\(\)/],
-    ['Storage', /getStorage|\bStorage\b/],
-    ['publishing', /\.publish\(|\bPubSub\b|@google-cloud\/pubsub/],
-    ['calling a callable', /httpsCallable/],
-    ['Cloud Tasks', /CloudTasks|@google-cloud\/tasks|getFunctions|enqueue/],
-    ['a timer re-run', /\bsetTimeout\b|\bsetInterval\b|\bsetImmediate\b/],
-    ['a schedule', /onSchedule|onDocument|onObject|onCall|onRequest/],
-    ['secrets', /defineSecret|secrets:/],
-  ];
+  it.each(sources)('%s has none of the forbidden calls, imports or URLs', (name, source) => {
+    expect(violations(name, source)).toEqual([]);
+  });
 
-  it.each(sources)('%s has none of the forbidden calls', (_name, source) => {
-    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    for (const [what, pattern] of forbidden) {
-      expect(pattern.test(code), what).toBe(false);
+  it('never names a project literal or an override: the target comes from the metadata server only', () => {
+    for (const [name, source] of sources) {
+      expect(source, name).not.toMatch(/hireframe-f6b03/);
     }
   });
 
-  it('never names a project literal: the target comes from the metadata server only', () => {
-    for (const [name, source] of sources) {
-      if (name === 'endpoint.ts' || name === 'client.ts' || name === 'decide.ts') continue;
-      expect(source, name).not.toMatch(/hireframe-f6b03/);
-    }
-    const client = sources.find(([name]) => name === 'client.ts')?.[1] ?? '';
-    expect(client).not.toMatch(/hireframe-f6b03/);
+  it.each([
+    ['an import from outside billing', "import { x } from '../scan/store.js';"],
+    ['a lower-case firestore import', "import { y } from '@google-cloud/firestore';"],
+    ['a dynamic import', "const m = await import('../scan/store.js');"],
+    [
+      'REST to Pub/Sub',
+      "await fetch('https://pubsub.googleapis.com/v1/projects/p/topics/t:publish');",
+    ],
+    ['a fetch to the function itself', "await globalThis.fetch('https://x.run.app/');"],
+    ['publishMessage', 'await topic.publishMessage({ data });'],
+    ['code hidden after /* in a string', "const a = '/*'; topic.publish(x); const b = '*/';"],
+    ['a project override', 'const p = process.env.GCLOUD_PROJECT;'],
+  ])('the guard itself catches %s', (_label, snippet) => {
+    expect(violations('client.ts', snippet).length).toBeGreaterThan(0);
   });
 });
