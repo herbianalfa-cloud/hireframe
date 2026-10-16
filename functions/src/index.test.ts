@@ -73,6 +73,7 @@ describe('deployed functions (ADR-017)', () => {
     ['application', ['ANTHROPIC_API_KEY']],
     ['generateCvs', ['ANTHROPIC_API_KEY']],
     ['purgeOldData', []],
+    ['billingGuard', []],
     ['ingestEmailJobs', ['ANTHROPIC_API_KEY', 'INGEST_HMAC_SECRET']],
     ['getDigest', ['INGEST_HMAC_SECRET']],
   ])('%s mounts %j', (name, secrets) => {
@@ -282,5 +283,62 @@ describe('purgeOldData (ADR-057)', () => {
     const source = readFileSync(new URL('./retention/schedule.ts', import.meta.url), 'utf8');
     expect(source).toMatch(/^\s*maxInstances: 1,$/m);
     expect(source).toMatch(/^\s*retryCount: 0,$/m);
+  });
+});
+
+describe('billingGuard (ADR-059)', () => {
+  const endpoint = (
+    deployed.billingGuard as unknown as {
+      __endpoint?: {
+        eventTrigger?: {
+          eventType?: string;
+          eventFilters?: Record<string, string>;
+          retry?: boolean;
+        };
+        serviceAccountEmail?: string;
+        timeoutSeconds?: number;
+        availableMemoryMb?: number | string;
+        maxInstances?: number | string;
+        secretEnvironmentVariables?: unknown[];
+        environmentVariables?: Record<string, string>;
+        callableTrigger?: object;
+        httpsTrigger?: object;
+        scheduleTrigger?: object;
+      };
+    }
+  ).__endpoint;
+
+  it('is triggered by a Pub/Sub message on the billing-guard topic, with no retry', () => {
+    expect(endpoint?.eventTrigger?.eventType).toBe('google.cloud.pubsub.topic.v1.messagePublished');
+    expect(endpoint?.eventTrigger?.eventFilters).toEqual({ topic: 'billing-guard' });
+    expect(endpoint?.eventTrigger?.retry).toBe(false);
+  });
+
+  // The manifest has one account; firebase-tools copies it to the Eventarc trigger too
+  // (gcp/cloudfunctionsv2.js), and RUNBOOK check C14b reads both live.
+  it('runs as hireframe-billing-guard, not the shared runtime account', () => {
+    expect(endpoint?.serviceAccountEmail).toBe(
+      'hireframe-billing-guard@hireframe-f6b03.iam.gserviceaccount.com',
+    );
+  });
+
+  it('states 1 instance, 60 s from the shared table and 256 MiB', () => {
+    expect(endpoint?.maxInstances).toBe(1);
+    expect(endpoint?.timeoutSeconds).toBe(CALLABLE_TIMEOUT_SECONDS.billingGuard);
+    expect(endpoint?.timeoutSeconds).toBe(60);
+    expect(endpoint?.availableMemoryMb).toBe(256);
+  });
+
+  it('mounts no secrets and has no other trigger', () => {
+    expect(endpoint?.secretEnvironmentVariables ?? []).toEqual([]);
+    expect(endpoint?.callableTrigger).toBeUndefined();
+    expect(endpoint?.httpsTrigger).toBeUndefined();
+    expect(endpoint?.scheduleTrigger).toBeUndefined();
+  });
+
+  it('states maxInstances and retry in its own options, not only the global ones', () => {
+    const source = readFileSync(new URL('./billing/endpoint.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/^\s*maxInstances: 1,$/m);
+    expect(source).toMatch(/^\s*retry: false,$/m);
   });
 });

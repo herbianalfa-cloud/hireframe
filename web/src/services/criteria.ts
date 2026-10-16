@@ -11,14 +11,7 @@ import {
   type CriteriaVersion,
   type RescoreResult,
 } from '@hireframe/shared';
-import {
-  collection,
-  doc,
-  onSnapshot,
-  runTransaction,
-  serverTimestamp,
-  writeBatch,
-} from 'firebase/firestore';
+import { collection, doc, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore';
 
 import { buildCriteriaWrite } from './fact-writes';
 import { callOwnerCallable } from './callable';
@@ -27,6 +20,7 @@ import { errorCode, logError } from './log';
 import { listen, type Unsubscribe } from './profile';
 import { withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { watchSnapshot } from './reads';
 
 /**
  * Criteria services (PRD R3, ADR-019). `criteria/current` points at an immutable
@@ -53,7 +47,7 @@ export function watchCurrentCriteria(callback: (state: CriteriaState) => void): 
   };
   const stop = listen(async () => {
     const { db } = await getFirebase();
-    return onSnapshot(
+    return watchSnapshot(
       doc(db, DOCS.criteriaCurrent),
       (pointerSnapshot) => {
         versionUnsubscribe?.();
@@ -67,7 +61,7 @@ export function watchCurrentCriteria(callback: (state: CriteriaState) => void): 
           fail('The criteria pointer is invalid.');
           return;
         }
-        versionUnsubscribe = onSnapshot(
+        versionUnsubscribe = watchSnapshot(
           doc(db, PATHS.criteriaVersion(criteriaVersionId(pointer.data.version))),
           (versionSnapshot) => {
             const parsed = CriteriaVersionSchema.safeParse(
@@ -143,7 +137,7 @@ export function watchCriteriaHistory(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         collection(db, COLLECTIONS.criteria),
         (snapshot) => {
           const versions: CriteriaVersionSummary[] = [];

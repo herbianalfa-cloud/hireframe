@@ -6,6 +6,7 @@ import type { WorkRights } from './profile.js';
 import {
   applyHardRules,
   experienceAsks,
+  freshnessCutoff,
   isExpired,
   rightToWorkBlocks,
   type S1Input,
@@ -129,6 +130,21 @@ describe('applyHardRules', () => {
         isExpired({ postedAt: daysAgo(15), firstSeenAt: daysAgo(1) }, { freshness_days: 14 }, NOW),
       ).toBe(true);
       expect(isExpired({ firstSeenAt: daysAgo(10) }, { freshness_days: 14 }, NOW)).toBe(false);
+    });
+
+    it('crosses freshness_days at the boundary: 14 days is fresh, 1 ms more is expired', () => {
+      const criteria = { freshness_days: 14 };
+      const posted = (ageMs: number) => ({
+        postedAt: new Date(NOW.getTime() - ageMs),
+        firstSeenAt: daysAgo(1),
+      });
+      const fourteenDays = 14 * 24 * 60 * 60 * 1000;
+      expect(isExpired(posted(fourteenDays - 1), criteria, NOW)).toBe(false);
+      expect(isExpired(posted(fourteenDays), criteria, NOW)).toBe(false);
+      expect(isExpired(posted(fourteenDays + 1), criteria, NOW)).toBe(true);
+      expect(freshnessCutoff(criteria, NOW)).toEqual(daysAgo(14));
+      // A shorter window moves the boundary with it.
+      expect(isExpired(posted(8 * 24 * 60 * 60 * 1000), { freshness_days: 7 }, NOW)).toBe(true);
     });
   });
 

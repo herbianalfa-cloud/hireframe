@@ -12,3 +12,4 @@ export { application } from './applications/callable.js';
 export { generateCvs } from './applications/schedule.js';
 export { deleteAllData } from './wipe/callable.js';
 export { purgeOldData } from './retention/schedule.js';
+export { billingGuard } from './billing/endpoint.js';

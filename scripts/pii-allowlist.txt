@@ -14,3 +14,7 @@ hireframe-fns@hireframe-f6b03.iam.gserviceaccount.com
 github-deployer@hireframe-f6b03.iam.gserviceaccount.com
 # LinkedIn's job-alert sender, which the Gmail bridge routes on (docs/plans/m6-plan.md, M6).
 jobalerts-noreply@linkedin.com
+# The billing guard's own account (ADR-059) and the Google-managed Pub/Sub service agent that the
+# 8C release plan grants a role to (docs/plans/m8c-plan.md). Service accounts, not people.
+hireframe-billing-guard@hireframe-f6b03.iam.gserviceaccount.com
+*@gcp-sa-pubsub.iam.gserviceaccount.com

@@ -25,7 +25,6 @@ import {
   getDoc,
   getDocs,
   limit,
-  onSnapshot,
   query,
   Timestamp,
   type Firestore,
@@ -42,6 +41,7 @@ import { listen, type LiveState, type Unsubscribe } from './profile';
 import { specConstraints, type QuerySpec } from './query-spec';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { tally, watchSnapshot } from './reads';
 
 /**
  * Dashboard services (PRD R7, R11; ADR-038): the Today lists, the summary bar's counts and last run, the month's spend
@@ -162,7 +162,7 @@ export function watchTodayList(
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         run(db, todayListSpec(list), limit(TODAY_LIST_SIZE)),
         (snapshot) => {
           markOnce(`hf:list:${list}`, () => ({
@@ -209,7 +209,7 @@ export function prefetchToday(): Unsubscribe {
   void getFirebase().then(
     ({ db }) => {
       if (stopped) return;
-      unsubscribe = onSnapshot(
+      unsubscribe = watchSnapshot(
         run(db, todayListSpec('apply'), limit(TODAY_LIST_SIZE)),
         (snapshot) => {
           // When the data arrives, to tell whether the list or the owner check gates `hf:usable`.
@@ -241,7 +241,7 @@ export function watchAddedByYou(callback: (state: LiveState<JobView[]>) => void)
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         run(db, addedByYouSpec, limit(ADDED_BY_YOU_SIZE)),
         (snapshot) => {
           const { jobs: views, invalid } = parseJobs(snapshot.docs);
@@ -262,7 +262,12 @@ export function watchAddedByYou(callback: (state: LiveState<JobView[]>) => void)
 async function count(label: string, source: Query): Promise<number> {
   try {
     const snapshot = await withRetry(
-      () => withTimeout(getCountFromServer(source), READ_TIMEOUT_MS, label),
+      () =>
+        withTimeout(
+          tally(getCountFromServer(source), 'dashboard:getCountFromServer'),
+          READ_TIMEOUT_MS,
+          label,
+        ),
       { label: `dashboard.${label}`, isRetryable: isTransient },
     );
     markOnce(`hf:count:${label}`, { ok: true });
@@ -302,7 +307,7 @@ export function watchLastRun(callback: (state: LiveState<Run | null>) => void): 
   return listen(
     async () => {
       const { db } = await getFirebase();
-      return onSnapshot(
+      return watchSnapshot(
         query(collection(db, COLLECTIONS.runs), ...specConstraints(lastRunSpec), limit(1)),
         (snapshot) => {
           const first = snapshot.docs[0];
@@ -364,7 +369,11 @@ export function spendViewFrom(usageData: unknown, configCap: number | undefined)
 /** `config/app.monthlyCapPence`, or undefined when unset or unreadable (the meter then falls back). */
 async function readConfiguredCap(db: Firestore): Promise<number | undefined> {
   try {
-    const snapshot = await withTimeout(getDoc(doc(db, DOCS.appConfig)), READ_TIMEOUT_MS, 'config');
+    const snapshot = await withTimeout(
+      tally(getDoc(doc(db, DOCS.appConfig)), 'dashboard:getDoc'),
+      READ_TIMEOUT_MS,
+      'config',
+    );
     const cap: unknown = snapshot.data()?.monthlyCapPence;
     return typeof cap === 'number' && Number.isInteger(cap) && cap >= 0 ? cap : undefined;
   } catch (error) {
@@ -383,7 +392,7 @@ export function watchSpend(
     async () => {
       const { db } = await getFirebase();
       const configCap = await readConfiguredCap(db);
-      return onSnapshot(
+      return watchSnapshot(
         doc(db, PATHS.usage(monthKey(now))),
         (snapshot) => {
           const view = spendViewFrom(snapshot.exists() ? snapshot.data() : null, configCap);
@@ -423,7 +432,7 @@ export async function loadAgreement(now: Date, days = AGREEMENT_DAYS): Promise<A
     withRetry(
       () =>
         withTimeout(
-          getDocs(run(db, specs.rated, limit(AGREEMENT_READ_LIMIT))),
+          tally(getDocs(run(db, specs.rated, limit(AGREEMENT_READ_LIMIT))), 'dashboard:getDocs'),
           READ_TIMEOUT_MS,
           'agreement ratings',
         ),
@@ -432,7 +441,7 @@ export async function loadAgreement(now: Date, days = AGREEMENT_DAYS): Promise<A
     withRetry(
       () =>
         withTimeout(
-          getDocs(run(db, specs.applied, limit(AGREEMENT_READ_LIMIT))),
+          tally(getDocs(run(db, specs.applied, limit(AGREEMENT_READ_LIMIT))), 'dashboard:getDocs'),
           READ_TIMEOUT_MS,
           'agreement applied',
         ),

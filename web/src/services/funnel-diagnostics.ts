@@ -35,6 +35,7 @@ import { errorCode, logError } from './log';
 import { specConstraints, type QuerySpec } from './query-spec';
 import { isTransient, withRetry, withTimeout } from './resilience';
 import { timestampsToDates } from './timestamps';
+import { tally } from './reads';
 
 /**
  * Funnel diagnostics for the System screen (docs/plans/funnel-intake-plan.md, ADR-043). The
@@ -162,7 +163,7 @@ interface LoadedJob {
 }
 
 async function readSet(source: Query): Promise<LoadedJob[]> {
-  const snapshot = await guard('jobs', () => getDocs(source));
+  const snapshot = await guard('jobs', () => tally(getDocs(source), 'funnel-diagnostics:getDocs'));
   const jobs: LoadedJob[] = [];
   let invalid = 0;
   for (const item of snapshot.docs) {
@@ -183,7 +184,11 @@ const withoutTexts = (jobs: readonly LoadedJob[]): DiagnosticJob[] =>
 
 async function count(source: Query, label: string): Promise<number | null> {
   try {
-    return (await guard(label, () => getCountFromServer(source))).data().count;
+    return (
+      await guard(label, () =>
+        tally(getCountFromServer(source), 'funnel-diagnostics:getCountFromServer'),
+      )
+    ).data().count;
   } catch (error) {
     if (error instanceof IndexBuildingError) throw error;
     return null;
@@ -192,11 +197,16 @@ async function count(source: Query, label: string): Promise<number | null> {
 
 async function loadCriteria(): Promise<CriteriaContent | null> {
   const { db } = await getFirebase();
-  const pointer = await guard('criteria', () => getDoc(doc(db, DOCS.criteriaCurrent)));
+  const pointer = await guard('criteria', () =>
+    tally(getDoc(doc(db, DOCS.criteriaCurrent)), 'funnel-diagnostics:getDoc'),
+  );
   const parsedPointer = CriteriaPointerSchema.safeParse(timestampsToDates(pointer.data()));
   if (!parsedPointer.success) return null;
   const version = await guard('criteria', () =>
-    getDoc(doc(db, PATHS.criteriaVersion(criteriaVersionId(parsedPointer.data.version)))),
+    tally(
+      getDoc(doc(db, PATHS.criteriaVersion(criteriaVersionId(parsedPointer.data.version)))),
+      'funnel-diagnostics:getDoc',
+    ),
   );
   const parsed = CriteriaVersionSchema.safeParse(timestampsToDates(version.data()));
   return parsed.success ? parsed.data : null;
@@ -204,7 +214,9 @@ async function loadCriteria(): Promise<CriteriaContent | null> {
 
 async function loadWorkRights(): Promise<WorkRights | null> {
   const { db } = await getFirebase();
-  const snapshot = await guard('work-rights', () => getDoc(doc(db, DOCS.profileMain)));
+  const snapshot = await guard('work-rights', () =>
+    tally(getDoc(doc(db, DOCS.profileMain)), 'funnel-diagnostics:getDoc'),
+  );
   const parsed = ProfileSettingsSchema.safeParse(timestampsToDates(snapshot.data()));
   return parsed.success ? parsed.data.workRights : null;
 }

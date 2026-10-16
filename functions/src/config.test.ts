@@ -5,15 +5,18 @@ import {
   API_TERMS_HOSTS,
   ApplicationOverridesSchema,
   APPLICATIONS,
+  BILLING_GUARD,
   defaultRunBudgetPence,
   ALERT_LINK_HOSTS,
   ALERTS,
   FUNNEL,
   funnelLimits,
+  guardMode,
   HMAC,
   hostPolicy,
   LLM,
   MODELS,
+  PLAIN_HTTP_HOSTS,
   PURPOSE_CALLABLE,
   RUNTIME_SERVICE_ACCOUNT,
   SCAN,
@@ -223,5 +226,30 @@ describe('retention budgets (ADR-057)', () => {
     expect(RETENTION.deadlineMs + RETENTION.chunkWorstCaseMs).toBeLessThanOrEqual(
       CALLABLE_TIMEOUT_SECONDS.purgeOldData * 1000,
     );
+  });
+});
+
+describe('guardMode (ADR-059)', () => {
+  it('is dry run when the variable is unset', () => {
+    expect(guardMode({})).toBe('dry_run');
+  });
+
+  it('arms only for the exact string armed', () => {
+    const name = BILLING_GUARD.modeEnvVar;
+    expect(guardMode({ [name]: 'armed' })).toBe('armed');
+    for (const value of ['ARMED', ' armed', 'armed ', 'true', '1', '', 'dry_run']) {
+      expect(guardMode({ [name]: value }), JSON.stringify(value)).toBe('dry_run');
+    }
+  });
+
+  it('keeps the guard under the function timeout and in the shared table', () => {
+    expect(BILLING_GUARD.deadlineMs).toBeLessThan(CALLABLE_TIMEOUT_SECONDS.billingGuard * 1000);
+    expect(BILLING_GUARD.requestTimeoutMs).toBeLessThan(BILLING_GUARD.deadlineMs);
+  });
+});
+
+describe('plain http (ADR-059)', () => {
+  it('allows exactly the metadata server', () => {
+    expect([...PLAIN_HTTP_HOSTS]).toEqual(['metadata.google.internal']);
   });
 });

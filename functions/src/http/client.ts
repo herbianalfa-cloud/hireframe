@@ -11,7 +11,7 @@ import { ALLOW_ALL, robotsFromResponse, type RobotsPolicy } from './robots.js';
  * - Times out every request, stops at the run deadline, and makes at most 3 attempts with
  *   exponential backoff on 429/5xx/timeouts/network errors (Retry-After honoured up to a cap).
  * - zod-parses every JSON response. 404s and schema errors are never retried.
- * Logging is injected (fixed event names, host + path label only, never a URL: Adzuna's key is
+ * Logging is injected (fixed event names; host, path and label only, never a URL or query: Adzuna's key is
  * in the query string), so the detect-ats script can use this without Firebase.
  */
 
@@ -29,7 +29,9 @@ export type HttpErrorCode =
   /** The host asked us to stay away (a Retry-After beyond the cap); no request was made. */
   | 'host_paused'
   /** A host we never fetch (CLAUDE.md hard rule: LinkedIn and the other alert-only boards). */
-  | 'forbidden_host';
+  | 'forbidden_host'
+  /** A plain `http:` URL for a host that isn't on the plain-http list. */
+  | 'insecure_url';
 
 export class HttpError extends Error {
   override name = 'HttpError';
@@ -87,6 +89,12 @@ export interface HttpClientDeps {
    * `FORBIDDEN_FETCH_HOSTS`; a client can only be made laxer by passing a shorter list on purpose.
    */
   forbiddenHosts?: readonly string[];
+  /**
+   * The only hosts (exact host, port included) that may be requested over plain `http:`, for a
+   * direct request only: a redirect is always HTTPS-only. Defaults to none; only the billing
+   * client passes `PLAIN_HTTP_HOSTS` (the metadata server, ADR-059).
+   */
+  plainHttpHosts?: readonly string[];
   /** Pauses carried over from earlier runs: no request goes to these hosts until then. */
   paused?: readonly HostPause[];
   log: HttpLog;
@@ -100,6 +108,16 @@ export interface RequestOptions {
 
 export interface HttpClient {
   getJson<T>(url: string, schema: z.ZodType<T>, options: RequestOptions): Promise<T>;
+  /**
+   * PUT a JSON body and parse the JSON answer. Same timeout, retry and zod rules as `getJson`;
+   * redirects are not followed. Only for calls that are safe to repeat (the caller's rule).
+   */
+  putJson<T>(url: string, body: unknown, schema: z.ZodType<T>, options: RequestOptions): Promise<T>;
+  /**
+   * GET a small plain-text answer and return it untouched (the caller validates it). Same
+   * timeout, retry and size rules as `getJson`.
+   */
+  getText(url: string, options: RequestOptions): Promise<string>;
   /** Requests started through this client (each attempt counts; robots.txt fetches don't). */
   requests(): number;
   /** Hosts still paused, to carry into the next run. */
@@ -175,6 +193,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     headers: Record<string, string>,
     counted: boolean,
     label: string,
+    init: { method: 'GET' | 'PUT'; body?: string } = { method: 'GET' },
   ): Promise<Response> {
     if (remaining() <= 0) throw new HttpError('deadline');
     await slot(url.host, intervalMs);
@@ -187,6 +206,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     // Redirects are followed by hand, a few hops at most, and every hop is checked against the
     // forbidden list: a board API must not be able to send us to LinkedIn (ADR-049).
     let target = url;
+    let hopHeaders = headers;
     for (let hop = 0; ; hop++) {
       const timeoutMs = Math.min(policy.timeoutMs, remaining());
       if (timeoutMs <= 0) throw new HttpError('deadline');
@@ -194,7 +214,9 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       let response: Response;
       try {
         response = await deps.fetch(target, {
-          headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...headers },
+          method: init.method,
+          ...(init.body === undefined ? {} : { body: init.body }),
+          headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...hopHeaders },
           redirect: 'manual',
           signal: AbortSignal.timeout(timeoutMs),
         });
@@ -213,13 +235,19 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       } catch {
         next = null;
       }
-      if (!next || hop >= MAX_REDIRECTS || !/^https?:$/.test(next.protocol)) {
-        throw new HttpError('http_status', response.status);
-      }
-      if (isForbidden(next.hostname)) {
-        deps.log('warn', 'http.forbidden_host', { host: next.host, label });
+      // The forbidden-host refusal comes first, on every path (ADR-049, ADR-059).
+      if (next && isForbidden(next.hostname)) {
+        deps.log('warn', 'http.forbidden_host', { host: next.host, path: next.pathname, label });
         throw new HttpError('forbidden_host');
       }
+      // A write is never replayed against a new location.
+      if (init.method !== 'GET') throw new HttpError('http_status', response.status);
+      // Redirects are https-only for every client, plain-http hosts included.
+      if (!next || hop >= MAX_REDIRECTS || next.protocol !== 'https:') {
+        throw new HttpError('http_status', response.status);
+      }
+      // Like the Fetch standard: credentials never follow a redirect to another origin.
+      if (next.origin !== target.origin) hopHeaders = withoutCredentials(hopHeaders);
       target = next;
       await slot(target.host, Math.max(intervalMs, deps.hostPolicy(target.host).intervalMs));
     }
@@ -228,7 +256,13 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   async function readBody(response: Response): Promise<string> {
     const declared = Number(response.headers.get('content-length') ?? '0');
     if (declared > deps.maxBodyBytes) throw new HttpError('too_large', response.status);
-    const body = await response.text();
+    let body: string;
+    try {
+      body = await response.text();
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      throw new HttpError(name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network');
+    }
     if (body.length > deps.maxBodyBytes) throw new HttpError('too_large', response.status);
     return body;
   }
@@ -266,20 +300,67 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   }
 
   function isForbidden(hostname: string): boolean {
-    const host = hostname.toLowerCase();
+    const host = hostname.toLowerCase().replace(/\.+$/, '');
     return (deps.forbiddenHosts ?? FORBIDDEN_FETCH_HOSTS).some(
       (banned) => host === banned || host.endsWith(`.${banned}`),
     );
   }
 
-  async function getJson<T>(rawUrl: string, schema: z.ZodType<T>, options: RequestOptions) {
+  /** HTTPS always; plain HTTP only for the exact hosts on the plain-http list. */
+  function schemeAllowed(url: URL): boolean {
+    if (url.protocol === 'https:') return true;
+    return (
+      url.protocol === 'http:' &&
+      url.username === '' &&
+      url.password === '' &&
+      (deps.plainHttpHosts ?? []).includes(url.host)
+    );
+  }
+
+  async function requestJson<T>(
+    method: 'GET' | 'PUT',
+    rawUrl: string,
+    body: unknown,
+    schema: z.ZodType<T>,
+    options: RequestOptions,
+  ): Promise<T> {
+    return request(method, rawUrl, body, options, (text, status) => {
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new HttpError('invalid_json', status);
+      }
+      const parsed = schema.safeParse(json);
+      if (!parsed.success) throw new HttpError('schema', status, parsed.error.issues.length);
+      return parsed.data;
+    });
+  }
+
+  async function request<T>(
+    method: 'GET' | 'PUT',
+    rawUrl: string,
+    body: unknown,
+    options: RequestOptions,
+    parseBody: (text: string, status: number) => T,
+  ): Promise<T> {
     const url = new URL(rawUrl);
     const policy = deps.hostPolicy(url.host);
-    const fields = { host: url.host, label: options.label };
+    // Host and path only: Adzuna's key is in the query, and headers carry tokens.
+    const fields = { host: url.host, path: url.pathname, label: options.label };
     if (isForbidden(url.hostname)) {
       deps.log('warn', 'http.forbidden_host', fields);
       throw new HttpError('forbidden_host');
     }
+    if (!schemeAllowed(url)) {
+      deps.log('warn', 'http.failed', { ...fields, attempt: 0, code: 'insecure_url' });
+      throw new HttpError('insecure_url');
+    }
+    const init = method === 'PUT' ? { method, body: JSON.stringify(body) } : ({ method } as const);
+    const headers =
+      method === 'PUT'
+        ? { 'Content-Type': 'application/json', ...options.headers }
+        : (options.headers ?? {});
     if ((pausedUntil.get(url.host) ?? 0) > deps.now()) {
       logPause(url.host, options.label);
       throw new HttpError('host_paused');
@@ -295,27 +376,9 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       let failure: HttpError;
       let waitMs = deps.backoffBaseMs * 2 ** (attempt - 1) * (1 + deps.random() * 0.25);
       try {
-        const response = await send(
-          url,
-          policy,
-          intervalMs,
-          options.headers ?? {},
-          true,
-          options.label,
-        );
+        const response = await send(url, policy, intervalMs, headers, true, options.label, init);
         if (response.ok) {
-          const body = await readBody(response);
-          let json: unknown;
-          try {
-            json = JSON.parse(body);
-          } catch {
-            throw new HttpError('invalid_json', response.status);
-          }
-          const parsed = schema.safeParse(json);
-          if (!parsed.success) {
-            throw new HttpError('schema', response.status, parsed.error.issues.length);
-          }
-          return parsed.data;
+          return parseBody(await readBody(response), response.status);
         }
         // Not awaited: a cancelled body we don't need must never hold up the run.
         void response.body?.cancel().catch(() => undefined);
@@ -361,13 +424,30 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   }
 
   return {
-    getJson,
+    getJson: (rawUrl, schema, options) => requestJson('GET', rawUrl, undefined, schema, options),
+    getText: (rawUrl, options) =>
+      request(
+        'GET',
+        rawUrl,
+        undefined,
+        { ...options, headers: { Accept: 'text/plain', ...options.headers } },
+        (text) => text,
+      ),
+    putJson: (rawUrl, body, schema, options) => requestJson('PUT', rawUrl, body, schema, options),
     requests: () => requestCount,
     pauses: () =>
       [...pausedUntil.entries()]
         .filter(([, until]) => until > deps.now())
         .map(([host, until]) => ({ host, until })),
   };
+}
+
+const CREDENTIAL_HEADERS = new Set(['authorization', 'metadata-flavor']);
+
+function withoutCredentials(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase())),
+  );
 }
 
 function codeFields(error: HttpError): Record<string, string | number> {

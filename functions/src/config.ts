@@ -243,6 +243,12 @@ export const FORBIDDEN_FETCH_HOSTS = [
   'glassdoor.fr',
 ] as const;
 
+/**
+ * The only hosts requested over plain `http:` (exact names). The GCE metadata server has no
+ * TLS; every other host is HTTPS-only (ADR-059).
+ */
+export const PLAIN_HTTP_HOSTS = ['metadata.google.internal'] as const;
+
 export interface HostPolicyConfig {
   robots: 'enforce' | 'api-terms';
   intervalMs: number;
@@ -606,3 +612,30 @@ export const CV_WORKER_SCHEDULE = {
 export const ApplicationOverridesSchema = z
   .object({ dailyCapPence: z.number().min(0).max(200) })
   .partial();
+
+/** The runtime mode of `billingGuard` (ADR-059). Only the exact string `armed` arms it. */
+export type GuardMode = 'dry_run' | 'armed';
+
+/**
+ * The billing kill switch (ADR-059). The `hireframe-kill` budget publishes to `topic`;
+ * `billingGuard` runs as its own account with no secrets and no Firestore access. The target
+ * project is never configured here: it always comes from the metadata server.
+ */
+export const BILLING_GUARD = {
+  topic: 'billing-guard',
+  /** The one budget the guard acts on; a message from any other budget is ignored. */
+  budgetDisplayName: 'hireframe-kill',
+  currency: 'GBP',
+  serviceAccount: 'hireframe-billing-guard@hireframe-f6b03.iam.gserviceaccount.com',
+  /** A plain env var, not a `defineString` param: a param breaks non-interactive deploys. */
+  modeEnvVar: 'BILLING_GUARD_MODE',
+  /** Per request, metadata server and Cloud Billing alike. */
+  requestTimeoutMs: 10_000,
+  /** No request starts after this much of the run; under the 60 s function timeout. */
+  deadlineMs: 45_000,
+} as const;
+
+/** `armed` only for the exact string `armed`; unset, `ARMED`, ` armed` or `true` are all dry run. */
+export function guardMode(env: Readonly<Record<string, string | undefined>>): GuardMode {
+  return env[BILLING_GUARD.modeEnvVar] === 'armed' ? 'armed' : 'dry_run';
+}

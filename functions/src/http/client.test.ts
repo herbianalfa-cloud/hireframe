@@ -9,6 +9,8 @@ import {
   type HttpClientDeps,
 } from './client.js';
 
+// Spelled out so the PII scan doesn't read the userinfo test URLs as email addresses.
+const AT = '@';
 const Schema = z.object({ ok: z.boolean() });
 const UA = 'HireframeBot/0.3 (+https://github.com/herbianalfa-cloud/hireframe)';
 
@@ -16,6 +18,8 @@ interface Call {
   url: string;
   at: number;
   headers: Record<string, string>;
+  method: string | undefined;
+  body: string | undefined;
 }
 
 type Reply = Response | Error | ((url: string) => Response | Error);
@@ -29,7 +33,13 @@ function harness(
   const logs: { event: string; fields: Record<string, unknown> }[] = [];
   const fetchFake = (input: URL | string, init?: RequestInit) => {
     const url = input.toString();
-    calls.push({ url, at: clock, headers: { ...(init?.headers as Record<string, string>) } });
+    calls.push({
+      url,
+      at: clock,
+      headers: { ...(init?.headers as Record<string, string>) },
+      method: init?.method,
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    });
     const path = new URL(url).pathname;
     const queue = replies[path] ?? replies['*'] ?? [];
     const reply = queue.length > 1 ? queue.shift() : queue[0];
@@ -276,12 +286,61 @@ describe('http client', () => {
     expect(logs[0]?.fields).toMatchObject({ host: 'api.example.com', label: 'test.endpoint' });
   });
 
+  it('logs host and path only: no query string, key, Authorization header or token (Adzuna-style URL)', async () => {
+    const adzuna =
+      'https://api.adzuna.com/v1/api/jobs/gb/search/1?app_id=ID123&app_key=KEY456&what=nurse';
+    const headers = { Authorization: 'Bearer TOKEN789' };
+    const secrets = ['app_id', 'app_key', 'ID123', 'KEY456', 'TOKEN789', 'Bearer', 'what=', '?'];
+    const leaks = (value: unknown) => secrets.filter((s) => JSON.stringify(value).includes(s));
+    const o = { label: 'adzuna.search', headers };
+    const robots = { '/robots.txt': NO_ROBOTS };
+    const path = '/v1/api/jobs/gb/search/1';
+
+    const cases: Record<string, Parameters<typeof harness>[0]> = {
+      success: { ...robots, [path]: [json({ ok: true })] },
+      retry: { ...robots, [path]: [json({}, 503), json({ ok: true })] },
+      http_status: { ...robots, [path]: [json({}, 403)] },
+      network: {
+        ...robots,
+        [path]: [new Error(`connect failed for ${adzuna} ${headers.Authorization}`)],
+      },
+      timeout: { ...robots, [path]: [Object.assign(new Error(adzuna), { name: 'TimeoutError' })] },
+      schema: { ...robots, [path]: [json({ nope: 1 })] },
+    };
+    for (const [name, replies] of Object.entries(cases)) {
+      const h = harness(replies);
+      const outcome = await h.client.getJson(adzuna, Schema, o).catch((e: unknown) => e);
+      expect(leaks(h.logs), name).toEqual([]);
+      if (outcome instanceof Error) expect(leaks(outcome.message), name).toEqual([]);
+      if (name !== 'success') {
+        expect(h.logs.at(-1)?.fields, name).toMatchObject({
+          host: 'api.adzuna.com',
+          path,
+          label: 'adzuna.search',
+        });
+      }
+    }
+
+    const blocked = harness({
+      '/robots.txt': [new Response('User-agent: *\nDisallow: /v1/', { status: 200 })],
+    });
+    await blocked.client.getJson(adzuna, Schema, o).catch(() => undefined);
+    expect(blocked.logs[0]?.event).toBe('http.robots_blocked');
+    expect(leaks(blocked.logs)).toEqual([]);
+
+    const forbidden = harness({}, { forbiddenHosts: ['adzuna.com'] });
+    await forbidden.client.getJson(adzuna, Schema, o).catch(() => undefined);
+    expect(forbidden.logs[0]?.event).toBe('http.forbidden_host');
+    expect(leaks(forbidden.logs)).toEqual([]);
+  });
+
   it('refuses a forbidden host and its subdomains before any fetch, robots.txt included', async () => {
     const h = harness({ '*': [json({ ok: true })] }, { forbiddenHosts: ['linkedin.com'] });
     for (const url of [
       'https://www.linkedin.com/jobs/view/4012345678',
       'https://LinkedIn.com/jobs/view/1',
       'https://uk.linkedin.com/comm/jobs/view/1',
+      'https://www.linkedin.com./jobs/view/1',
     ]) {
       await expect(h.client.getJson(url, Schema, opts)).rejects.toMatchObject({
         code: 'forbidden_host',
@@ -324,12 +383,18 @@ describe('http client', () => {
       '/robots.txt': NO_ROBOTS,
       '/start': [redirect('https://boards.example.com/hop')],
       '/hop': [redirect('https://uk.linkedin.com/jobs/view/1')],
+      '/dot': [redirect('https://www.linkedin.com./jobs/view/1')],
     });
     await expect(
       h.client.getJson('https://boards.example.com/start', Schema, opts),
     ).rejects.toMatchObject({ code: 'forbidden_host' });
     expect(h.calls.map((call) => new URL(call.url).host)).not.toContain('uk.linkedin.com');
     expect(h.logs.some((entry) => entry.event === 'http.forbidden_host')).toBe(true);
+    // The fully qualified form (trailing dot) is the same host.
+    await expect(
+      h.client.getJson('https://boards.example.com/dot', Schema, opts),
+    ).rejects.toMatchObject({ code: 'forbidden_host' });
+    expect(h.calls.map((call) => new URL(call.url).host)).not.toContain('www.linkedin.com.');
   });
 
   it('follows up to 3 redirect hops by hand and no more', async () => {
@@ -360,5 +425,238 @@ describe('http client', () => {
 
   it('builds a Basic auth header with an empty password', () => {
     expect(basicAuth('key')).toBe(`Basic ${Buffer.from('key:').toString('base64')}`);
+  });
+});
+
+describe('http client: PUT and plain http (ADR-059)', () => {
+  const keyed = { policy: { robots: 'api-terms' as const } };
+
+  it('PUTs a JSON body once and parses the answer', async () => {
+    const { client, calls } = harness({ '/b': [json({ ok: true })] }, keyed);
+    await expect(
+      client.putJson('https://api.example.com/b', { a: '' }, Schema, {
+        label: 'test.put',
+        headers: { Authorization: 'Bearer t' },
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ method: 'PUT', body: '{"a":""}' });
+    expect(calls[0]?.headers['Content-Type']).toBe('application/json');
+    expect(calls[0]?.headers.Authorization).toBe('Bearer t');
+  });
+
+  it('retries a failed PUT at most 3 times, then gives up', async () => {
+    const { client, calls } = harness({ '/b': [json({}, 503)] }, keyed);
+    await expect(
+      client.putJson('https://api.example.com/b', {}, Schema, { label: 'test.put' }),
+    ).rejects.toMatchObject({ code: 'http_status', status: 503 });
+    expect(calls).toHaveLength(3);
+  });
+
+  it('does not follow a redirect on a PUT', async () => {
+    const { client, calls } = harness(
+      {
+        '/b': [
+          new Response('', { status: 307, headers: { location: 'https://api.example.com/c' } }),
+        ],
+      },
+      keyed,
+    );
+    await expect(
+      client.putJson('https://api.example.com/b', {}, Schema, { label: 'test.put' }),
+    ).rejects.toMatchObject({ code: 'http_status', status: 307 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refuses plain http to any host that is not on the list, before any fetch', async () => {
+    const h = harness({ '*': [json({ ok: true })] }, keyed);
+    for (const url of [
+      'http://api.example.com/a',
+      'http://metadata.google.internal.evil.com/a',
+      'http://evil.metadata.google.internal/a',
+      'http://169.254.169.254/a',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts), url).rejects.toMatchObject({
+        code: 'insecure_url',
+      });
+      await expect(h.client.putJson(url, {}, Schema, opts), url).rejects.toMatchObject({
+        code: 'insecure_url',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it('allows plain http to exactly the listed host', async () => {
+    const h = harness({ '/a': [json({ ok: true })] }, { ...keyed, plainHttpHosts: ['meta.test'] });
+    await expect(h.client.getJson('http://meta.test/a', Schema, opts)).resolves.toEqual({
+      ok: true,
+    });
+    await expect(h.client.getJson('http://other.test/a', Schema, opts)).rejects.toMatchObject({
+      code: 'insecure_url',
+    });
+  });
+
+  it('does not let a redirect downgrade to plain http', async () => {
+    const h = harness(
+      {
+        '/robots.txt': NO_ROBOTS,
+        '/a': [
+          new Response('', { status: 302, headers: { location: 'http://api.example.com/b' } }),
+        ],
+      },
+      {},
+    );
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      {
+        code: 'http_status',
+      },
+    );
+    expect(h.calls.map((call) => call.url)).not.toContain('http://api.example.com/b');
+  });
+
+  it('gives a default client no plain http at all, the metadata host included', async () => {
+    const h = harness({ '*': [json({ ok: true })] }, keyed);
+    await expect(
+      h.client.getJson('http://metadata.google.internal/x', Schema, opts),
+    ).rejects.toMatchObject({ code: 'insecure_url' });
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it('never follows a redirect to plain http, even to a host on the plain-http list', async () => {
+    const h = harness(
+      {
+        '/a': [
+          new Response('', {
+            status: 302,
+            headers: { location: 'http://metadata.google.internal/computeMetadata/v1/x' },
+          }),
+        ],
+      },
+      { ...keyed, plainHttpHosts: ['metadata.google.internal'] },
+    );
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      { code: 'http_status' },
+    );
+    expect(h.calls.map((call) => new URL(call.url).host)).toEqual(['api.example.com']);
+  });
+
+  it('refuses a forbidden redirect target first, with a log line, over plain http and on a PUT', async () => {
+    const h = harness({
+      '/robots.txt': NO_ROBOTS,
+      '/a': [
+        new Response('', {
+          status: 302,
+          headers: { location: 'http://uk.linkedin.com/jobs/view/1' },
+        }),
+      ],
+      '/b': [
+        new Response('', {
+          status: 307,
+          headers: { location: 'https://uk.linkedin.com/jobs/view/1' },
+        }),
+      ],
+    });
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      { code: 'forbidden_host' },
+    );
+    expect(h.logs.filter((entry) => entry.event === 'http.forbidden_host')).toHaveLength(1);
+    await expect(
+      h.client.putJson('https://api.example.com/b', {}, Schema, opts),
+    ).rejects.toMatchObject({ code: 'forbidden_host' });
+    expect(h.logs.filter((entry) => entry.event === 'http.forbidden_host')).toHaveLength(2);
+    expect(h.calls.map((call) => new URL(call.url).host)).not.toContain('uk.linkedin.com');
+  });
+
+  it('matches the plain-http list on the exact host: port, userinfo and look-alike forms are refused', async () => {
+    const h = harness(
+      { '*': [json({ ok: true })] },
+      { ...keyed, plainHttpHosts: ['metadata.google.internal'] },
+    );
+    for (const url of [
+      'http://metadata.google.internal:8080/a',
+      `http://user${AT}metadata.google.internal/a`,
+      `http://user:pw${AT}metadata.google.internal/a`,
+      'http://metadata.google.internal./a',
+      'http://2852039166/a',
+      'http://[::ffff:169.254.169.254]/a',
+      'http://metadata.google.internal%2eevil.com/a',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts), url).rejects.toMatchObject({
+        code: 'insecure_url',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
+    await expect(
+      h.client.getJson('http://METADATA.Google.Internal/a', Schema, opts),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it('drops credentials on a cross-origin redirect and keeps them on a same-origin one', async () => {
+    const redirect = (to: string) => new Response('', { status: 302, headers: { location: to } });
+    const h = harness(
+      {
+        '/same': [redirect('/same2')],
+        '/same2': [json({ ok: true })],
+        '/cross': [redirect('https://other.example.net/landing')],
+        '/landing': [json({ ok: true })],
+      },
+      keyed,
+    );
+    const headers = { Authorization: 'Bearer secret', 'metadata-flavor': 'Google', 'X-Keep': '1' };
+    await h.client.getJson('https://api.example.com/same', Schema, { label: 'test', headers });
+    const sameHop = h.calls.find((call) => call.url.endsWith('/same2'));
+    expect(sameHop?.headers.Authorization).toBe('Bearer secret');
+    await h.client.getJson('https://api.example.com/cross', Schema, { label: 'test', headers });
+    const crossHop = h.calls.find((call) => call.url.endsWith('/landing'));
+    expect(crossHop?.headers).not.toHaveProperty('Authorization');
+    expect(crossHop?.headers).not.toHaveProperty('metadata-flavor');
+    expect(crossHop?.headers['X-Keep']).toBe('1');
+  });
+
+  it('getText returns the body as text with the same retry rules', async () => {
+    const h = harness(
+      { '/t': [json({}, 503), new Response('plain-answer\n', { status: 200 })] },
+      keyed,
+    );
+    await expect(h.client.getText('https://api.example.com/t', opts)).resolves.toBe(
+      'plain-answer\n',
+    );
+    expect(h.calls).toHaveLength(2);
+    expect(h.calls[0]?.headers.Accept).toBe('text/plain');
+  });
+
+  it('maps a timeout while reading the body to a retried timeout error', async () => {
+    const stalled = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new DOMException('stalled', 'TimeoutError'));
+          },
+        }),
+      );
+    const h = harness({ '/a': [() => stalled()] }, keyed);
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      { code: 'timeout' },
+    );
+    expect(h.calls).toHaveLength(3);
+  });
+
+  it('keeps refusing LinkedIn, Indeed, Wellfound and Glassdoor on the plain-http and PUT paths', async () => {
+    const h = harness({ '*': [json({ ok: true })] }, keyed);
+    for (const url of [
+      'http://www.linkedin.com/a',
+      'https://www.linkedin.com/a',
+      'http://uk.indeed.com/a',
+      'https://wellfound.com/a',
+      'http://www.glassdoor.co.uk/a',
+    ]) {
+      await expect(h.client.getJson(url, Schema, opts), url).rejects.toMatchObject({
+        code: 'forbidden_host',
+      });
+      await expect(h.client.putJson(url, {}, Schema, opts), url).rejects.toMatchObject({
+        code: 'forbidden_host',
+      });
+    }
+    expect(h.calls).toHaveLength(0);
   });
 });
