@@ -85,7 +85,7 @@ describe('billingGuard wiring: a message with no data', () => {
     vi.stubGlobal('fetch', fetchSpy);
     try {
       const event = cloudEvent(99);
-      const { data: _data, ...attributesOnly } = event.data.message;
+      const attributesOnly = { ...event.data.message, data: undefined };
       await expect(
         invoke({ ...event, data: { ...event.data, message: attributesOnly } }),
       ).resolves.toBeUndefined();
@@ -159,7 +159,7 @@ function violations(name: string, source: string): string[] {
   const found: string[] = [];
   for (const [what, pattern] of FORBIDDEN) if (pattern.test(code)) found.push(what);
   for (const match of code.matchAll(/(?:\bfrom\s+|\bimport\s+)['"]([^'"]+)['"]/g)) {
-    if (!ALLOWED_IMPORTS.has(match[1] ?? '')) found.push(`import ${match[1]}`);
+    if (!ALLOWED_IMPORTS.has(match[1] ?? '')) found.push(`import ${match[1] ?? ''}`);
   }
   if (/\bimport\s*\(|\brequire\s*\(/.test(code)) found.push('a dynamic import');
   for (const match of code.matchAll(/https?:\/\/[^\s'"`]+/g)) {

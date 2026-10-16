@@ -634,7 +634,7 @@ describe('http client: PUT and plain http (ADR-059)', () => {
           },
         }),
       );
-    const h = harness({ '/a': [(() => stalled()) as unknown as Response] }, keyed);
+    const h = harness({ '/a': [() => stalled()] }, keyed);
     await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
       { code: 'timeout' },
     );
