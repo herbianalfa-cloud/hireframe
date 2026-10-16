@@ -338,6 +338,7 @@ describe('http client', () => {
       'https://www.linkedin.com/jobs/view/4012345678',
       'https://LinkedIn.com/jobs/view/1',
       'https://uk.linkedin.com/comm/jobs/view/1',
+      'https://www.linkedin.com./jobs/view/1',
     ]) {
       await expect(h.client.getJson(url, Schema, opts)).rejects.toMatchObject({
         code: 'forbidden_host',
@@ -380,12 +381,18 @@ describe('http client', () => {
       '/robots.txt': NO_ROBOTS,
       '/start': [redirect('https://boards.example.com/hop')],
       '/hop': [redirect('https://uk.linkedin.com/jobs/view/1')],
+      '/dot': [redirect('https://www.linkedin.com./jobs/view/1')],
     });
     await expect(
       h.client.getJson('https://boards.example.com/start', Schema, opts),
     ).rejects.toMatchObject({ code: 'forbidden_host' });
     expect(h.calls.map((call) => new URL(call.url).host)).not.toContain('uk.linkedin.com');
     expect(h.logs.some((entry) => entry.event === 'http.forbidden_host')).toBe(true);
+    // The fully qualified form (trailing dot) is the same host.
+    await expect(
+      h.client.getJson('https://boards.example.com/dot', Schema, opts),
+    ).rejects.toMatchObject({ code: 'forbidden_host' });
+    expect(h.calls.map((call) => new URL(call.url).host)).not.toContain('www.linkedin.com.');
   });
 
   it('follows up to 3 redirect hops by hand and no more', async () => {

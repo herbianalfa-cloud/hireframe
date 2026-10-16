@@ -283,7 +283,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   }
 
   function isForbidden(hostname: string): boolean {
-    const host = hostname.toLowerCase();
+    const host = hostname.toLowerCase().replace(/\.+$/, '');
     return (deps.forbiddenHosts ?? FORBIDDEN_FETCH_HOSTS).some(
       (banned) => host === banned || host.endsWith(`.${banned}`),
     );
