@@ -605,6 +605,22 @@ describe('http client: PUT and plain http (ADR-059)', () => {
     expect(crossHop?.headers['X-Keep']).toBe('1');
   });
 
+  it('maps a timeout while reading the body to a retried timeout error', async () => {
+    const stalled = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new DOMException('stalled', 'TimeoutError'));
+          },
+        }),
+      );
+    const h = harness({ '/a': [(() => stalled()) as unknown as Response] }, keyed);
+    await expect(h.client.getJson('https://api.example.com/a', Schema, opts)).rejects.toMatchObject(
+      { code: 'timeout' },
+    );
+    expect(h.calls).toHaveLength(3);
+  });
+
   it('keeps refusing LinkedIn, Indeed, Wellfound and Glassdoor on the plain-http and PUT paths', async () => {
     const h = harness({ '*': [json({ ok: true })] }, keyed);
     for (const url of [

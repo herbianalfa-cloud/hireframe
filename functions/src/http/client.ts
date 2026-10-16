@@ -251,7 +251,13 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
   async function readBody(response: Response): Promise<string> {
     const declared = Number(response.headers.get('content-length') ?? '0');
     if (declared > deps.maxBodyBytes) throw new HttpError('too_large', response.status);
-    const body = await response.text();
+    let body: string;
+    try {
+      body = await response.text();
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      throw new HttpError(name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network');
+    }
     if (body.length > deps.maxBodyBytes) throw new HttpError('too_large', response.status);
     return body;
   }
