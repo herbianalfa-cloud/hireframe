@@ -83,7 +83,14 @@ export type LogEvent =
   | 'retention.done'
   | 'retention.failed'
   | 'retention.invalid_cursor'
-  | 'retention.invalid_doc';
+  | 'retention.invalid_doc'
+  | 'billing_guard.below'
+  | 'billing_guard.ignored'
+  | 'billing_guard.invalid'
+  | 'billing_guard.would_disable'
+  | 'billing_guard.disabled'
+  | 'billing_guard.already_disabled'
+  | 'billing_guard.failed';
 
 export type LogFields = Record<string, string | number | boolean>;
 type Level = 'info' | 'warn' | 'error';
