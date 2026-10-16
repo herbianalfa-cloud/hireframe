@@ -31,9 +31,8 @@ function cloudEvent(costAmount: number) {
   };
 }
 
-interface Runnable {
-  run: (event: unknown) => Promise<unknown>;
-}
+/** The exported function itself, so the whole Pub/Sub wrapper runs (not just the raw handler). */
+const invoke = billingGuard as unknown as (event: unknown) => Promise<unknown>;
 
 describe('billingGuard wiring: the real wrapper in dry run (ADR-059)', () => {
   let logged: { event: string; fields: Record<string, unknown> }[] = [];
@@ -54,7 +53,7 @@ describe('billingGuard wiring: the real wrapper in dry run (ADR-059)', () => {
   });
 
   it('logs would_disable at the threshold with the variable unset, and never calls fetch', async () => {
-    await (billingGuard as unknown as Runnable).run(cloudEvent(25));
+    await invoke(cloudEvent(25));
     expect(logged.map((entry) => entry.event)).toEqual(['billing_guard.would_disable']);
     expect(logged[0]?.fields).toMatchObject({ mode: 'dry_run' });
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -63,7 +62,7 @@ describe('billingGuard wiring: the real wrapper in dry run (ADR-059)', () => {
   it('stays in dry run for anything but the exact string armed', async () => {
     for (const value of ['ARMED', ' armed', 'true']) {
       vi.stubEnv('BILLING_GUARD_MODE', value);
-      await (billingGuard as unknown as Runnable).run(cloudEvent(99));
+      await invoke(cloudEvent(99));
     }
     expect(logged.map((entry) => entry.event)).toEqual(
       Array(3).fill('billing_guard.would_disable'),
@@ -72,9 +71,30 @@ describe('billingGuard wiring: the real wrapper in dry run (ADR-059)', () => {
   });
 
   it('logs below with dry_run under the threshold, and never calls fetch', async () => {
-    await (billingGuard as unknown as Runnable).run(cloudEvent(1));
+    await invoke(cloudEvent(1));
     expect(logged.map((entry) => entry.event)).toEqual(['billing_guard.below']);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('billingGuard wiring: a message with no data', () => {
+  it('logs invalid, resolves and makes no request', async () => {
+    const logged: string[] = [];
+    const fetchSpy = vi.fn();
+    setLogSink((_level, event) => logged.push(event));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const event = cloudEvent(99);
+      const { data: _data, ...attributesOnly } = event.data.message;
+      await expect(
+        invoke({ ...event, data: { ...event.data, message: attributesOnly } }),
+      ).resolves.toBeUndefined();
+      expect(logged).toEqual(['billing_guard.invalid']);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      setLogSink();
+      vi.unstubAllGlobals();
+    }
   });
 });
 
