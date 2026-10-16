@@ -68,6 +68,17 @@ describe('monthKey', () => {
     expect(monthKey(new Date('2026-09-30T23:30:00Z'))).toBe('2026-10');
     expect(monthKey(new Date('2026-12-31T23:30:00Z'))).toBe('2026-12');
   });
+
+  it('rolls the month over at London midnight, in both BST and GMT', () => {
+    // BST (UTC+1) until Sun 25 Oct 2026, then GMT.
+    expect(monthKey(new Date('2026-09-30T22:59:59.999Z'))).toBe('2026-09');
+    expect(monthKey(new Date('2026-09-30T23:00:00Z'))).toBe('2026-10');
+    expect(monthKey(new Date('2026-10-31T23:59:59.999Z'))).toBe('2026-10');
+    expect(monthKey(new Date('2026-11-01T00:00:00Z'))).toBe('2026-11');
+    // Clocks go forward on 29 Mar 2026: 31 Mar 23:00Z is already 1 Apr in London.
+    expect(monthKey(new Date('2026-03-31T22:59:59.999Z'))).toBe('2026-03');
+    expect(monthKey(new Date('2026-03-31T23:00:00Z'))).toBe('2026-04');
+  });
 });
 
 describe('reservations and the cap', () => {
@@ -104,6 +115,23 @@ describe('reservations and the cap', () => {
     expect(staleReservationIds(all, NOW, 'own')).toEqual(['stale']);
     expect(staleReservationIds(all, NOW).sort()).toEqual(['own', 'stale']);
     expect(staleReservationIds(all, NOW, 'own', RESERVATION_TTL_MS * 10)).toEqual([]);
+  });
+
+  it('turns a reservation stale at exactly 15 minutes, not before', () => {
+    expect(RESERVATION_TTL_MS).toBe(15 * 60_000);
+    const at = (ageMs: number) => ({ r: { pence: 40, at: new Date(NOW.getTime() - ageMs) } });
+    const check = (ageMs: number) =>
+      checkCap({
+        spendPence: 0,
+        reservations: at(ageMs),
+        capPence: 100,
+        requestPence: 0,
+        now: NOW,
+      }).availablePence;
+    expect(staleReservationIds(at(RESERVATION_TTL_MS - 1), NOW)).toEqual([]);
+    expect(check(RESERVATION_TTL_MS - 1)).toBe(60); // still held
+    expect(staleReservationIds(at(RESERVATION_TTL_MS), NOW)).toEqual(['r']);
+    expect(check(RESERVATION_TTL_MS)).toBe(100); // released from the live total
   });
 });
 

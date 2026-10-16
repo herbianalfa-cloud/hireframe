@@ -10,7 +10,14 @@ import {
 } from '@hireframe/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { FUNNEL, funnelLimits, MODELS, PRICES_USD_PER_MTOK, type FunnelLimits } from '../config.js';
+import {
+  FUNNEL,
+  funnelLimits,
+  LOOKUP,
+  MODELS,
+  PRICES_USD_PER_MTOK,
+  type FunnelLimits,
+} from '../config.js';
 import { fakeTransport } from '../llm/fake-transport.js';
 import type { LlmRequest, LlmResponse, LlmTransport } from '../llm/transport.js';
 import { emptyUsage } from '../llm/usage-store.js';
@@ -493,6 +500,19 @@ describe('expiry sweep', () => {
     // Back in the waiting list, so a second run leaves it alone.
     await run(deps(store, { limits: { s2MaxJobs: 0, s3MaxJobs: 0 } }));
     expect(store.get('dead').next).toBe('description');
+  });
+
+  it('keeps a describe claim 1 ms short of 10 minutes and releases one 1 ms past it', async () => {
+    const store = memoryFunnelStore();
+    const ago = (ms: number) => new Date(TEST_NOW.getTime() - ms);
+    const claimed = (describingAt: Date) =>
+      testJob({ stage: 's2', next: null, describingAt, flags: ['needs_description'] });
+    store.add('inside', claimed(ago(LOOKUP.describeClaimStaleMs - 1)));
+    store.add('outside', claimed(ago(LOOKUP.describeClaimStaleMs + 1)));
+    await run(deps(store, { limits: { s2MaxJobs: 0, s3MaxJobs: 0 } }));
+    expect(LOOKUP.describeClaimStaleMs).toBe(10 * 60_000);
+    expect(store.get('inside').next ?? null).toBeNull();
+    expect(store.get('outside').next).toBe('description');
   });
 
   it('leaves the overflow past the sweep limit for the next run', async () => {

@@ -96,6 +96,19 @@ describe('runRetention (ADR-057)', () => {
     expect(jobs[1]?.hasDescription).toBe(true);
   });
 
+  it('keeps a job judged exactly 60 days ago and purges one 1 ms older', async () => {
+    const at = (ageMs: number) => new Date(NOW.getTime() - ageMs);
+    const jobs = [
+      job('edge', 0, { judgedAt: at(60 * DAY) }),
+      job('past', 0, { judgedAt: at(60 * DAY + 1) }),
+    ];
+    const { store } = fakeStore(jobs);
+    expect(RETENTION.skipAgeDays).toBe(60);
+    expect((await run(store)).purged).toBe(1);
+    expect(jobs[0]?.hasDescription).toBe(true);
+    expect(jobs[1]?.hasDescription).toBe(false);
+  });
+
   it.each(['new', 'skipped'])('purges a %s job', async (status) => {
     const jobs = [job('a', 70, { status })];
     const { store } = fakeStore(jobs);
