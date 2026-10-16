@@ -139,7 +139,7 @@ describe('billing client (ADR-059)', () => {
     });
     expect(g.logs.length).toBeGreaterThan(0);
     expect(everything).not.toContain(TOKEN);
-    expect(everything).not.toContain('ya29');
+    expect(everything).not.toContain('fake-access-token');
     expect(everything).not.toContain('Bearer');
   });
 });

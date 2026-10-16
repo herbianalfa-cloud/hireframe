@@ -2,7 +2,7 @@ import type { BillingClientDeps } from './client.js';
 
 /** Test helpers for the billing guard: a scripted Google (metadata + Cloud Billing) and a fake clock. */
 
-export const TOKEN = 'ya29.test-token-value-must-never-be-logged';
+export const TOKEN = 'fake-access-token-must-never-be-logged';
 export const PROJECT = 'hireframe-test-1234';
 
 export interface FakeCall {
