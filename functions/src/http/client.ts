@@ -201,6 +201,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
     // Redirects are followed by hand, a few hops at most, and every hop is checked against the
     // forbidden list: a board API must not be able to send us to LinkedIn (ADR-049).
     let target = url;
+    let hopHeaders = headers;
     for (let hop = 0; ; hop++) {
       const timeoutMs = Math.min(policy.timeoutMs, remaining());
       if (timeoutMs <= 0) throw new HttpError('deadline');
@@ -210,7 +211,7 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
         response = await deps.fetch(target, {
           method: init.method,
           ...(init.body === undefined ? {} : { body: init.body }),
-          headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...headers },
+          headers: { 'User-Agent': deps.userAgent, Accept: 'application/json', ...hopHeaders },
           redirect: 'manual',
           signal: AbortSignal.timeout(timeoutMs),
         });
@@ -240,6 +241,8 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
       if (!next || hop >= MAX_REDIRECTS || next.protocol !== 'https:') {
         throw new HttpError('http_status', response.status);
       }
+      // Like the Fetch standard: credentials never follow a redirect to another origin.
+      if (next.origin !== target.origin) hopHeaders = withoutCredentials(hopHeaders);
       target = next;
       await slot(target.host, Math.max(intervalMs, deps.hostPolicy(target.host).intervalMs));
     }
@@ -409,6 +412,14 @@ export function createHttpClient(deps: HttpClientDeps): HttpClient {
         .filter(([, until]) => until > deps.now())
         .map(([host, until]) => ({ host, until })),
   };
+}
+
+const CREDENTIAL_HEADERS = new Set(['authorization', 'metadata-flavor']);
+
+function withoutCredentials(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase())),
+  );
 }
 
 function codeFields(error: HttpError): Record<string, string | number> {

@@ -583,6 +583,28 @@ describe('http client: PUT and plain http (ADR-059)', () => {
     ).resolves.toEqual({ ok: true });
   });
 
+  it('drops credentials on a cross-origin redirect and keeps them on a same-origin one', async () => {
+    const redirect = (to: string) => new Response('', { status: 302, headers: { location: to } });
+    const h = harness(
+      {
+        '/same': [redirect('/same2')],
+        '/same2': [json({ ok: true })],
+        '/cross': [redirect('https://other.example.net/landing')],
+        '/landing': [json({ ok: true })],
+      },
+      keyed,
+    );
+    const headers = { Authorization: 'Bearer secret', 'metadata-flavor': 'Google', 'X-Keep': '1' };
+    await h.client.getJson('https://api.example.com/same', Schema, { label: 'test', headers });
+    const sameHop = h.calls.find((call) => call.url.endsWith('/same2'));
+    expect(sameHop?.headers.Authorization).toBe('Bearer secret');
+    await h.client.getJson('https://api.example.com/cross', Schema, { label: 'test', headers });
+    const crossHop = h.calls.find((call) => call.url.endsWith('/landing'));
+    expect(crossHop?.headers).not.toHaveProperty('Authorization');
+    expect(crossHop?.headers).not.toHaveProperty('metadata-flavor');
+    expect(crossHop?.headers['X-Keep']).toBe('1');
+  });
+
   it('keeps refusing LinkedIn, Indeed, Wellfound and Glassdoor on the plain-http and PUT paths', async () => {
     const h = harness({ '*': [json({ ok: true })] }, keyed);
     for (const url of [
