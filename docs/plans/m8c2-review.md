@@ -181,7 +181,7 @@ None.
    - No change to `.github`, `scripts` or `package.json`; deploys still run only on `v*` tags.
 
 ## Outside this diff
-On `main`, `docs/plans/m8-billing-guards.md:41` and `:58` contain "herbianalfa@", the first part of the owner's email address. PR #41 didn't add it, but the repo is public.
+On `main`, `docs/plans/m8-billing-guards.md:41` and `:58` contain the first part of the owner's email address, as a fragment before the at sign. PR #41 didn't add it, but the repo is public.
 
 ## Next step
 This was a review only, and nothing will be edited. If you want the fixes:
