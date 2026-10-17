@@ -1,6 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { CALLABLE_TIMEOUT_SECONDS } from '@hireframe/shared';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import * as deployed from './index.js';
@@ -340,5 +343,230 @@ describe('billingGuard (ADR-059)', () => {
     const source = readFileSync(new URL('./billing/endpoint.ts', import.meta.url), 'utf8');
     expect(source).toMatch(/^\s*maxInstances: 1,$/m);
     expect(source).toMatch(/^\s*retry: false,$/m);
+  });
+});
+
+type Trigger = 'callable' | 'https' | 'schedule' | 'pubsub';
+type Account = 'fns' | 'guard';
+
+interface FullEndpoint {
+  maxInstances?: number | string;
+  timeoutSeconds?: number;
+  availableMemoryMb?: number | string;
+  serviceAccountEmail?: string;
+  callableTrigger?: object;
+  httpsTrigger?: object;
+  scheduleTrigger?: { retryConfig?: { retryCount?: number } };
+  eventTrigger?: { retry?: boolean };
+}
+
+// Every number is written out on purpose, as in the region test: a changed constant must fail
+// here, not just follow itself. A new export without a row fails the first test below.
+const EXPECTED: Record<
+  string,
+  { trigger: Trigger; timeoutSeconds: number; memoryMb: number; account: Account }
+> = {
+  addFact: { trigger: 'callable', timeoutSeconds: 120, memoryMb: 1024, account: 'fns' },
+  application: { trigger: 'callable', timeoutSeconds: 120, memoryMb: 1024, account: 'fns' },
+  billingGuard: { trigger: 'pubsub', timeoutSeconds: 60, memoryMb: 256, account: 'guard' },
+  deleteAllData: { trigger: 'callable', timeoutSeconds: 120, memoryMb: 512, account: 'fns' },
+  generateCvs: { trigger: 'schedule', timeoutSeconds: 540, memoryMb: 1024, account: 'fns' },
+  getDigest: { trigger: 'https', timeoutSeconds: 60, memoryMb: 512, account: 'fns' },
+  ingestEmailJobs: { trigger: 'https', timeoutSeconds: 120, memoryMb: 512, account: 'fns' },
+  lookup: { trigger: 'callable', timeoutSeconds: 300, memoryMb: 1024, account: 'fns' },
+  parseCv: { trigger: 'callable', timeoutSeconds: 540, memoryMb: 1024, account: 'fns' },
+  purgeOldData: { trigger: 'schedule', timeoutSeconds: 300, memoryMb: 512, account: 'fns' },
+  rescore: { trigger: 'callable', timeoutSeconds: 540, memoryMb: 1024, account: 'fns' },
+  resetProfile: { trigger: 'callable', timeoutSeconds: 120, memoryMb: 1024, account: 'fns' },
+  scanNow: { trigger: 'callable', timeoutSeconds: 540, memoryMb: 1024, account: 'fns' },
+  scheduledScan: { trigger: 'schedule', timeoutSeconds: 540, memoryMb: 1024, account: 'fns' },
+};
+
+const ACCOUNTS: Record<Account, string> = {
+  fns: 'hireframe-fns@hireframe-f6b03.iam.gserviceaccount.com',
+  guard: 'hireframe-billing-guard@hireframe-f6b03.iam.gserviceaccount.com',
+};
+
+/**
+ * Functions whose timeout reads another row of the shared table: the scheduled scan runs the same
+ * scan as `scanNow` and has no row of its own.
+ */
+const TIMEOUT_KEY: Record<string, keyof typeof CALLABLE_TIMEOUT_SECONDS> = {
+  scheduledScan: 'scanNow',
+};
+
+function timeoutKey(name: string): keyof typeof CALLABLE_TIMEOUT_SECONDS {
+  return TIMEOUT_KEY[name] ?? (name as keyof typeof CALLABLE_TIMEOUT_SECONDS);
+}
+
+const exported = Object.entries(deployed).map(
+  ([name, fn]) => [name, (fn as { __endpoint?: FullEndpoint }).__endpoint] as const,
+);
+
+/** Problems with how the `on*()` calls in one source file state their limits; empty is clean. */
+function limitProblems(file: string, source: string): { problems: string[]; calls: number } {
+  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const triggers = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const from = statement.moduleSpecifier;
+    if (!ts.isStringLiteral(from) || !from.text.startsWith('firebase-functions')) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      if (/^on[A-Z]/.test(element.name.text)) triggers.add(element.name.text);
+    }
+  }
+  const problems: string[] = [];
+  let calls = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const callee = node.expression.text;
+      if (triggers.has(callee)) {
+        calls += 1;
+        let owner = '<anonymous>';
+        for (let up: ts.Node = node.parent; !ts.isSourceFile(up); up = up.parent) {
+          if (ts.isVariableDeclaration(up) && ts.isIdentifier(up.name)) {
+            owner = up.name.text;
+            break;
+          }
+        }
+        const label = `${file}: ${owner} (${callee})`;
+        const options = node.arguments[0];
+        if (!options || !ts.isObjectLiteralExpression(options)) {
+          problems.push(`${label}: options are not an object literal`);
+        } else {
+          const own = (key: string) =>
+            options.properties.find(
+              (p): p is ts.PropertyAssignment =>
+                ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === key,
+            );
+          const max = own('maxInstances')?.initializer;
+          if (!max || !ts.isNumericLiteral(max) || max.text !== '1') {
+            problems.push(`${label}: maxInstances is not the literal 1`);
+          }
+          const timeout = own('timeoutSeconds')?.initializer;
+          const key = timeoutKey(owner);
+          const fromTable =
+            timeout !== undefined &&
+            ts.isPropertyAccessExpression(timeout) &&
+            ts.isIdentifier(timeout.expression) &&
+            timeout.expression.text === 'CALLABLE_TIMEOUT_SECONDS' &&
+            timeout.name.text === key;
+          if (!timeout || !(ts.isNumericLiteral(timeout) || fromTable)) {
+            problems.push(
+              `${label}: timeoutSeconds is not a number or CALLABLE_TIMEOUT_SECONDS.${key}`,
+            );
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { problems, calls };
+}
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === 'loadtest' ? [] : sourceFiles(path);
+    return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [path] : [];
+  });
+}
+
+describe('every function states its limits (ADR-060, C2)', () => {
+  it('exports exactly the functions in the table', () => {
+    expect(Object.keys(deployed).sort()).toEqual(Object.keys(EXPECTED).sort());
+    expect(Object.keys(EXPECTED)).toHaveLength(14);
+  });
+
+  it.each(exported)('%s states its limits and runs as the right account', (name, endpoint) => {
+    const want = EXPECTED[name];
+    expect(want).toBeDefined();
+    if (!want || !endpoint) throw new Error(`${name}: no row or no endpoint`);
+    expect(endpoint.maxInstances).toBe(1);
+    expect(endpoint.timeoutSeconds).toBe(want.timeoutSeconds);
+    expect(endpoint.timeoutSeconds).toBe(CALLABLE_TIMEOUT_SECONDS[timeoutKey(name)]);
+    expect(endpoint.availableMemoryMb).toBe(want.memoryMb);
+
+    const set = {
+      callable: endpoint.callableTrigger !== undefined,
+      https: endpoint.httpsTrigger !== undefined,
+      schedule: endpoint.scheduleTrigger !== undefined,
+      pubsub: endpoint.eventTrigger !== undefined,
+    };
+    expect(
+      Object.entries(set)
+        .filter(([, on]) => on)
+        .map(([kind]) => kind),
+    ).toEqual([want.trigger]);
+    if (want.trigger === 'schedule') {
+      expect(endpoint.scheduleTrigger?.retryConfig?.retryCount).toBe(0);
+    }
+    if (want.trigger === 'pubsub') expect(endpoint.eventTrigger?.retry).toBe(false);
+    expect(endpoint.serviceAccountEmail).toBe(ACCOUNTS[want.account]);
+  });
+
+  it('every on*() call in the source states maxInstances: 1 and its timeout in its own options', () => {
+    const root = fileURLToPath(new URL('.', import.meta.url));
+    let calls = 0;
+    const problems: string[] = [];
+    for (const path of sourceFiles(root)) {
+      const found = limitProblems(path.slice(root.length), readFileSync(path, 'utf8'));
+      calls += found.calls;
+      problems.push(...found.problems);
+    }
+    expect(problems).toEqual([]);
+    // A wrapper that hides a trigger would leave fewer call sites than exports.
+    expect(calls).toBe(Object.keys(EXPECTED).length);
+  });
+
+  describe('the source scan catches what it should', () => {
+    const wrap = (options: string, name = 'thing') =>
+      `import { onCall } from 'firebase-functions/https';\n` +
+      `export const ${name} = onCall(${options}, async () => {});`;
+    const ok = '{ maxInstances: 1, timeoutSeconds: 60 }';
+
+    it('passes a complete call', () => {
+      expect(limitProblems('a.ts', wrap(ok))).toEqual({ problems: [], calls: 1 });
+      expect(
+        limitProblems(
+          'a.ts',
+          wrap('{ maxInstances: 1, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.lookup }', 'lookup'),
+        ).problems,
+      ).toEqual([]);
+    });
+
+    it.each([
+      ['no maxInstances', '{ timeoutSeconds: 60 }'],
+      ['maxInstances 2', '{ maxInstances: 2, timeoutSeconds: 60 }'],
+      ['maxInstances from a constant', '{ maxInstances: ONE, timeoutSeconds: 60 }'],
+      ['only a spread', '{ ...ownerOptions, timeoutSeconds: 60 }'],
+      ['no timeout', '{ maxInstances: 1 }'],
+      ['a timeout from a variable', '{ maxInstances: 1, timeoutSeconds: seconds }'],
+      ['not an object literal', 'ownerOptions'],
+    ])('flags %s', (_label, options) => {
+      expect(limitProblems('a.ts', wrap(options)).problems).toHaveLength(1);
+    });
+
+    it('flags a table key that is not the function name', () => {
+      const options = '{ maxInstances: 1, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.scanNow }';
+      expect(limitProblems('a.ts', wrap(options, 'lookup')).problems).toHaveLength(1);
+    });
+
+    it('counts a trigger hidden in a wrapper and flags it as anonymous', () => {
+      const source =
+        `import { onCall } from 'firebase-functions/https';\n` +
+        `export const make = () => onCall({}, async () => {});`;
+      const found = limitProblems('a.ts', source);
+      expect(found.calls).toBe(1);
+      expect(found.problems).not.toEqual([]);
+    });
+
+    it('ignores on*() calls that are not from firebase-functions', () => {
+      const source = `import { onCall } from 'elsewhere';\nexport const x = onCall({});`;
+      expect(limitProblems('a.ts', source)).toEqual({ problems: [], calls: 0 });
+    });
   });
 });

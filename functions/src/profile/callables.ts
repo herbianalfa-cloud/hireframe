@@ -49,7 +49,12 @@ async function readFile(path: string): Promise<Uint8Array | null> {
 const llmOptions: CallableOptions = { ...ownerOptions, secrets: [anthropicApiKey] };
 
 export const parseCv = onCall(
-  { ...llmOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.parseCv },
+  {
+    ...llmOptions,
+    timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.parseCv,
+    // Stated here as well as in the global options, so a change there can't widen this one.
+    maxInstances: 1,
+  },
   safeHandler('parseCv', async (request) => {
     const config = await requireOwner(request);
     return parseCvHandler(request.data, {
@@ -63,7 +68,12 @@ export const parseCv = onCall(
 );
 
 export const addFact = onCall(
-  { ...llmOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.addFact },
+  {
+    ...llmOptions,
+    timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.addFact,
+    // Stated here as well as in the global options, so a change there can't widen this one.
+    maxInstances: 1,
+  },
   safeHandler('addFact', async (request) => {
     const config = await requireOwner(request);
     return addFactHandler(request.data, {
@@ -75,7 +85,12 @@ export const addFact = onCall(
 );
 
 export const resetProfile = onCall(
-  { ...ownerOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.resetProfile },
+  {
+    ...ownerOptions,
+    timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.resetProfile,
+    // Stated here as well as in the global options, so a change there can't widen this one.
+    maxInstances: 1,
+  },
   safeHandler('resetProfile', async (request) => {
     await requireOwner(request);
     return resetProfileHandler(request.data, {
