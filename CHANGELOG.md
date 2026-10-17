@@ -3,15 +3,15 @@
 All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [1.0.0] - Unreleased
+### Added
+- Tests: a table of the 14 exports (trigger, timeout, memory, account, instances), a source scan that fails on a trigger call (`on*()` or `before*()`, aliased or through a namespace import) without a literal `maxInstances` or a timeout, or with a spread after either key (with a self-check of the scanner and of the count rule), and ±1 ms tables for `lockLiveUntil` and `isLockLive` for each lock holder (`scan`, `rescore`, `email`, `lookup`, `wipe`).
+- **Docs:** ADR-060, the ADR-017 and ADR-059 addenda (spike results, `roles/browser` for arming in v1.0.1), the SECURITY "Security checklist before v1.0.0" and the five release gates, ARCHITECTURE (Environments), ROADMAP (M8 row and parking lot), `.gitignore` (`iam-*.json`, `iam-*.txt`). Items for K14–K19 are ticked at K20; items that need the v1.0.0 deploy are marked "pending K25–K28".
+
 ### Changed
 - **M8 PR 8C2: instance audit and lock refactor** (ADR-017 addendum, ADR-060; plan `docs/plans/m8c2-plan.md`).
   - **Literal `maxInstances: 1` on all 14 functions** (7 inherited it before: `parseCv`, `addFact`, `resetProfile`, `rescore`, `lookup`, `scanNow`, `scheduledScan`). Every options object states `maxInstances` and `timeoutSeconds` at its call site; `setGlobalOptions` stays as a backstop. `scheduledScan`'s timeout comes from `CALLABLE_TIMEOUT_SECONDS.scanNow`, because the shared table has no row of its own for it. No behaviour change, but the bundle changes, so the v1.0.0 deploy rebuilds every function.
   - **One stale-lock rule:** `lockLiveUntil` and `isLockLive` in `scan/store.ts` replace three copies in `liveLockHolder`, `acquireOrRefreshWipe` and `acquireLock`. No behaviour change.
 - **Build account (ADR-060, Path F):** the default compute account becomes build-only at the v1.0.0 deploy (RUNBOOK Part K); no code reads or writes it.
-
-### Added
-- Tests: a table of the 14 exports (trigger, timeout, memory, account, instances), a source scan that fails on an `on*()` call without a literal `maxInstances` or a timeout (with a self-check of the scanner), and ±1 ms tables for `lockLiveUntil` and `isLockLive` for each lock holder.
-- **Docs:** ADR-060, the ADR-017 and ADR-059 addenda (spike results, `roles/browser` for arming in v1.0.1), the SECURITY "Security checklist before v1.0.0" and the five release gates, ARCHITECTURE (Environments), ROADMAP (M8 row and parking lot), `.gitignore` (`iam-*.json`, `iam-*.txt`). Items that need the v1.0.0 deploy are marked "pending K25–K28".
 
 ## [0.9.1] - Unreleased
 ### Added
