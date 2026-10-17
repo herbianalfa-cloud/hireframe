@@ -73,6 +73,7 @@ describe('lockLiveUntil and isLockLive: the one stale rule (ADR-048)', () => {
 
   it.each([
     ['scan', 12],
+    ['rescore', 12],
     ['email', 3],
     ['lookup', 2],
     ['wipe', 3],

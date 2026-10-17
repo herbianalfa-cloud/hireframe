@@ -16,8 +16,8 @@ import {
   type CompanySeed,
   type ExistingJobKeys,
   type LockHolder,
-  type ScanLock,
   type Quota,
+  type ScanLock,
   type ScanSourceId,
   type SourceHealth,
 } from '@hireframe/shared';

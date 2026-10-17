@@ -18,6 +18,9 @@ interface Endpoint {
   availableMemoryMb?: number | string;
   maxInstances?: number | string;
   concurrency?: number | string;
+  serviceAccountEmail?: string;
+  scheduleTrigger?: { retryConfig?: { retryCount?: number } };
+  eventTrigger?: { eventType?: string; retry?: boolean };
 }
 
 const endpoints = Object.entries(deployed).map(
@@ -349,17 +352,6 @@ describe('billingGuard (ADR-059)', () => {
 type Trigger = 'callable' | 'https' | 'schedule' | 'pubsub';
 type Account = 'fns' | 'guard';
 
-interface FullEndpoint {
-  maxInstances?: number | string;
-  timeoutSeconds?: number;
-  availableMemoryMb?: number | string;
-  serviceAccountEmail?: string;
-  callableTrigger?: object;
-  httpsTrigger?: object;
-  scheduleTrigger?: { retryConfig?: { retryCount?: number } };
-  eventTrigger?: { retry?: boolean };
-}
-
 // Every number is written out on purpose, as in the region test: a changed constant must fail
 // here, not just follow itself. A new export without a row fails the first test below.
 const EXPECTED: Record<
@@ -399,65 +391,93 @@ function timeoutKey(name: string): keyof typeof CALLABLE_TIMEOUT_SECONDS {
   return TIMEOUT_KEY[name] ?? (name as keyof typeof CALLABLE_TIMEOUT_SECONDS);
 }
 
-const exported = Object.entries(deployed).map(
-  ([name, fn]) => [name, (fn as { __endpoint?: FullEndpoint }).__endpoint] as const,
-);
+const PUBSUB_PUBLISHED = 'google.cloud.pubsub.topic.v1.messagePublished';
 
-/** Problems with how the `on*()` calls in one source file state their limits; empty is clean. */
+/** Problems with how the trigger calls in one source file state their limits; empty is clean. */
 function limitProblems(file: string, source: string): { problems: string[]; calls: number } {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const triggerName = /^(on|before)[A-Z]/;
+  // Local names bound to a trigger (aliases included) and local names of whole-module imports.
   const triggers = new Set<string>();
+  const namespaces = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement)) continue;
     const from = statement.moduleSpecifier;
     if (!ts.isStringLiteral(from) || !from.text.startsWith('firebase-functions')) continue;
     const bindings = statement.importClause?.namedBindings;
-    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    if (!bindings) continue;
+    if (ts.isNamespaceImport(bindings)) {
+      namespaces.add(bindings.name.text);
+      continue;
+    }
     for (const element of bindings.elements) {
-      if (/^on[A-Z]/.test(element.name.text)) triggers.add(element.name.text);
+      if (triggerName.test((element.propertyName ?? element.name).text)) {
+        triggers.add(element.name.text);
+      }
     }
   }
   const problems: string[] = [];
   let calls = 0;
+  const calleeOf = (expression: ts.Expression): string | undefined => {
+    if (ts.isIdentifier(expression))
+      return triggers.has(expression.text) ? expression.text : undefined;
+    if (
+      ts.isPropertyAccessExpression(expression) &&
+      ts.isIdentifier(expression.expression) &&
+      namespaces.has(expression.expression.text) &&
+      triggerName.test(expression.name.text)
+    ) {
+      return `${expression.expression.text}.${expression.name.text}`;
+    }
+    return undefined;
+  };
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const callee = node.expression.text;
-      if (triggers.has(callee)) {
-        calls += 1;
-        let owner = '<anonymous>';
-        for (let up: ts.Node = node.parent; !ts.isSourceFile(up); up = up.parent) {
-          if (ts.isVariableDeclaration(up) && ts.isIdentifier(up.name)) {
-            owner = up.name.text;
-            break;
-          }
+    const callee = ts.isCallExpression(node) ? calleeOf(node.expression) : undefined;
+    if (ts.isCallExpression(node) && callee !== undefined) {
+      calls += 1;
+      let owner = '<anonymous>';
+      for (let up: ts.Node = node.parent; !ts.isSourceFile(up); up = up.parent) {
+        if (ts.isVariableDeclaration(up) && ts.isIdentifier(up.name)) {
+          owner = up.name.text;
+          break;
         }
-        const label = `${file}: ${owner} (${callee})`;
-        const options = node.arguments[0];
-        if (!options || !ts.isObjectLiteralExpression(options)) {
-          problems.push(`${label}: options are not an object literal`);
-        } else {
-          const own = (key: string) =>
-            options.properties.find(
-              (p): p is ts.PropertyAssignment =>
-                ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === key,
-            );
-          const max = own('maxInstances')?.initializer;
-          if (!max || !ts.isNumericLiteral(max) || max.text !== '1') {
-            problems.push(`${label}: maxInstances is not the literal 1`);
-          }
-          const timeout = own('timeoutSeconds')?.initializer;
-          const key = timeoutKey(owner);
-          const fromTable =
-            timeout !== undefined &&
-            ts.isPropertyAccessExpression(timeout) &&
-            ts.isIdentifier(timeout.expression) &&
-            timeout.expression.text === 'CALLABLE_TIMEOUT_SECONDS' &&
-            timeout.name.text === key;
-          if (!timeout || !(ts.isNumericLiteral(timeout) || fromTable)) {
-            problems.push(
-              `${label}: timeoutSeconds is not a number or CALLABLE_TIMEOUT_SECONDS.${key}`,
-            );
-          }
+      }
+      const label = `${file}: ${owner} (${callee})`;
+      const options = node.arguments[0];
+      if (!options || !ts.isObjectLiteralExpression(options)) {
+        problems.push(`${label}: options are not an object literal`);
+      } else {
+        const own = (key: string) =>
+          options.properties.findIndex(
+            (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === key,
+          );
+        const initializer = (key: string): ts.Expression | undefined => {
+          const property = options.properties[own(key)];
+          return property && ts.isPropertyAssignment(property) ? property.initializer : undefined;
+        };
+        const max = initializer('maxInstances');
+        if (!max || !ts.isNumericLiteral(max) || max.text !== '1') {
+          problems.push(`${label}: maxInstances is not the literal 1`);
+        }
+        const timeout = initializer('timeoutSeconds');
+        const key = timeoutKey(owner);
+        const fromTable =
+          timeout !== undefined &&
+          ts.isPropertyAccessExpression(timeout) &&
+          ts.isIdentifier(timeout.expression) &&
+          timeout.expression.text === 'CALLABLE_TIMEOUT_SECONDS' &&
+          timeout.name.text === key;
+        if (!timeout || !(ts.isNumericLiteral(timeout) || fromTable)) {
+          problems.push(
+            `${label}: timeoutSeconds is not a number or CALLABLE_TIMEOUT_SECONDS.${key}`,
+          );
+        }
+        // A spread after either key can overwrite the literal the scan just read.
+        const firstKey = Math.min(
+          ...['maxInstances', 'timeoutSeconds'].map(own).filter((i) => i >= 0),
+        );
+        if (options.properties.some((p, i) => ts.isSpreadAssignment(p) && i > firstKey)) {
+          problems.push(`${label}: a spread comes after maxInstances or timeoutSeconds`);
         }
       }
     }
@@ -465,6 +485,26 @@ function limitProblems(file: string, source: string): { problems: string[]; call
   };
   visit(sourceFile);
   return { problems, calls };
+}
+
+/**
+ * The scan over several sources, plus the count rule: a trigger the scan cannot see (re-exported
+ * through a local module, built by a wrapper) leaves fewer call sites than exported functions.
+ */
+function scanProblems(sources: { file: string; source: string }[], exportCount: number): string[] {
+  let calls = 0;
+  const problems: string[] = [];
+  for (const { file, source } of sources) {
+    const found = limitProblems(file, source);
+    calls += found.calls;
+    problems.push(...found.problems);
+  }
+  if (calls !== exportCount) {
+    problems.push(
+      `${String(calls)} trigger calls found for ${String(exportCount)} exported functions`,
+    );
+  }
+  return problems;
 }
 
 function sourceFiles(dir: string): string[] {
@@ -481,7 +521,7 @@ describe('every function states its limits (ADR-060, C2)', () => {
     expect(Object.keys(EXPECTED)).toHaveLength(14);
   });
 
-  it.each(exported)('%s states its limits and runs as the right account', (name, endpoint) => {
+  it.each(endpoints)('%s states its limits and runs as the right account', (name, endpoint) => {
     const want = EXPECTED[name];
     expect(want).toBeDefined();
     if (!want || !endpoint) throw new Error(`${name}: no row or no endpoint`);
@@ -494,7 +534,7 @@ describe('every function states its limits (ADR-060, C2)', () => {
       callable: endpoint.callableTrigger !== undefined,
       https: endpoint.httpsTrigger !== undefined,
       schedule: endpoint.scheduleTrigger !== undefined,
-      pubsub: endpoint.eventTrigger !== undefined,
+      pubsub: endpoint.eventTrigger?.eventType === PUBSUB_PUBLISHED,
     };
     expect(
       Object.entries(set)
@@ -504,22 +544,19 @@ describe('every function states its limits (ADR-060, C2)', () => {
     if (want.trigger === 'schedule') {
       expect(endpoint.scheduleTrigger?.retryConfig?.retryCount).toBe(0);
     }
+    // Any other event trigger (Firestore, Storage) must fail here, not pass as pubsub.
+    expect(endpoint.eventTrigger !== undefined).toBe(want.trigger === 'pubsub');
     if (want.trigger === 'pubsub') expect(endpoint.eventTrigger?.retry).toBe(false);
     expect(endpoint.serviceAccountEmail).toBe(ACCOUNTS[want.account]);
   });
 
-  it('every on*() call in the source states maxInstances: 1 and its timeout in its own options', () => {
+  it('every trigger call in the source states maxInstances: 1 and its timeout in its own options', () => {
     const root = fileURLToPath(new URL('.', import.meta.url));
-    let calls = 0;
-    const problems: string[] = [];
-    for (const path of sourceFiles(root)) {
-      const found = limitProblems(path.slice(root.length), readFileSync(path, 'utf8'));
-      calls += found.calls;
-      problems.push(...found.problems);
-    }
-    expect(problems).toEqual([]);
-    // A wrapper that hides a trigger would leave fewer call sites than exports.
-    expect(calls).toBe(Object.keys(EXPECTED).length);
+    const sources = sourceFiles(root).map((path) => ({
+      file: path.slice(root.length),
+      source: readFileSync(path, 'utf8'),
+    }));
+    expect(scanProblems(sources, Object.keys(EXPECTED).length)).toEqual([]);
   });
 
   describe('the source scan catches what it should', () => {
@@ -555,13 +592,63 @@ describe('every function states its limits (ADR-060, C2)', () => {
       expect(limitProblems('a.ts', wrap(options, 'lookup')).problems).toHaveLength(1);
     });
 
-    it('counts a trigger hidden in a wrapper and flags it as anonymous', () => {
+    it('names the wrapper that owns a trigger built inside it', () => {
       const source =
         `import { onCall } from 'firebase-functions/https';\n` +
         `export const make = () => onCall({}, async () => {});`;
       const found = limitProblems('a.ts', source);
       expect(found.calls).toBe(1);
-      expect(found.problems).not.toEqual([]);
+      expect(found.problems.join()).toContain('make (onCall)');
+    });
+
+    it('flags a trigger with no owning variable as anonymous', () => {
+      const source =
+        `import { onCall } from 'firebase-functions/https';\n` +
+        `export default onCall({}, async () => {});`;
+      const found = limitProblems('a.ts', source);
+      expect(found.calls).toBe(1);
+      expect(found.problems.join()).toContain('<anonymous> (onCall)');
+    });
+
+    it('flags a spread placed after a key it could overwrite', () => {
+      const options = '{ maxInstances: 1, timeoutSeconds: 60, ...wide }';
+      expect(limitProblems('a.ts', wrap(options)).problems).toHaveLength(1);
+    });
+
+    it('sees an aliased import, a namespace import and a before* trigger', () => {
+      const aliased =
+        `import { onCall as call } from 'firebase-functions/https';\n` +
+        `export const a = call({}, async () => {});`;
+      const namespaced =
+        `import * as https from 'firebase-functions/v2/https';\n` +
+        `export const b = https.onCall({}, async () => {});`;
+      const identity =
+        `import { beforeUserCreated } from 'firebase-functions/identity';\n` +
+        `export const c = beforeUserCreated({}, async () => {});`;
+      for (const source of [aliased, namespaced, identity]) {
+        const found = limitProblems('a.ts', source);
+        expect(found.calls).toBe(1);
+        expect(found.problems).not.toEqual([]);
+      }
+    });
+
+    it('ignores a namespace call that is not a trigger', () => {
+      const source =
+        `import * as https from 'firebase-functions/v2/https';\n` +
+        `export const b = https.HttpsError;`;
+      expect(limitProblems('a.ts', source)).toEqual({ problems: [], calls: 0 });
+    });
+
+    it('the count rule flags a trigger re-exported through a local module', () => {
+      const direct = { file: 'a.ts', source: wrap(ok, 'first') };
+      const hidden = {
+        file: 'b.ts',
+        source: `import { onCall } from './wrapper.js';\nexport const second = onCall({});`,
+      };
+      expect(scanProblems([direct], 1)).toEqual([]);
+      expect(scanProblems([direct, hidden], 2)).toEqual([
+        '1 trigger calls found for 2 exported functions',
+      ]);
     });
 
     it('ignores on*() calls that are not from firebase-functions', () => {
