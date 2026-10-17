@@ -492,8 +492,8 @@ Design: `docs/plans/m8b-plan.md`, ADR-057 (wipe and retention), ADR-058 (backups
     gcloud firestore databases list --project=$P --format='value(name)'
     ```
 
-### Part K: Billing kill switch (M8 8C1, `v0.9.1`)
-Design: `docs/plans/m8c-plan.md` §2 and §4, ADR-059. `billingGuard` is the first event-triggered function, and it ships in **dry run**: it logs `would_disable` and makes no network call, and the project holds no billing role. Release on a weekday between 10:00 and 16:00 (London) with nothing Generating, after the throwaway spike (plan §4 Phase 1, which proves the armed path in a separate project and is not run from here). Cloud Shell, with this setup each session:
+### Part K: Billing kill switch, IAM hardening and v1.0.0 (M8 8C1 `v0.9.1`, 8C2 `v1.0.0`)
+Design: `docs/plans/m8c-plan.md` §2 and §4, `docs/plans/m8c2-plan.md`, ADR-059 and ADR-060. `billingGuard` is the first event-triggered function, and it ships in **dry run**: it logs `would_disable` and makes no network call, and the project holds no billing role. Release on a weekday between 10:00 and 16:00 (London) with nothing Generating, after the throwaway spike (plan §4 Phase 1, which proves the armed path in a separate project and is not run from here). Cloud Shell, with this setup each session:
 ```bash
 P=hireframe-f6b03; R=europe-west2
 NUM=$(gcloud projects describe $P --format='value(projectNumber)')
@@ -555,7 +555,106 @@ Every command is shown in chat and approved before it runs. Use only `add-` and 
   - **No log line within 2 minutes of a publish:** push delivery is broken, most likely because K9 removed the Pub/Sub agent's project-level `tokenCreator`. See Recovery, "`billingGuard` logs nothing after a publish". Record in ADR-059 which grant is live.
 - **K13. Budgets (owner, console).** Billing → Budgets & alerts: £2, £5 and £10 at 100%, actual and forecast, emails on; and `hireframe-kill` at £25, scope this project, actual cost, connected to the topic `projects/hireframe-f6b03/topics/billing-guard`. Check (C47): within 24 hours the logs show a real budget message (`gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$P --freshness=1d --limit=10 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'`) as `billing_guard.below` (`mode: dry_run`), never `billing_guard.invalid`. An `.invalid` is fixed in the next PR. Rollback: delete the budget.
 
-After K13, check that the next scheduled scan succeeds and the morning digest arrives. K14 onwards (the stolen-account guards, Editor removal and `v1.0.0`) belong to PR 8C2.
+After K13, check that the next scheduled scan succeeds and the morning digest arrives. K14 onwards (the stolen-account guards, Editor removal and `v1.0.0`) belong to PR 8C2 and follow.
+
+**Phase 3: stolen-account guards.** Its own weekday window, after the v0.9.1 Scan-now proof (K17 must not run before it, so a disable can't be mistaken for a v0.9.1 fault). Each step is shown in chat and approved alone.
+
+- **K14. Snapshot `flat` to `~/iam-before-p3.txt`; C43; C48 keys loop; C51.**
+  ```bash
+  cd ~ && flat > ~/iam-before-p3.txt && wc -l ~/iam-before-p3.txt
+  gcloud projects get-iam-policy $P --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$SA" --format='value(bindings.role)' | sort   # C43
+  for A in $(gcloud iam service-accounts list --project=$P --format='value(email)'); do echo "$A $(gcloud iam service-accounts keys list --iam-account=$A --managed-by=user --project=$P --format='value(name)' | wc -l)"; done   # C48
+  gcloud projects get-iam-policy $P --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$COMPUTE" --format='value(bindings.role)'   # C51
+  ```
+  Check: C43 lists the 7 baseline roles (8 if K7 needed C38b `eventarc.developer`, recorded). C48 prints 0 for every account. C51 prints only `roles/editor`. Keep the file out of the repo; paste the role list, not the file. Rollback: none (reads only).
+- **K15. Secrets (C34).**
+  ```bash
+  gcloud secrets list --project=$P --format='value(name)'
+  gcloud secrets get-iam-policy <name> --project=$P   # once per secret
+  ```
+  Check: the accessor is only `hireframe-fns`; the deployer holds `secretmanager.viewer` per ADR-017; no public member (`allUsers`, `allAuthenticatedUsers`); the last `main` CI gitleaks job is green. Rollback: none (reads only). A wrong binding is fixed with `add-` or `remove-iam-policy-binding` on that secret, shown in chat first.
+- **K16. Invoker audit (C49).**
+  ```bash
+  for S in $(gcloud run services list --region=$R --project=$P --format='value(metadata.name)'); do echo "$S: $(gcloud run services get-iam-policy $S --region=$R --project=$P --flatten='bindings[].members' --filter='bindings.role:roles/run.invoker' --format='value(bindings.members)' | tr '\n' ' ')"; done
+  ```
+  Check: `allUsers` only on the 8 callables plus `ingestemailjobs` and `getdigest`; `hireframe-fns` only on the 3 scheduled; the guard only on `billingguard`. Rollback: the Recovery entry for that function's type (callable: Part C step 28; scheduled: the "has no schedule" entries; event: K8).
+- **K17. Unused APIs (C32, C33).** Not before the v0.9.1 Scan-now proof.
+  ```bash
+  gcloud services list --enabled --project=$P --format='value(config.name)'   # C32
+  gcloud services disable <api> --project=$P   # C33, one at a time, never --force
+  ```
+  Claude proposes the disable list in chat from the C32 output; each API is then disabled alone. **Never disable:** `identitytoolkit`, `securetoken`, `firestore`, `firebaserules`, `firebasehosting`, `firebasestorage`, `storage*`, `firebaseappcheck`, `recaptchaenterprise`, `cloudfunctions`, `run`, `cloudbuild`, `artifactregistry`, `eventarc`, `pubsub`, `cloudscheduler`, `secretmanager`, `iam`, `iamcredentials`, `sts`, `cloudresourcemanager`, `serviceusage`, `cloudbilling`, `firebaseextensions`, `compute`, `logging`, `firebase`. Check, after each: the app loads and signs in, System is OK, and the next scan succeeds. Rollback: `gcloud services enable <api> --project=$P`.
+- **K18. Quotas (C53).** Record the current values first:
+  ```bash
+  gcloud compute project-info describe --project=$P --flatten=quotas --format='value(quotas.metric,quotas.limit)' | grep -E '^(CPUS_ALL_REGIONS|GPUS_ALL_REGIONS)\s'
+  ```
+  Then, in the console (**IAM & Admin → Quotas**, Compute Engine API), set **CPUs (all regions)** and **GPUs (all regions)** to 0. Check: the same read prints 0 and 0; `cd ~ && flat > ~/iam-after-p3.txt && diff ~/iam-before-p3.txt ~/iam-after-p3.txt` prints nothing; then **Scan now** and System shows **Succeeded** (the spike proved builds under quota 0, not the runtime). Rollback: set the recorded values back in the console.
+
+**Phase 4: `v1.0.0`.** After the five gates, on a weekday between 10:00 and 16:00 (London), with nothing Generating, never Sun 25 Oct. This is the proving deploy: the bundle changed, so every one of the 14 functions rebuilds as the compute account without Editor (ADR-060).
+
+- **K19. Release checklist recorded (the five gates).** Record each gate with its date and evidence in the SECURITY "v1.0.0 release gates" list: step 97 (phone median ≤ 2,000 ms); the restore drill C17–C20 (Part J); one clean weekday on v0.9.0; the Scan-now proof on v0.9.1 (right after its deploy, Scan now → System shows Succeeded with a run time → `digestNow` arrives → `gcloud scheduler jobs list --location=$R --project=$P` shows every job); C47 (a real budget message parsed, K13). Reference only: Lighthouse accessibility on Pipeline (100) and the 360 px phone check, both recorded in 8A2, and the R1–R12 pointers in the PRD. Check: every gate has its evidence. Rollback: none; a missing gate stops here.
+- **K20. Evidence commit to 8C2; CI green; merge.** On `feat/m8c2-hardening`, commit the pre-deploy SECURITY ticks, the gate dates, ADR-059's live push-delivery grant (K12) and whether C38b was needed (K7), and the v0.9.1 deploy time. If that deploy took more than 12 minutes, raise `timeout-minutes` in `.github/workflows/deploy.yml` (20 today) in the same commit. Wait for CI to go green, then merge. Merging deploys nothing, because deploys run only on tags. Check: the PR is merged. Rollback: none needed; revert the PR if it must not stay.
+- **K21. Reads before the change (K1, `flat > ~/iam-before-100.txt`, C43, C51, C39a/b, topic IAM).**
+  ```bash
+  cd ~ && flat > ~/iam-before-100.txt && wc -l ~/iam-before-100.txt
+  gcloud projects get-iam-policy $P --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$SA" --format='value(bindings.role)' | sort   # C43
+  gcloud projects get-iam-policy $P --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$COMPUTE" --format='value(bindings.role)'   # C51
+  for L in $R global; do gcloud eventarc triggers list --location=$L --project=$P --format='table(name,serviceAccount,destination.cloudRun.service,transport.pubsub.topic)'; done   # C39a
+  gcloud functions list --regions=$R --project=$P --format='table(name,serviceConfig.serviceAccountEmail,eventTrigger.serviceAccountEmail)'   # C39b
+  gcloud pubsub topics get-iam-policy billing-guard --project=$P
+  ```
+  Repeat K1 (C1, C2, C3) first. Check: nothing uses `$COMPUTE` (no row in C39a/b); C51 prints only `roles/editor`; record the topic's publishers (the ADR-059 arming check for v1.0.1). Rollback: none (reads only).
+- **K22. Bucket names (C52).** `gcloud storage buckets list --project=$P --format='value(name)' | grep '^gcf-v2-'`. Check: the sources and uploads buckets exist and match the `gcf-v2-` prefix in K23's condition; otherwise stop and use the per-bucket variant (K23) after review in chat. Rollback: none (read only).
+- **K23. Path F grants (C39).** Exactly as the spike proved:
+  ```bash
+  gcloud projects add-iam-policy-binding $P --member=serviceAccount:$COMPUTE --role=roles/logging.logWriter --condition=None
+  gcloud artifacts repositories add-iam-policy-binding gcf-artifacts --location=$R --member=serviceAccount:$COMPUTE --role=roles/artifactregistry.writer --project=$P
+  gcloud projects add-iam-policy-binding $P --member=serviceAccount:$COMPUTE --role=roles/storage.objectViewer --condition='expression=resource.name.startsWith("projects/_/buckets/gcf-v2-"),title=gcf-sources'
+  ```
+  Use the per-bucket variant instead of the third line only if K22 showed the prefix does not match: `gcloud storage buckets add-iam-policy-binding gs://<bucket> --member=serviceAccount:$COMPUTE --role=roles/storage.objectViewer`. Check: C51 shows `roles/editor`, `roles/logging.logWriter` and `roles/storage.objectViewer`; `gcloud artifacts repositories get-iam-policy gcf-artifacts --location=$R --project=$P` shows the writer. Rollback: each command with `remove-iam-policy-binding` (keep the same `--condition`).
+- **K24. Remove `roles/editor` from `$COMPUTE`, then straight to K25 (C39).**
+  ```bash
+  gcloud projects remove-iam-policy-binding $P --member=serviceAccount:$COMPUTE --role=roles/editor --condition=None
+  ```
+  Check: C51 shows exactly `roles/logging.logWriter` and `roles/storage.objectViewer`. Do not stop here: until K25 builds, nothing has proved the account works without Editor. Rollback (C40): the Recovery entry "Rollback the Editor removal".
+- **K25. Tag v1.0.0, the proving deploy (C4, C50).** Run `git checkout main && git pull && git log -1`; `git log -1` must show the 8C2 merge commit. Only then run `git tag v1.0.0 && git push origin v1.0.0`, and approve the deploy (Part C step 27). Check: all **14** functions show "Successful update operation", none Skipped (a Skipped function means the bundle did not change; stop and report), and
+  ```bash
+  gcloud builds list --region=$R --project=$P --limit=20 --format='table(id,createTime.date(),status,serviceAccount)'
+  ```
+  shows all SUCCESS, run as `$COMPUTE`. Rollback: if a build fails, C40 (Recovery, "Rollback the Editor removal"), wait 2 minutes, then **Re-run failed jobs**. Those functions kept their old hash, so they rebuild. Report the failing build's log line.
+- **K26. IAM diff against K21's file.**
+  ```bash
+  cd ~ && flat > ~/iam-after-100.txt && diff ~/iam-before-100.txt ~/iam-after-100.txt
+  ```
+  Check: exactly `- roles/editor …$COMPUTE`, `+ roles/logging.logWriter …$COMPUTE` and `+ roles/storage.objectViewer …$COMPUTE`. Run C43 again: still the deployer baseline from K14. Any other line: stop. Rollback: none (reads only).
+- **K27. Live checks (K1, C51, C39a/b, C49, C14 table, C35, topic IAM read).**
+  - K1 again (C1, C2, C3): the deploy rewrote the invokers.
+  - C51: no `roles/editor`.
+  - C39a and C39b: the K21 commands again; no row shows `$COMPUTE`.
+  - C49: the K16 loop; the same result.
+  - C14 table: every function's settings are unchanged, against the expected values in `functions/src/index.test.ts` (`EXPECTED`):
+    ```bash
+    gcloud functions list --regions=$R --project=$P --format='table(name,serviceConfig.maxInstanceCount,serviceConfig.timeoutSeconds,serviceConfig.availableMemory,serviceConfig.serviceAccountEmail)'
+    ```
+  - C35: the K12 environment read must not contain `BILLING_GUARD_MODE`; publish only the below-threshold message (`costAmount` 1) and expect `billing_guard.below` with `mode: dry_run` within 2 minutes. Do not publish the 30 message: the forced rebuild is checked, not the threshold. `gcloud billing projects describe $P --format='value(billingEnabled)'` still prints `True`.
+  - Topic IAM read: `gcloud pubsub topics get-iam-policy billing-guard --project=$P`, recorded for the ADR-059 arming check (v1.0.1).
+
+  Rollback: C40 if the runtime breaks (Recovery, "Rollback the Editor removal").
+- **K28. Within 24 h; C41 `gcloud auth revoke`; follow-up docs PR.** Check and record: a scheduled scan Succeeded (R4, R12); the digest arrived; `generateCvs` last attempt OK (`gcloud scheduler jobs describe firebase-schedule-generateCvs-europe-west2 --location=$R --format='value(status,lastAttemptTime)'`); `retention.done` at 03:30 (`gcloud logging read 'jsonPayload.event="retention.done"' --project=$P --freshness=1d --limit=3 --format='table(timestamp,severity,jsonPayload.event)'`); Apps Script **Executions** shows `run` 2xx; the step 89 lab table. Then C41, `gcloud auth revoke` on the laptop, and delete the snapshots from Cloud Shell once they are summarised in the PR: `rm ~/iam-*.txt`. Open the follow-up docs-only PR ticking C50, K26, K27, K28 and C41 in SECURITY (it deploys nothing). v1.0.1 (arming, ADR-059) waits for one full clean weekday on v1.0.0. Rollback: none (reads, then a local sign-out).
+
+#### Every release
+Before and after any tag. Part K's setup block applies.
+1. **Window:** a weekday, 10:00–16:00 London, never Sun 25 Oct. Nothing Generating (Pipeline shows no Generating application).
+2. **Step 77 before and after the deploy** (C1, C2): the bundle changes, so the deploy rewrites the invokers.
+3. **Invokers for new functions, by type:** a callable, Part C step 28; a scheduled function, step 94.4 (and its Recovery entry); an event function, K8.
+4. **The C3 list:** `gcloud scheduler jobs list --location=$R --project=$P --format='table(name,schedule,timeZone,state,httpTarget.oidcToken.serviceAccountEmail)'` lists exactly three jobs (`scheduledScan`, `generateCvs`, `purgeOldData`), all ENABLED, all `hireframe-fns@…`.
+5. **Indexes:** Firestore → Indexes shows every index Enabled before the next scheduled run.
+6. **C14 on new functions:** describe each new function (step 101's command) and compare with the table test's `EXPECTED` row.
+7. **Step 89 recorded** (the lab table, which no longer gates), and **step 97** (the phone test) whenever R7 is touched.
+8. **A proving deploy needs a bundle change.** A re-run skips unchanged functions. Compare the sha256 of `functions/deploy/index.js` on `main` and on the branch; if they match, nothing is proved.
+9. **Deploy time inside the job timeout:** the last deploy's time is under `timeout-minutes` in `.github/workflows/deploy.yml` (raise it if a deploy took more than 12 minutes).
+
+After K28, M8 is complete. Arming the billing guard (v1.0.1) is a separate, separately approved change (ADR-059).
 
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
@@ -632,6 +731,14 @@ After K13, check that the next scheduled scan succeeds and the morning digest ar
   gcloud iam service-accounts get-iam-policy $GUARD --project=$P --format='value(bindings.role,bindings.members)'
   ```
   The second command must show it beside the deployer's `serviceAccountUser`. Then publish the below-threshold message again and expect `billing_guard.below` within 2 minutes. Rollback: the same command with `remove-iam-policy-binding`. If it still logs nothing, check C46 (the only invoker is `hireframe-billing-guard@…`) and C14b (the trigger's service account). Record the live option in ADR-059.
+- **Billing was disabled** (the kill switch tripped, or billing was unlinked by hand): everything paid has stopped, and Google may delete resources later, so act the same day. Use Part K's setup block. First find the cause; do not relink blindly. Check `gcloud billing projects describe $P --format='value(billingEnabled,billingAccountName)'` and the guard's logs (`gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$P --freshness=2d --limit=20 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'`): `billing_guard.disabled` means the guard acted, and the budget that fired it (cost against £25) is the thing to read first; a `billing_guard.failed` or no line at all points at a manual unlink or a card problem (see "Project suspended"). When the cause is understood, relink: `gcloud billing projects link $P --billing-account=<BILLING_ACCOUNT_ID>` (shown in chat first; the ID is in the console under Billing). Then C3 (the C3 list, "Every release" step 4: scheduler jobs may need re-enabling), a **Scan now** (System shows Succeeded) and a backup check (`gcloud firestore backups list --location=$R --project=$P`, newest READY, ADR-058). The guard stays in dry run until v1.0.1 arms it, so until then billing is only disabled by hand or by Google.
+- **Project suspended (card declined):** the £50 card limit declined a charge, Google suspended the project and the app is down. Open the console → **Billing** → **Payment method**, fix or replace the card and clear the outstanding balance, then follow Google's reinstatement prompt for the project. Normal spend is near zero, so find what spent first (Billing → Reports, `usage/{yyyy-mm}` in Firestore). When the project is back, check `billingEnabled` as above, then the C3 list, a **Scan now** and a backup check, as in "Billing was disabled".
+- **Rollback the Editor removal** (C40: builds fail after K24, for example a 403 in a `gcf-v2-*` or Artifact Registry line of the build log, or a function stays on its old revision). Add Editor back (shown in chat first):
+  ```bash
+  gcloud projects add-iam-policy-binding $P --member=serviceAccount:$COMPUTE --role=roles/editor --condition=None
+  ```
+  Wait 2 minutes for the change to propagate, then GitHub → Actions → the failed deploy → **Re-run failed jobs**. The functions that failed kept their old hash, so they rebuild. Report the failing build's log line. If the log shows a 403 on `gcf-v2-*`, the condition did not match the bucket (K22): instead of the conditional grant, give the build account the role on each bucket: `gcloud storage buckets add-iam-policy-binding gs://<bucket> --member=serviceAccount:$COMPUTE --role=roles/storage.objectViewer`. Use the setup block from Part K.
+- **First Pub/Sub function: the CLI's IAM step** (the deploy fails in prepare with "We failed to modify the IAM policy for the project", before anything is deployed): the same pattern as K6 and K9, for any first event-triggered function. Grant only the bindings the CLI printed, shown in chat first, the way K6 does (`gcloud projects add-iam-policy-binding $P --member=… --role=… --condition=None`), then **Re-run failed jobs**. Afterwards remove exactly those grants with `remove-iam-policy-binding` and diff the snapshot as in K9: nothing may remain except Google's own `roles/pubsub.serviceAgent` line, which is recorded and never removed. If push delivery then stops, see "`billingGuard` logs nothing after a publish".
 
 ## Local setup (per machine)
 1. **Node 22:** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.
