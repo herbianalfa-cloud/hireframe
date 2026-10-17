@@ -28,6 +28,8 @@ export const rescore = onCall(
   {
     ...ownerOptions,
     timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.rescore,
+    // Stated here as well as in the global options, so a change there can't widen this one.
+    maxInstances: 1,
     secrets: [anthropicApiKey, reedApiKey],
   },
   safeHandler('rescore', async (request): Promise<RescoreResult> => {

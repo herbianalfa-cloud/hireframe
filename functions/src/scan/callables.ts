@@ -97,7 +97,13 @@ async function scanDeps(config: AppConfig, trigger: 'manual' | 'schedule'): Prom
 }
 
 export const scanNow = onCall(
-  { ...ownerOptions, timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.scanNow, secrets: scanSecrets },
+  {
+    ...ownerOptions,
+    timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.scanNow,
+    // Stated here as well as in the global options, so a change there can't widen this one.
+    maxInstances: 1,
+    secrets: scanSecrets,
+  },
   safeHandler('scanNow', async (request): Promise<ScanNowResult> => {
     const config = await requireOwner(request);
     const deps = await scanDeps(config, 'manual');
@@ -112,6 +118,8 @@ export const scheduledScan = onSchedule(
     region: REGION,
     timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.scanNow,
     memory: CALLABLE.memory,
+    // Stated here as well as in the global options, so a change there can't widen this one.
+    maxInstances: 1,
     retryCount: 0,
     secrets: scanSecrets,
   },
