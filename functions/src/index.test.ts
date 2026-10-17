@@ -515,6 +515,37 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+/** Problems with the trigger an endpoint declares against the one its row expects; empty is clean. */
+function triggerProblems(endpoint: Endpoint, want: Trigger): string[] {
+  const set = {
+    callable: endpoint.callableTrigger !== undefined,
+    https: endpoint.httpsTrigger !== undefined,
+    schedule: endpoint.scheduleTrigger !== undefined,
+    // Any other event trigger (Firestore, Storage) must not pass as pubsub.
+    pubsub: endpoint.eventTrigger?.eventType === PUBSUB_PUBLISHED,
+  };
+  const problems: string[] = [];
+  const kinds = Object.entries(set)
+    .filter(([, on]) => on)
+    .map(([kind]) => kind);
+  if (kinds.length !== 1 || kinds[0] !== want) {
+    problems.push(`trigger is [${kinds.join(', ')}], expected ${want}`);
+  }
+  if (endpoint.eventTrigger !== undefined && want !== 'pubsub') {
+    problems.push('has an event trigger but the row is not pubsub');
+  }
+  if (endpoint.eventTrigger === undefined && want === 'pubsub') {
+    problems.push('has no event trigger');
+  }
+  if (want === 'schedule' && endpoint.scheduleTrigger?.retryConfig?.retryCount !== 0) {
+    problems.push('scheduled retryCount is not 0');
+  }
+  if (want === 'pubsub' && endpoint.eventTrigger?.retry !== false) {
+    problems.push('pubsub retry is not false');
+  }
+  return problems;
+}
+
 describe('every function states its limits (ADR-060, C2)', () => {
   it('exports exactly the functions in the table', () => {
     expect(Object.keys(deployed).sort()).toEqual(Object.keys(EXPECTED).sort());
@@ -530,23 +561,7 @@ describe('every function states its limits (ADR-060, C2)', () => {
     expect(endpoint.timeoutSeconds).toBe(CALLABLE_TIMEOUT_SECONDS[timeoutKey(name)]);
     expect(endpoint.availableMemoryMb).toBe(want.memoryMb);
 
-    const set = {
-      callable: endpoint.callableTrigger !== undefined,
-      https: endpoint.httpsTrigger !== undefined,
-      schedule: endpoint.scheduleTrigger !== undefined,
-      pubsub: endpoint.eventTrigger?.eventType === PUBSUB_PUBLISHED,
-    };
-    expect(
-      Object.entries(set)
-        .filter(([, on]) => on)
-        .map(([kind]) => kind),
-    ).toEqual([want.trigger]);
-    if (want.trigger === 'schedule') {
-      expect(endpoint.scheduleTrigger?.retryConfig?.retryCount).toBe(0);
-    }
-    // Any other event trigger (Firestore, Storage) must fail here, not pass as pubsub.
-    expect(endpoint.eventTrigger !== undefined).toBe(want.trigger === 'pubsub');
-    if (want.trigger === 'pubsub') expect(endpoint.eventTrigger?.retry).toBe(false);
+    expect(triggerProblems(endpoint, want.trigger)).toEqual([]);
     expect(endpoint.serviceAccountEmail).toBe(ACCOUNTS[want.account]);
   });
 
@@ -557,6 +572,25 @@ describe('every function states its limits (ADR-060, C2)', () => {
       source: readFileSync(path, 'utf8'),
     }));
     expect(scanProblems(sources, Object.keys(EXPECTED).length)).toEqual([]);
+  });
+
+  describe('the trigger check catches what it should', () => {
+    it('passes a pubsub row with a pubsub event trigger', () => {
+      const endpoint = { eventTrigger: { eventType: PUBSUB_PUBLISHED, retry: false } };
+      expect(triggerProblems(endpoint as Endpoint, 'pubsub')).toEqual([]);
+    });
+
+    it('fails a Firestore event trigger on the pubsub row', () => {
+      const endpoint = {
+        eventTrigger: { eventType: 'google.cloud.firestore.document.v1.written', retry: false },
+      };
+      expect(triggerProblems(endpoint as Endpoint, 'pubsub')).not.toEqual([]);
+    });
+
+    it('fails a pubsub event trigger that retries', () => {
+      const endpoint = { eventTrigger: { eventType: PUBSUB_PUBLISHED, retry: true } };
+      expect(triggerProblems(endpoint as Endpoint, 'pubsub')).not.toEqual([]);
+    });
   });
 
   describe('the source scan catches what it should', () => {
