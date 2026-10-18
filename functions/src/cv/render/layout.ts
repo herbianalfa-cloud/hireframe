@@ -233,9 +233,17 @@ export function makeEndKeyOf(
   };
 }
 
+// ---- The rule under a section title ----
+
+/** Word puts the rule's `space` below the text and then its width: both count in the layout. */
+export const RULE_SPACE = 1;
+export const RULE_SIZE = 0.5;
+export const RULE_HEIGHT = RULE_SPACE + RULE_SIZE;
+
 // ---- Blocks ----
 
-const CONTACT_SEPARATOR = '  |  ';
+/** Single spaces: Word keeps them, the PDF wrap collapses them, so both lay out the same line. */
+const CONTACT_SEPARATOR = ' | ';
 
 function block(kind: BlockKind, text: string, bold = false, dates = ''): Block {
   const made: Block = { kind, text, runs: [{ text, bold }] };
@@ -491,7 +499,8 @@ export function layoutBlocks(
 
     y += Math.max(pending, style.before);
     wrapped.forEach((runs, i) => {
-      if (y + style.leading > USABLE_HEIGHT) {
+      const ruled = item.kind === 'section' && i === wrapped.length - 1;
+      if (y + style.leading + (ruled ? RULE_HEIGHT : 0) > USABLE_HEIGHT) {
         page += 1;
         y = 0;
       }
@@ -508,7 +517,7 @@ export function layoutBlocks(
       if (item.kind === 'section') placed.rule = true;
       if (i === wrapped.length - 1 && dates !== undefined) placed.dates = dates;
       lines.push(placed);
-      y += style.leading;
+      y += style.leading + (ruled ? RULE_HEIGHT : 0);
     });
     blockLines.push(wrapped.length);
     pending = style.after;

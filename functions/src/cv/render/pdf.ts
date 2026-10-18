@@ -5,6 +5,8 @@ import {
   BASE_SPEC,
   CONTENT_WIDTH,
   PAGE,
+  RULE_SIZE,
+  RULE_SPACE,
   cvBlocks,
   layoutBlocks,
   noteBlocks,
@@ -94,11 +96,12 @@ async function renderBlocksPdf(
       });
     }
     if (line.rule === true) {
-      const y = baseline - 3;
+      // In the height the layout set aside under the line box: its space, then half the width.
+      const y = PAGE.height - PAGE.margin - (line.top + line.leading) - RULE_SPACE - RULE_SIZE / 2;
       sheet.drawLine({
         start: { x: PAGE.margin, y },
         end: { x: PAGE.margin + CONTENT_WIDTH, y },
-        thickness: 0.5,
+        thickness: RULE_SIZE,
         color: rgb(0, 0, 0),
       });
     }

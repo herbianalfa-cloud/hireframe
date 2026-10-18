@@ -31,12 +31,14 @@ import {
 import { FAKE_HEADER, WIDE_HEADER, fakeDateOf, filler, maxCv, wideCv } from './fixtures.js';
 import {
   BODY_SIZES,
+  BULLET_INDENT,
   CONTENT_WIDTH,
   USABLE_HEIGHT,
   baseSpec,
   cvBlocks,
   layoutBlocks,
   resolveStyles,
+  wrapRuns,
 } from './layout.js';
 import { makePdfMeasure } from './pdf.js';
 
@@ -97,7 +99,7 @@ describe('renderCvPdf', () => {
     );
     expectInOrder(text, [
       FAKE_HEADER.name,
-      `${FAKE_HEADER.email}  |  ${FAKE_HEADER.phone ?? ''}  |  ${FAKE_HEADER.location ?? ''}  |  ${FAKE_HEADER.links?.[0] ?? ''}`,
+      `${FAKE_HEADER.email} | ${FAKE_HEADER.phone ?? ''} | ${FAKE_HEADER.location ?? ''} | ${FAKE_HEADER.links?.[0] ?? ''}`,
     ]);
 
     const other = { ...FAKE_HEADER, name: 'Sam Sample', email: 'sam@example.com' };
@@ -535,6 +537,91 @@ describe('PDF and DOCX agree', () => {
         expect(word.usedHeight).toBeLessThanOrEqual(pdf.usedHeight);
       }
     }
+  });
+
+  /**
+   * The height Word gives the DOCX body, from document.xml alone: per paragraph the larger of the
+   * previous space after and this space before (Word's rule with no "don't use HTML paragraph
+   * auto spacing"), plus lines × the exact line height, plus the border's space and width. Lines
+   * wrap at the full `CONTENT_WIDTH` with the spaces kept, and a right tab puts the dates at
+   * the margin with no gap.
+   */
+  async function docxHeight(
+    header: typeof FAKE_HEADER,
+    content: Parameters<typeof renderCvDocx>[1],
+    spec: ReturnType<typeof baseSpec>,
+  ): Promise<number> {
+    const measure = await makePdfMeasure();
+    const zip = await JSZip.loadAsync(await renderCvDocx(header, content, fakeDateOf, spec));
+    const body = (await zip.file('word/document.xml')?.async('string')) ?? '';
+    const twip = (value: string | undefined) => Number(value ?? '0') / 20;
+    let height = 0;
+    let pendingAfter = 0;
+    for (const paragraph of body.match(/<w:p>.*?<\/w:p>/gs) ?? []) {
+      const attr = (tag: string, name: string) =>
+        new RegExp(`<w:${tag}\\b[^>]*\\bw:${name}="([^"]*)"`).exec(paragraph)?.[1];
+      const before = twip(attr('spacing', 'before'));
+      const after = twip(attr('spacing', 'after'));
+      const line = twip(attr('spacing', 'line'));
+      const indent = paragraph.includes('<w:numPr>') ? BULLET_INDENT : 0;
+      const runs: { text: string; bold: boolean }[] = [];
+      let dates: { text: string; size: number } | undefined;
+      let tabbed = false;
+      for (const run of paragraph.match(/<w:r>.*?<\/w:r>/gs) ?? []) {
+        if (run.includes('<w:tab/>')) {
+          tabbed = true;
+          continue;
+        }
+        const text = /<w:t\b[^>]*>(.*?)<\/w:t>/s.exec(run)?.[1] ?? '';
+        const size = Number(/<w:sz w:val="(\d+)"/.exec(run)?.[1] ?? '20') / 2;
+        const bold = run.includes('<w:b/>');
+        if (tabbed) dates = { text, size };
+        else runs.push({ text, bold });
+      }
+      const size = Number(/<w:sz w:val="(\d+)"/.exec(paragraph)?.[1] ?? '20') / 2;
+      const width = CONTENT_WIDTH - indent;
+      const wrapped = wrapRuns(runs, width, (text, bold) => measure(text, bold, size));
+      if (dates !== undefined) {
+        const last = wrapped[wrapped.length - 1] ?? [];
+        const used = last.reduce((sum, part) => sum + measure(part.text, part.bold, size), 0);
+        if (used + measure(dates.text, false, dates.size) > width) wrapped.push([]);
+      }
+      const border = /<w:bottom\b[^>]*\bw:sz="(\d+)"[^>]*\bw:space="(\d+)"/.exec(paragraph);
+      const rule = border === null ? 0 : Number(border[1]) / 8 + Number(border[2]);
+      height += Math.max(pendingAfter, before) + wrapped.length * line + rule;
+      pendingAfter = after;
+    }
+    return height;
+  }
+
+  it('fits one page in Word: the DOCX height from document.xml is within USABLE_HEIGHT', async () => {
+    for (const make of [fullCv, maxCv]) {
+      const fit = await fitPage(FAKE_HEADER, make(), fakeDateOf);
+      if (!fit.ok) throw new Error('did not fit');
+      const height = await docxHeight(FAKE_HEADER, fit.content, fit.spec);
+      expect(height).toBeGreaterThan(300);
+      expect(height).toBeLessThanOrEqual(USABLE_HEIGHT);
+      // The layout counts everything Word adds (the rule included), and Word wraps no later than
+      // the PDF does: the DOCX is no taller than the layout says.
+      expect(height).toBeLessThanOrEqual(fit.fill * USABLE_HEIGHT + 0.5);
+    }
+  });
+
+  it('writes the contact line to the DOCX as the PDF reads it, spaces kept', async () => {
+    const { body } = await docxParts();
+    const contact = [
+      FAKE_HEADER.email,
+      FAKE_HEADER.phone,
+      FAKE_HEADER.location,
+      ...(FAKE_HEADER.links ?? []),
+    ].join(' | ');
+    expect(body).toContain(`>${contact}</w:t>`);
+    expect(contact).not.toMatch(/ {2}/);
+    const pdf = await extractText(
+      (await renderCvPdf(FAKE_HEADER, applyTrim(validCv(), 0), fakeDateOf)).bytes,
+      'pdf',
+    );
+    expect(pdf).toContain(contact);
   });
 
   async function docxParts(spec = baseSpec(10.5)) {

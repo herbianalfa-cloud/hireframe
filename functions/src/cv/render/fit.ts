@@ -22,8 +22,8 @@ import {
 } from './layout.js';
 import { makePdfMeasure, renderCvPdf } from './pdf.js';
 
-/** Points kept free at the bottom after the gaps are spread. */
-export const FILL_RESERVE = 6;
+/** Points kept free at the bottom after the gaps are spread: covers Word's rounding (M6). */
+export const FILL_RESERVE = 10;
 /** Halving steps of the search for how far to spread. */
 const SPREAD_STEPS = 8;
 

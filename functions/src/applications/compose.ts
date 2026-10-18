@@ -1,6 +1,5 @@
 import {
   CV_CRITERIA,
-  CV_SCORE_TARGET,
   CV_WEIGHTS,
   CvContentSchema,
   FILL_FULL_BAND,
@@ -248,9 +247,7 @@ function revisionPlan(
     draft.score.total +
     fixing.reduce((sum, finding) => sum + findingCost(finding), 0) +
     (fillable ? CV_WEIGHTS.fill - draft.score.criteria.fill : 0);
-  const fixable =
-    (fixing.length > 0 || fillable) &&
-    (hard || reachable >= (input.scoreTarget ?? CV_SCORE_TARGET));
+  const fixable = (fixing.length > 0 || fillable) && (hard || reachable >= input.scoreTarget);
   if (!fixable) return { fixable: false };
   // The ones the job asks for come first.
   const wanted = new Set(input.job.requirements.flatMap((requirement) => requirement.factIds));

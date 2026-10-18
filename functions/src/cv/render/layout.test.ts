@@ -300,6 +300,19 @@ describe('layoutBlocks', () => {
     expect(rules).toEqual(['SUMMARY', 'EDUCATION', 'EXPERIENCE', 'PROJECTS', 'SKILLS']);
   });
 
+  it('counts the rule under a section title in the height, and only there', () => {
+    const section: Block = {
+      kind: 'section',
+      text: 'SKILLS',
+      runs: [{ text: 'SKILLS', bold: true }],
+    };
+    const text: Block = { kind: 'text', text: 'Plain.', runs: [{ text: 'Plain.', bold: false }] };
+    const ruled = layoutBlocks([section], measure, styles);
+    const plain = layoutBlocks([text], measure, styles);
+    expect(ruled.usedHeight).toBeCloseTo(styles.section.before + styles.section.leading + 1.5, 5);
+    expect(plain.usedHeight).toBeCloseTo(styles.text.before + styles.text.leading, 5);
+  });
+
   it('reports the rendered lines of each block in order', () => {
     const blocks = cvBlocks(FAKE_HEADER, applyTrim(fullCv(), 0), fakeDateOf);
     const { blockLines } = layoutBlocks(blocks, measure, styles);
