@@ -135,7 +135,7 @@ describe('cvSystem voice and length', () => {
     expect(system).toMatch(/passionate about, proven track record/);
     expect(system).toMatch(/Leadership, seniority and superlative words/);
     // The examples use placeholders, not facts.
-    expect(system.match(/Bad: "[^"]*"/g)?.every((bad) => /\[/.test(bad))).toBe(true);
+    expect(system.match(/Bad: "[^"]*"/g)?.every((bad) => bad.includes('['))).toBe(true);
   });
 
   it('asks for a first-person note of 180 to 250 words that names the company, not in a greeting', () => {
