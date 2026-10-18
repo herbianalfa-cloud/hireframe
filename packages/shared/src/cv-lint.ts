@@ -48,7 +48,20 @@ const CONTRAST: readonly RegExp[] = [
     'i',
   ),
   new RegExp(String.raw`\bnot an? [^.;!?,]{1,40}, but an?\b`, 'i'),
-  new RegExp(String.raw`\bless\b[^.;!?,]{1,40},\s*more\b`, 'i'),
+  // "less X, more Y", but not "less than 2 weeks, more than halving it": a comparison of figures.
+  new RegExp(String.raw`\bless\b(?:(?!\bthan\b)[^.;!?,]){1,40},\s*more\b`, 'i'),
+  // "isn't X, it's Y" with any subject: "Good onboarding isn't paperwork, it's trust."
+  new RegExp(
+    String.raw`\b(?:isn't|wasn't|aren't|weren't|is not|was not|are not|were not)\b${GAP}[,;.]\s*(?:it's|it is|it was|that's|that is|that was|this is|they're|they are|they were)\b`,
+    'i',
+  ),
+  // "not for X but for Y": "Built the dashboard not for show but for weekly decisions."
+  new RegExp(
+    String.raw`\bnot (?:for|to|by|because of|because|as|in|on|with)\b[^.;!?,]{1,40}?\bbut (?:for|to|by|because|as|in|on|with)\b`,
+    'i',
+  ),
+  // A sentence that opens "Not X but Y": "Not speed but accuracy."
+  new RegExp(String.raw`(?:^|[.;!?]\s+)not\b[^.;!?,]{1,40}?\sbut\b`, 'i'),
 ];
 
 /** Stock phrases. Never allowed, whatever the facts say. */
@@ -120,13 +133,49 @@ const INFLATED: readonly RegExp[] = [
   /\boutstanding\b/i,
 ];
 
+/**
+ * A present-tense claim as a bullet's opening verb ("Lead weekly calls", "Manages the queue"):
+ * `open` finds it, `own` is the word a cited fact may use itself. Only the opening verb counts, so
+ * "the lead paragraph" and "lead time" stay clean.
+ */
+const OPENING_CLAIMS: readonly { open: RegExp; own: RegExp }[] = [
+  {
+    open: /^\s*leads?\b(?!\s+(?:time|times|paragraph|paragraphs|generation|gen|source|sources|sheet|magnet|capture|qualification|scoring)\b)/i,
+    own: /\b(?:lead|leads|led|leading|leadership|leader)\b/i,
+  },
+  { open: /^\s*manages?\b/i, own: /\bmanag(?:e|es|ed|ing|er|ement)\b/i },
+  { open: /^\s*oversees\b/i, own: /\bovers(?:aw|ee|ees|eeing|een)\b/i },
+];
+
 const INTENSIFIER =
   /\b(?:successfully|effectively|significantly|substantially|dramatically|remarkably|tremendously|extremely|highly|greatly|truly|really)\b/i;
 
 const WEAK_OPENER =
   /^\s*(?:responsible for|worked on|tasked with|helped to|helped with|assisted with|duties included|in charge of)\b/i;
 
-const FIRST_PERSON = /\b(?:I|I'm|I've|I'd|I'll|me|my|myself)\b/;
+/** "I" is capital only; "me", "my" and "myself" in any case ("My onboarding work"). */
+const FIRST_PERSON_I = /\b(?:I|I'm|I've|I'd|I'll)\b/g;
+const FIRST_PERSON_ME = /\b(?:me|my|myself)\b/i;
+/** Words that can open a sentence before a real "I" ("Then I ran"); "Phase I" is a numeral. */
+const BEFORE_REAL_I =
+  /^(?:then|later|now|today|when|while|after|before|since|so|and|but|here|there|next|first|once|yes|as|if|because|although|though|where|whenever|whilst|until|thus|hence|also|still|soon|often|always|never)$/i;
+
+/** Whether the text says "I": not the Roman numeral after a capitalised word ("Phase I"). */
+function saysI(value: string): boolean {
+  for (const match of value.matchAll(FIRST_PERSON_I)) {
+    const before = /([\p{L}][\p{L}'-]*)\s+$/u.exec(value.slice(0, match.index))?.[1];
+    if (
+      before !== undefined &&
+      /^\p{Lu}/u.test(before) &&
+      !BEFORE_REAL_I.test(before) &&
+      match[0] === 'I'
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
 
 const GREETING = /^\s*(?:dear|hi|hello|good (?:morning|afternoon))\b/i;
 const SIGN_OFF =
@@ -186,7 +235,8 @@ function textsOf(
 const ownedByFact = (pattern: RegExp, text: Text): boolean => pattern.test(text.cited);
 
 /** "not managed", "never led", "didn't lead", "without managing": the word is denied, not claimed. */
-const NEGATION_BEFORE = /(?:\b(?:not|never|no|without|neither|nor|cannot)|n't)\s+(?:[a-z]+\s+)?$/i;
+const NEGATION_BEFORE =
+  /(?:\b(?:not|never|no|without|neither|nor|cannot)|n't)\s+(?:(?!(?:only|just|merely|simply)\b)[a-z]+\s+)?$/i;
 
 /** The words of a job's title, lower case ("Product Manager (Graduate Scheme)" has four). */
 function titleWords(title: string | undefined): ReadonlySet<string> {
@@ -200,15 +250,48 @@ function titleWords(title: string | undefined): ReadonlySet<string> {
 }
 
 /**
- * Whether `pattern` claims something in `value`: a match that is neither a word of the job's
- * title ("Product Manager": saying which job it is for is not claiming its seniority) nor
- * denied in the words just before it ("not managed"). "Managed" is not "manager", so a claim
- * beyond the title is still found.
+ * Whether the word at `index` is part of the job's title phrase: a title word sitting next to
+ * another title word ("Product Manager", "Strategic Partnerships"). A title word on its own is
+ * the posting's text, which could be inflated or planted, so it is no excuse ("Strategic
+ * thinker").
+ */
+function inTitlePhrase(value: string, index: number, word: string, title: ReadonlySet<string>) {
+  if (!title.has(word.toLowerCase())) return false;
+  const before = /([\p{L}]+)[^\p{L}.;!?]*$/u.exec(value.slice(0, index))?.[1];
+  const after = /^[^\p{L}.;!?]*([\p{L}]+)/u.exec(value.slice(index + word.length))?.[1];
+  return (
+    (before !== undefined && title.has(before.toLowerCase())) ||
+    (after !== undefined && title.has(after.toLowerCase()))
+  );
+}
+
+/** Uses of an inflated word that are not a claim of seniority ("led to", "outstanding tickets"). */
+const NOT_A_CLAIM_AFTER: readonly RegExp[] = [
+  /^(?:led|managed) to\b/i,
+  /^outstanding (?:tickets?|issues?|items?)\b/i,
+  /^expert (?:interviews?|reviews?)\b/i,
+];
+/** "a leading retailer": the adjective before a noun, but not "a leading role". */
+const LEADING_NOUN = /\ba leading (?!(?:role|position|part|team|voice|figure)\b)[a-z]+/i;
+
+function notAClaim(value: string, index: number): boolean {
+  const from = value.slice(index);
+  if (NOT_A_CLAIM_AFTER.some((pattern) => pattern.test(from))) return true;
+  const around = value.slice(Math.max(0, index - 2));
+  return /^a leading\b/i.test(around) && LEADING_NOUN.test(around);
+}
+
+/**
+ * Whether `pattern` claims something in `value`: a match that is neither part of the job's title
+ * phrase ("Product Manager": saying which job it is for is not claiming its seniority), nor
+ * denied in the words just before it ("not managed"), nor one of the false friends above.
+ * "Managed" is not "manager", so a claim beyond the title is still found.
  */
 function claims(pattern: RegExp, value: string, title: ReadonlySet<string>): boolean {
   const every = new RegExp(pattern.source, 'gi');
   for (const match of value.matchAll(every)) {
-    if (title.has(match[0].toLowerCase())) continue;
+    if (inTitlePhrase(value, match.index, match[0], title)) continue;
+    if (notAClaim(value, match.index)) continue;
     if (!NEGATION_BEFORE.test(value.slice(Math.max(0, match.index - 24), match.index))) return true;
   }
   return false;
@@ -222,6 +305,13 @@ function check(text: Text, title: ReadonlySet<string>): FindingCode[] {
   if (CLICHE.some((pattern) => pattern.test(value))) codes.add('cliche');
 
   if (INFLATED.some((pattern) => claims(pattern, value, title) && !ownedByFact(pattern, text))) {
+    codes.add('inflated_claim');
+  }
+
+  if (
+    text.bullet &&
+    OPENING_CLAIMS.some(({ open, own }) => open.test(value) && !own.test(text.cited))
+  ) {
     codes.add('inflated_claim');
   }
 
@@ -239,7 +329,9 @@ function check(text: Text, title: ReadonlySet<string>): FindingCode[] {
 
   if (INTENSIFIER.test(value)) codes.add('intensifier');
   if (text.bullet && WEAK_OPENER.test(value)) codes.add('weak_opener');
-  if (text.part === 'cv' && FIRST_PERSON.test(value)) codes.add('first_person');
+  if (text.part === 'cv' && (saysI(value) || FIRST_PERSON_ME.test(value))) {
+    codes.add('first_person');
+  }
   if (sentencesOf(value).some((sentence) => words(sentence) > MAX_SENTENCE_WORDS)) {
     codes.add('long_sentence');
   }

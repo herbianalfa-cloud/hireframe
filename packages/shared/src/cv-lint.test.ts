@@ -54,6 +54,12 @@ describe('contrast_pattern (hard)', () => {
     'Wrote less code, more tests.',
     'Not merely cleaned data; it is the base for every report.',
     'It’s not the tooling. It’s the habit.',
+    "Good onboarding isn't paperwork, it's trust.",
+    'Built the dashboard not for show but for weekly decisions.',
+    "It wasn't luck. It was a weekly check.",
+    'The goal was not speed, it was accuracy.',
+    'Not speed but accuracy.',
+    "The report wasn't a summary; it was a plan.",
   ])('flags: %s', (text) => {
     expect(codesOf(text)).toContain('contrast_pattern');
   });
@@ -64,6 +70,11 @@ describe('contrast_pattern (hard)', () => {
     'Not applicable to the role.',
     'Tested the form and fixed the bugs found.',
     'Wrote less than a page for each report.',
+    'Cut setup to less than 2 weeks, more than halving it.',
+    'The report was not late, and the team read it.',
+    'Did not exceed the budget in any month but the first.',
+    'It was not clear who owned the rota, so I asked.',
+    'Wrote a lot, but not all of it shipped.',
   ])('does not flag: %s', (text) => {
     expect(codesOf(text)).not.toContain('contrast_pattern');
   });
@@ -197,6 +208,21 @@ describe('inflated_claim ignores the job title and denied uses', () => {
     expect(codesWith('Applying for the product MANAGER role.', 'Product Manager')).toEqual([]);
   });
 
+  it('exempts a title word only next to another title word (L7)', () => {
+    const title = 'Strategic Partnerships Associate';
+    expect(codesWith('Strategic thinker who ran onboarding for 12 clients.', title)).toContain(
+      'inflated_claim',
+    );
+    expect(
+      codesWith('Applying for the Strategic Partnerships Associate role.', title),
+    ).not.toContain('inflated_claim');
+    // A title of one inflated word excuses nothing, and neither does a lone word of a longer one.
+    expect(codesWith('Expert in setup flows.', 'Expert')).toContain('inflated_claim');
+    expect(codesWith('A manager of rotas.', 'Associate Product Manager')).toContain(
+      'inflated_claim',
+    );
+  });
+
   it('still flags the word outside the title phrase', () => {
     expect(codesWith('Managed a team of 4 analysts.', 'Product Manager')).toContain(
       'inflated_claim',
@@ -215,8 +241,12 @@ describe('inflated_claim ignores the job title and denied uses', () => {
 
   it('exempts only the exact title word, with no stemming', () => {
     const title = 'Associate Product Manager';
-    expect(codesWith('Applying for the Manager role.', title)).not.toContain('inflated_claim');
-    expect(codesWith('Applying for the MANAGER role.', title)).not.toContain('inflated_claim');
+    expect(codesWith('Applying for the Product Manager role.', title)).not.toContain(
+      'inflated_claim',
+    );
+    expect(codesWith('Applying for the PRODUCT MANAGER role.', title)).not.toContain(
+      'inflated_claim',
+    );
     expect(codesWith('Managed a team of 4 analysts.', title)).toContain('inflated_claim');
     expect(codesWith('Led the team through the rewrite.', title)).toContain('inflated_claim');
     // Other forms of the title's word are claims, not the title.
@@ -245,6 +275,60 @@ describe('inflated_claim ignores the job title and denied uses', () => {
     expect(codesWith(text)).toContain('inflated_claim');
   });
 
+  it.each([
+    'Not only wrote the guides, also led the rewrite.',
+    'Not just led onboarding for 12 clients, also wrote guides.',
+    'Not merely managed the rota.',
+  ])('does not read "not only/just/merely" as a denial: %s', (text) => {
+    expect(codesWith(text)).toContain('inflated_claim');
+  });
+
+  it.each([
+    'Lead weekly onboarding calls for 12 clients.',
+    'Leads the weekly onboarding calls.',
+    'Manage the onboarding queue.',
+    'Manages the onboarding queue.',
+    'Oversees setup for new clients.',
+  ])('flags a present-tense claim as the opening verb (M5): %s', (text) => {
+    expect(codesWith(text)).toContain('inflated_claim');
+  });
+
+  it.each([
+    'Wrote the lead paragraph of each article.',
+    'Cut lead time for setup from 5 to 2 days.',
+    'Lead time for setup fell to 2 days.',
+    'Wrote guides on how a team manages onboarding.',
+    'Wrote the guide for people who manage rotas.',
+  ])('does not flag lead, manage or oversees away from the opening verb: %s', (text) => {
+    expect(codesWith(text)).not.toContain('inflated_claim');
+  });
+
+  it('lets a cited fact own a present-tense opening verb', () => {
+    // fact-clients says "Led onboarding for 12 clients".
+    expect(codesWith('Lead onboarding for 12 clients.', 'Data Analyst', 'fact-clients')).toEqual(
+      [],
+    );
+  });
+
+  it.each([
+    'Wrote guides which led to fewer tickets.',
+    'Managed to cut setup time by half.',
+    'Cleared outstanding tickets each week.',
+    'Closed outstanding issues from the backlog.',
+    'Example is a leading retailer of garden tools.',
+    'Ran expert interviews with five users.',
+    'Did an expert review of the help centre.',
+  ])('does not flag a false friend (L1): %s', (text) => {
+    expect(codesWith(text)).not.toContain('inflated_claim');
+  });
+
+  it('still flags the real uses beside the false friends', () => {
+    expect(codesWith('Led the rewrite, which led to fewer tickets.')).toContain('inflated_claim');
+    expect(codesWith('Took a leading role in the rewrite.')).toContain('inflated_claim');
+    expect(codesWith('An expert in setup flows.')).toContain('inflated_claim');
+    expect(codesWith('Outstanding results.')).toContain('inflated_claim');
+  });
+
   it('flags a denied use next to a real one in the same text', () => {
     expect(codesWith('Never led a team, but managed a rota.')).toContain('inflated_claim');
   });
@@ -264,6 +348,9 @@ describe('soft findings', () => {
     ['weak_opener', 'Helped to write articles.'],
     ['first_person', 'I wrote 25 help-centre articles.'],
     ['first_person', 'Wrote articles for my team.'],
+    ['first_person', 'My onboarding work covered 12 clients.'],
+    ['first_person', 'Wrote the guides for ME and the team.'],
+    ['first_person', 'Then I wrote 25 help-centre articles.'],
     ['exclamation', 'Wrote 25 help-centre articles!'],
     [
       'long_sentence',
@@ -280,6 +367,8 @@ describe('soft findings', () => {
     'Worked with the support team on the setup flow.',
     'Edited the highlights of each article.',
     'Wrote a short summary. Added a second one for the setup flow.',
+    'Ran Phase I onboarding for the new clients.',
+    'Wrote Part I of the guide.',
   ])('is quiet on: %s', (text) => {
     expect(codesOf(text)).toEqual([]);
   });
