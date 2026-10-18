@@ -84,7 +84,7 @@ function linesOf(blocks: readonly Block[], layout: LayoutResult): FitLines {
  * numbers. A CV that is still over a page after every step is `too_long`, and that is a real
  * outcome: headings and education are never trimmed, so at the limits of the schema, in wide
  * letters, they alone run past one page (pinned by a test with `wideCv()`). Ordinary words at
- * the same limits do fit once trimmed (`maxCv()`). Bounded by the steps × 2 sizes + 9 layouts.
+ * the same limits do fit once trimmed (`maxCv()`). Bounded by (steps + 1) × 3 body sizes, then 9 spread layouts and one final render.
  */
 export async function fitPage(
   header: CvHeader,

@@ -65,6 +65,8 @@ export interface CvScore {
   rubric: typeof CV_RUBRIC_VERSION;
   /** 0 to 10, two decimals; at most `CV_HARD_FINDING_CAP` while a hard finding stands. */
   total: number;
+  /** The criteria summed before the hard-finding cap, so two capped scores can still be ranked. */
+  uncapped: number;
   criteria: Record<CvCriterion, number>;
   findings: Finding[];
   gatePassed: boolean;
@@ -291,7 +293,9 @@ function structureScore(content: Content, company: string, findings: readonly Fi
 // ---- 7. The cover note (rubric v2) ----
 
 function trigrams(text: string): Set<string> {
-  const words = foldText(text).split(' ').filter((word) => word !== '');
+  const words = foldText(text)
+    .split(' ')
+    .filter((word) => word !== '');
   const out = new Set<string>();
   for (let i = 0; i + 2 < words.length; i += 1) out.add(words.slice(i, i + 3).join(' '));
   return out;
@@ -353,6 +357,7 @@ export function scoreCv(input: CvScoreInput): CvScore {
   return {
     rubric: CV_RUBRIC_VERSION,
     total,
+    uncapped: round2(sum),
     criteria,
     findings,
     gatePassed: !hard && total >= (input.target ?? CV_SCORE_TARGET),
