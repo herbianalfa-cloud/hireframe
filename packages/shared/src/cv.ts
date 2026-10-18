@@ -565,6 +565,8 @@ interface Cite {
   types?: readonly Fact['type'][];
   /** Fact types for the ref at the same index, where the refs are not alike (an education line). */
   typesByRef?: readonly (readonly Fact['type'][])[];
+  /** An education line: `refs[1]` is an achievement that may lend its classification only. */
+  classification?: boolean;
 }
 
 function cites(content: CvContent): Cite[] {
@@ -619,6 +621,7 @@ function cites(content: CvContent): Cite[] {
         entry.factRef === '' ? [] : [entry.factRef, ...(achievement === '' ? [] : [achievement])],
       // The line's own fact first, then at most one achievement for the classification.
       typesByRef: [EDUCATION_FACT_TYPES, EDUCATION_ACHIEVEMENT_FACT_TYPES],
+      classification: true,
       words: 'fact',
       denied: NOT_IN_ENTRIES,
     });
@@ -698,6 +701,40 @@ interface FactReads {
   /** The folded text and evidence, for a part with no word (`R`). */
   phrase: string;
   figures: Set<string>;
+}
+
+/** The only words an education line may take from its achievement (M1 of the CV quality review). */
+const CLASSIFICATION_WORDS: ReadonlySet<string> = new Set(
+  [
+    'first class honours',
+    'first class honors',
+    'upper second class',
+    'lower second class',
+    'second class',
+    'third class',
+    'third',
+    'distinction',
+    'merit',
+    'pass',
+    'commendation',
+    'cum laude',
+    'magna cum laude',
+    'summa cum laude',
+  ].flatMap((phrase) => phrase.split(' ')),
+);
+/** The two classifications written as figures; the only figures an achievement may lend. */
+const CLASSIFICATION_FIGURES = /\b2\s?:\s?[12]\b/;
+const DEGREE_TOKENS =
+  /\b(?:bsc|msc|ba|ma|mba|phd|dphil|meng|beng|mphil|mres|llb|llm|bed|med|mchem|mmath|mphys|bcom|mcom|bfa|mfa)\b/g;
+
+/** Whether an achievement belongs to this degree: a degree token or a year in both texts. */
+function sharesDegree(education: CvFact, achievement: CvFact): boolean {
+  const tokens = (fact: CvFact, pattern: RegExp): Set<string> =>
+    new Set(`${fact.text}\n${fact.evidence}`.toLowerCase().match(pattern) ?? []);
+  const degrees = tokens(achievement, DEGREE_TOKENS);
+  if ([...tokens(education, DEGREE_TOKENS)].some((token) => degrees.has(token))) return true;
+  const years = tokens(achievement, /\b(?:19|20)\d{2}\b/g);
+  return [...tokens(education, /\b(?:19|20)\d{2}\b/g)].some((year) => years.has(year));
 }
 
 function readFact(fact: CvFact): FactReads {
@@ -801,6 +838,7 @@ export function validateCv(
 
     // Distinct refs only: the work below is per fact, not per mention.
     const cited: CvFact[] = [];
+    const byIndex: (CvFact | undefined)[] = [];
     const seen = new Set<string>();
     cite.refs.forEach((ref, index) => {
       if (seen.has(ref)) return;
@@ -811,6 +849,7 @@ export function validateCv(
         add(cite.path, 'unknown_fact');
         return;
       }
+      byIndex[index] = fact;
       const types = cite.typesByRef?.[index] ?? cite.types;
       const wrongType =
         cite.denied.includes(fact.type) || (types !== undefined && !types.includes(fact.type));
@@ -818,6 +857,18 @@ export function validateCv(
       if (!cited.includes(fact)) cited.push(fact);
     });
     const citedReads = cited.map(readsOf);
+
+    // An education line's achievement lends a classification and nothing else (M1).
+    const lender = cite.classification === true ? byIndex[1] : undefined;
+    const owner = cite.classification === true ? byIndex[0] : undefined;
+    if (lender !== undefined && owner !== undefined && lender !== owner) {
+      const educationFacts = facts.filter(
+        (fact) => fact.status === 'active' && EDUCATION_FACT_TYPES.includes(fact.type),
+      );
+      if (educationFacts.length >= 2 && !sharesDegree(owner, lender)) {
+        add(cite.path, 'wrong_fact_type');
+      }
+    }
 
     // Contact allowance: the cited facts' text only, tokenised once for every text under the cite.
     const allowance = contactAllowance(cited.map((fact) => fact.text).join('\n'));
@@ -831,7 +882,13 @@ export function validateCv(
     }
 
     if (cite.words === 'fact' && cited.length > 0) {
-      const allowed = new Set(citedReads.flatMap((read) => [...read.words]));
+      const allowed = new Set(
+        cited.flatMap((fact) =>
+          fact === lender
+            ? [...readsOf(fact).words].filter((word) => CLASSIFICATION_WORDS.has(word))
+            : [...readsOf(fact).words],
+        ),
+      );
       let checked = 0;
       for (const text of cite.texts) {
         const words = wordsOf(text.value);
@@ -847,7 +904,15 @@ export function validateCv(
       }
     }
 
-    const supported = new Set(citedReads.flatMap((read) => [...read.figures]));
+    const supported = new Set(
+      cited.flatMap((fact) =>
+        fact === lender
+          ? CLASSIFICATION_FIGURES.test(`${fact.text}\n${fact.evidence}`)
+            ? [...figuresIn('2:1 2:2')]
+            : []
+          : [...readsOf(fact).figures],
+      ),
+    );
     for (const text of cite.texts) {
       for (const figure of figuresIn(text.value)) {
         if (!supported.has(figure)) add(text.path, 'unsupported_number');

@@ -1637,8 +1637,8 @@ describe('an education line citing a classification', () => {
   const HONOURS: CvFact = {
     id: 'fact-honours',
     type: 'achievement',
-    text: 'Graduated with First Class Honours',
-    evidence: 'First Class Honours',
+    text: 'Graduated with First Class Honours in the BSc',
+    evidence: 'First Class Honours, BSc',
     status: 'active',
   };
   const facts = [...CV_FACTS, DEGREE, HONOURS];
@@ -1662,6 +1662,72 @@ describe('an education line citing a classification', () => {
     expect(citedFactIds(both, aliases)).toEqual(
       expect.arrayContaining(['fact-degree', 'fact-honours']),
     );
+  });
+
+  it("refuses an unrelated award and its figure, and another degree's classification", () => {
+    const MSC: CvFact = {
+      id: 'fact-msc',
+      type: 'achievement',
+      text: 'Awarded a Distinction for the MSc dissertation',
+      evidence: 'Distinction, MSc dissertation',
+      status: 'active',
+    };
+    const PRIZE: CvFact = {
+      id: 'fact-prize',
+      type: 'achievement',
+      text: 'Won first prize at a 60-person hackathon with a fraud-detection model',
+      evidence: 'first prize, 60-person hackathon',
+      status: 'active',
+    };
+    const BA: CvFact = {
+      id: 'fact-ba',
+      type: 'education',
+      text: 'BSc Economics, Example University',
+      evidence: 'BSc Economics, Example University',
+      status: 'active',
+    };
+    const many = [...facts, MSC, PRIZE, BA];
+    const manyAliases = new Map([
+      ...aliases,
+      ['F12', 'fact-msc'],
+      ['F13', 'fact-prize'],
+      ['F14', 'fact-ba'],
+    ]);
+    const check = (text: string, ref: string) =>
+      validateCv(
+        edited((cv) => {
+          cv.education = [{ line: text, factRef: 'F14', achievementRef: ref }];
+        }),
+        manyAliases,
+        many,
+      );
+    expect(check('BSc Economics, Example University, Distinction', 'F12')).toMatchObject({
+      ok: false,
+    });
+    expect(
+      issuesOfVerdict(check('BSc Economics, first prize, 60-person hackathon', 'F13')),
+    ).toContainEqual({ path: 'education[0]', code: 'unsupported_text' });
+  });
+
+  it('with two education facts, needs a shared degree token or year', () => {
+    const OTHER: CvFact = {
+      ...HONOURS,
+      id: 'fact-other',
+      text: 'Graduated with First Class Honours',
+      evidence: 'First Class Honours',
+    };
+    const verdictOther = validateCv(
+      line((e) => {
+        e.line = 'BSc Business Information Systems, First Class Honours';
+        e.achievementRef = 'F12';
+      }),
+      new Map([...aliases, ['F12', 'fact-other']]),
+      [...facts, OTHER],
+    );
+    expect(issuesOfVerdict(verdictOther)).toContainEqual({
+      path: 'education[0]',
+      code: 'wrong_fact_type',
+    });
   });
 
   it('refuses the classification words when the achievement is not cited', () => {
