@@ -169,6 +169,8 @@ export const CV_CRITERIA = [
   'tailoring',
   'craft',
   'structure',
+  /** Rubric v2 on; a `cvs` doc scored under v1 has none. */
+  'note',
 ] as const;
 export type CvCriterion = (typeof CV_CRITERIA)[number];
 
@@ -193,10 +195,12 @@ export const CvQualitySchema = z.strictObject({
   rubric: z.string().min(1).max(40),
   total: z.number().min(0).max(10),
   criteria: z.strictObject(
-    Object.fromEntries(CV_CRITERIA.map((name) => [name, z.number().min(0).max(10)])) as Record<
-      CvCriterion,
-      z.ZodNumber
-    >,
+    Object.fromEntries(
+      CV_CRITERIA.map((name) => [
+        name,
+        name === 'note' ? z.number().min(0).max(10).exactOptional() : z.number().min(0).max(10),
+      ]),
+    ) as Record<CvCriterion, z.ZodNumber>,
   ),
   findings: z
     .array(z.strictObject({ code: z.enum(FINDING_CODES), path: z.string().min(1).max(80) }))
