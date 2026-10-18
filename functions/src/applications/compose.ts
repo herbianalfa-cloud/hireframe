@@ -4,6 +4,7 @@ import {
   FILL_FULL_BAND,
   citedFactIds,
   clampCvCounts,
+  dropUnsupportedSkills,
   issueCodes,
   normaliseCvText,
   orderEntries,
@@ -112,14 +113,14 @@ export interface Shipped {
 }
 
 export type ComposeResult =
-  | { kind: 'invalid'; issues: CvIssueCode[]; where: CvIssue[] }
+  | { kind: 'invalid'; issues: CvIssueCode[]; where: CvIssue[]; skillsDropped: number }
   /** The owner moved the application before the revision was counted. */
   | { kind: 'lost' }
   | {
       kind: 'composed';
       shipped: Shipped;
       /** The first draft's score and findings (the eval reports them; they are not stored). */
-      draft: { total: number; hard: number; soft: number };
+      draft: { total: number; hard: number; soft: number; skillsDropped: number };
       /** Set when the revision's failure ends the run, after the draft ships. */
       stop?: 'cap' | 'error';
     };
@@ -129,11 +130,14 @@ interface Candidate {
   cited: CvContent;
   score: CvScore;
   dashesReplaced: number;
+  /** Skills removed before validating: uncited, or citing a fact that is not a skill. */
+  skillsDropped: number;
   facts: readonly ExistingFact[];
 }
 
 type Prepared =
-  { ok: true; candidate: Candidate } | { ok: false; issues: CvIssueCode[]; where: CvIssue[] };
+  | { ok: true; candidate: Candidate }
+  | { ok: false; issues: CvIssueCode[]; where: CvIssue[]; skillsDropped: number };
 
 /** Scrub, validate, order, fit and score one model output. */
 async function prepare(
@@ -144,11 +148,20 @@ async function prepare(
 ): Promise<Prepared> {
   // NFC first: the validator checks printability after NFC, the renderer does not.
   // Counts next: a sixth bullet on one entry loses that bullet, not the whole output.
-  const scrubbed = scrubDashes(clampCvCounts(normaliseCvText(raw)));
+  const clamped = clampCvCounts(normaliseCvText(raw));
+  const kept = dropUnsupportedSkills(clamped, input.toId, validatorFacts(facts));
+  const scrubbed = scrubDashes(kept.content);
   const verdict = validateCv(scrubbed.content, input.toId, validatorFacts(facts));
-  if (!verdict.ok) return { ok: false, issues: issueCodes(verdict.issues), where: verdict.issues };
+  if (!verdict.ok)
+    return {
+      ok: false,
+      issues: issueCodes(verdict.issues),
+      where: verdict.issues,
+      skillsDropped: kept.dropped,
+    };
   const strict = CvContentSchema.safeParse(scrubbed.content);
-  if (!strict.success) return { ok: false, issues: ['too_long'], where: [] };
+  if (!strict.success)
+    return { ok: false, issues: ['too_long'], where: [], skillsDropped: kept.dropped };
 
   const { render } = deps;
   const dated = facts.map((fact) => ({ id: fact.id, dates: fact.content.dates }));
@@ -159,7 +172,7 @@ async function prepare(
   );
   try {
     const fit = await render.fitPage(input.header, ordered, render.makeDateOf(input.toId, dated));
-    if (!fit.ok) return { ok: false, issues: [fit.code], where: [] };
+    if (!fit.ok) return { ok: false, issues: [fit.code], where: [], skillsDropped: kept.dropped };
     const score = scoreCv({
       content: fit.content,
       facts: validatorFacts(facts),
@@ -176,11 +189,18 @@ async function prepare(
     });
     return {
       ok: true,
-      candidate: { fit, cited: ordered, score, dashesReplaced: scrubbed.replaced, facts },
+      candidate: {
+        fit,
+        cited: ordered,
+        score,
+        dashesReplaced: scrubbed.replaced,
+        skillsDropped: kept.dropped,
+        facts,
+      },
     };
   } catch (error) {
     if (error instanceof render.CvRenderError)
-      return { ok: false, issues: [error.code], where: [] };
+      return { ok: false, issues: [error.code], where: [], skillsDropped: kept.dropped };
     throw error;
   }
 }
@@ -286,14 +306,22 @@ function revisionFailure(error: unknown): {
 
 export async function composeCv(deps: ComposeDeps, input: ComposeInput): Promise<ComposeResult> {
   const first = await prepare(deps, input, input.draft, input.facts);
-  if (!first.ok) return { kind: 'invalid', issues: first.issues, where: first.where };
+  if (!first.ok) {
+    const { issues, where, skillsDropped } = first;
+    return { kind: 'invalid', issues, where, skillsDropped };
+  }
   const { score } = first.candidate;
   const hard = hardCount(score);
   const result = await reviseAndShip(deps, input, first.candidate);
   if (result.kind !== 'composed') return result;
   return {
     ...result,
-    draft: { total: score.total, hard, soft: score.findings.length - hard },
+    draft: {
+      total: score.total,
+      hard,
+      soft: score.findings.length - hard,
+      skillsDropped: first.candidate.skillsDropped,
+    },
   };
 }
 
@@ -375,7 +403,12 @@ async function reviseAndShip(
         ),
       };
     }
-    return { kind: 'invalid', issues: again.issues, where: again.where };
+    return {
+      kind: 'invalid',
+      issues: again.issues,
+      where: again.where,
+      skillsDropped: again.skillsDropped,
+    };
   }
   if (!revisedOk) {
     // The revision parsed but does not validate: the codes say why, the draft ships.

@@ -136,6 +136,19 @@ function writeIssueLines(results: readonly CvCaseResult[]): string[] {
     : ['Writes that failed validation:', ...lines.map((l) => `  ${l}`), ''];
 }
 
+/** The skills removed before validating, per case: uncited, or citing a fact that is no skill. */
+function skillsDroppedLines(results: readonly CvCaseResult[]): string[] {
+  const dropped = results.filter((r) => r.skillsDropped > 0);
+  if (dropped.length === 0) return [];
+  const total = dropped.reduce((sum, r) => sum + r.skillsDropped, 0);
+  return [
+    `Skills dropped before validating (${String(total)}): ${dropped
+      .map((r) => `${r.id} ${String(r.skillsDropped)}`)
+      .join(', ')}`,
+    '',
+  ];
+}
+
 export function formatCvReport(results: readonly CvCaseResult[]): string {
   const summary = summariseCv(results);
   const rows = results.map((r) => {
@@ -181,6 +194,7 @@ export function formatCvReport(results: readonly CvCaseResult[]): string {
     ...rows.map(line),
     '',
     ...writeIssueLines(results),
+    ...skillsDroppedLines(results),
     `Full profile: ${String(summary.passing)}/${String(summary.full)} at ${String(CV_SCORE_TARGET)} or more · mean ${num(summary.fullMean)}`,
     `Revisions: ${String(summary.revisions)}/${String(summary.cases)} (${(summary.revisionRate * 100).toFixed(0)}%)`,
     `Tokens (write + revision): ${String(summary.tokens.input)} in, ${String(summary.tokens.output)} out`,

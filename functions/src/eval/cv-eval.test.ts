@@ -240,6 +240,7 @@ function result(id: string, total: number, over: Partial<CvCaseResult> = {}): Cv
     writeCalls: 1,
     reviseCalls: 0,
     writeIssues: [[]],
+    skillsDropped: 0,
     draftHard: 0,
     draftSoft: 1,
     costPence: 4,
@@ -373,6 +374,12 @@ describe('summariseCv and formatCvReport', () => {
     expect(text).toContain('  c01: write 1 unsupported_text, wrong_fact_type; write 2 valid');
     expect(text).toContain('  c04: write 1 too_long; write 2 uncited');
     expect(text).not.toContain('c02: write');
+  });
+
+  it('counts the skills dropped before validating, per case, and says nothing when none were', () => {
+    expect(formatCvReport(goodRun())).not.toContain('Skills dropped');
+    const run = goodRun().map((r, i): CvCaseResult => (i < 2 ? { ...r, skillsDropped: i + 1 } : r));
+    expect(formatCvReport(run)).toContain('Skills dropped before validating (3): c01 1, c02 2');
   });
 });
 

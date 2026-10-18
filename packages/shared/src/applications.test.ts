@@ -160,7 +160,10 @@ describe('ApplicationSchema', () => {
     // A path is structure only: text with spaces or punctuation is refused.
     const bad = [{ code: 'uncited', path: 'Led a team of 4!' }];
     expect(ApplicationSchema.safeParse(application({ lastIssueAt: bad })).success).toBe(false);
-    const many = Array.from({ length: 25 }, (_, i) => ({ code: 'uncited', path: `skills[${String(i)}]` }));
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      code: 'uncited',
+      path: `skills[${String(i)}]`,
+    }));
     expect(ApplicationSchema.safeParse(application({ lastIssueAt: many })).success).toBe(false);
   });
 
