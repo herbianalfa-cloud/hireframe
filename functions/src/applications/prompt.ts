@@ -35,7 +35,7 @@ import type { JobForCv } from './store.js';
  * The header (name, email, phone, links) and the criteria never appear. No tools; the output
  * schema is fixed (`CvContentShapeSchema`). Bump the version on any wording change.
  */
-export const CV_PROMPT_VERSION = 'cv-2026-10-18b';
+export const CV_PROMPT_VERSION = 'cv-2026-10-18c';
 
 // ---- Length target ----
 
@@ -160,8 +160,8 @@ const OUTPUT_SHAPE = `{
 const VOICE = `Voice: write as a recent graduate describing their own work plainly. Plain words, specific, no hype.
 - Start each bullet with a plain past-tense verb (present tense for a current role). One idea per bullet, 10 to 25 words, at most 2 lines. When a fact has a figure, use it.
 - Do not write em dashes or en dashes. Use a comma or a full stop.
-- The summary is 1 or 2 plain sentences, at most 3 lines. It never says where the candidate lives or is based: the header carries the location. Skills: 6 to 14, the most relevant first.
-- The cover note is 180 to 250 words in the first person, in 2 to 4 paragraphs. Name the company once in the body (without a domain). Name one or two of the job's requirements and the facts that meet them. No greeting, no sign-off, no company name in a greeting.
+- The summary is 1 or 2 plain sentences, at most 3 lines. It never says where the candidate lives or is based: the header carries the location. Skills: up to 14, the most relevant first, each citing a skill fact; with no skill fact for it, leave it out.
+- The cover note is 180 to 250 words in the first person, in 2 to 4 paragraphs. Name the company once in the body (without a domain). Name one or two of the job's requirements and the facts that meet them. No greeting, no sign-off, no company name in a greeting. A number in the cover note must appear in a fact that same paragraph cites. Never repeat numbers or terms from the posting (days in the office, a first-30-days plan, a team size, a salary): the posting says what they ask for, the facts say what the candidate did.
 Patterns that are checked for and cost points (each with a bad and a good example, on placeholder text):
 - A contrast ("not X, but Y", "it's not X, it's Y", "not only X but also Y", "less X, more Y"). Bad: "Not just [task A], but [task B]." Good: "[Past-tense verb] [task A] and [task B]."
 - Stacked buzzwords or vague adjectives (leverage, synergy, innovative, dynamic, driven, dedicated, proactive). Bad: "Leveraged innovative, dynamic [thing]." Good: "Built [thing] in [tool]."
@@ -203,7 +203,7 @@ Rules the output is checked against. Break one and the output is rejected:
    - Skill: skill facts only. A tool or method that only an experience fact mentions (no skill fact) goes in a bullet, never in Skills.
    Nothing cites a preference fact.
 4. Copy role, org, education and skill words exactly from the cited fact: every word of two letters or more must be in it. No plurals (Analysts for Analyst), no abbreviations (Sr, PM, VP), no added levels (II), no Certification for Certificate. Shortening is fine; adding a title or a company is not. A heading and an education line need at least one real word from the fact. An education line uses only the words of the facts it cites: the education fact's words, and from the achievement fact only the classification (for example First Class Honours); no module names, grades or years of your own. A project with no organisation gets "" for org; an experience entry always has one.
-5. Skills: one skill per fact. A label with parts (separated by , ; / & | + - and or) needs a fact for each part, so write "SQL" and "Python" as two skills, not "Advanced SQL". C++, C# and F# are different skills.
+5. Skills: every skill cites a skill fact; if there is none for it, leave it out. One skill per fact. A label with parts (separated by , ; / & | + - and or) needs a fact for each part, so write "SQL" and "Python" as two skills, not "Advanced SQL". C++, C# and F# are different skills.
 6. Write the employer's name without a domain: "Booking", not "Booking.com". No links, no email addresses, no phone numbers and nothing shaped like name.tld unless a cited fact has that exact token. The header supplies contact details.
 7. Plain text only, using characters from standard Western typefaces: no emoji, no symbols outside that range, no line breaks inside a text.
 8. The CV must fit one A4 page; follow the length target above.`;
@@ -211,11 +211,12 @@ Rules the output is checked against. Break one and the output is rejected:
 
 /** What each issue code asks the model to fix, on the second attempt. */
 const ISSUE_GUIDANCE: Readonly<Record<CvIssueCode, string>> = {
-  uncited: 'every text needs at least one citation',
+  uncited: 'every text needs at least one citation (a skill with no skill fact is left out)',
   unknown_fact: 'cite only aliases listed above',
   wrong_fact_type:
     'cite only the fact types each part allows (rule 3): skills cite skill facts, education lines an education fact (and one achievement for a classification)',
-  unsupported_number: 'write only figures that a cited fact has, in the same form (rule 2)',
+  unsupported_number:
+    'write only figures that a cited fact has, in the same form (rule 2); in the cover note, a figure must be in a fact that same paragraph cites, and none from the posting',
   unsupported_text:
     'copy role, org, education and skill words exactly from the cited fact (rules 4 and 5)',
   contact_in_text: 'remove links, addresses and domains (rule 6)',
