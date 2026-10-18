@@ -388,6 +388,22 @@ describe('composeCv: whether to revise', () => {
     expect(p.counted).toBe(0);
   });
 
+  it('does not count an unused fact with no alias towards the two it needs', async () => {
+    const p = probe();
+    const facts = [
+      ...archive('fact-ttl', 'fact-articles'),
+      {
+        ...(existing()[0] as ExistingFact),
+        id: 'fact-added-later',
+        status: 'active' as const,
+        content: { ...(existing()[0] as ExistingFact).content, type: 'achievement' as const },
+      },
+    ];
+    const { shipped } = composed(await composeCv(p.deps, input(thinCv(), { facts })));
+    expect(shipped.quality.revisionSkipped).toBe('not_fixable');
+    expect(p.counted).toBe(0);
+  });
+
   it('revises an underfilled draft when two or more unused facts could fill it', async () => {
     const p = probe(() => goodCv());
     const { shipped } = composed(await composeCv(p.deps, input(thinCv())));
@@ -505,6 +521,18 @@ describe('composeCv: choosing between the candidates', () => {
     expect(shipped.quality.revised).toBe(true);
     expect(shipped.quality.total).toBeLessThan(shipped.quality.draftTotal ?? 0);
     expect(shipped.quality.findings.some((f) => f.code === 'contrast_pattern')).toBe(false);
+  });
+
+  it('ranks two candidates at the hard-finding cap by their uncapped sums', async () => {
+    const draft = withContrast(goodCv());
+    draft.summary = { text: 'Significantly useful analyst.', factRefs: [a('fact-clients')] };
+    const { shipped } = composed(
+      await composeCv(probe(() => withContrast(goodCv())).deps, input(draft)),
+    );
+    // Both stand at the 7.5 cap with one hard finding; the revision has fewer soft ones.
+    expect(shipped.quality.total).toBe(7.5);
+    expect(shipped.quality.draftTotal).toBe(7.5);
+    expect(shipped.quality.revised).toBe(true);
   });
 
   it('ships the draft on a tie', async () => {

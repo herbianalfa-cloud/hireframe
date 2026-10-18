@@ -228,7 +228,11 @@ function revisionPlan(
   input: ComposeInput,
   draft: Candidate,
 ): { fixable: true; unusedAliases: string[] } | { fixable: false } {
-  const unused = unusedBulletFacts(input.facts, new Set(citedFactIds(draft.cited, input.toId)));
+  // Facts with no alias (added after the prompt was built) can't be shown, so they don't count.
+  const unused = unusedBulletFacts(
+    input.facts,
+    new Set(citedFactIds(draft.cited, input.toId)),
+  ).filter((fact) => input.toAlias.has(fact.id));
   const underfilled = 1 - draft.fit.fill > FILL_FULL_BAND;
   const fixable =
     draft.score.findings.some((finding) => finding.fixable) ||
@@ -246,12 +250,15 @@ function revisionPlan(
 const hardCount = (score: CvScore): number =>
   score.findings.filter((finding) => finding.severity === 'hard').length;
 
-/** The better candidate: fewest hard findings, then the higher total; the draft wins a tie. */
+/** The better candidate: fewest hard findings, then the higher total (the uncapped sum when both sit at the cap); the draft wins a tie. */
 function better(draft: Candidate, revision: Candidate): Candidate {
   const hardDraft = hardCount(draft.score);
   const hardRevision = hardCount(revision.score);
   if (hardRevision !== hardDraft) return hardRevision < hardDraft ? revision : draft;
-  return revision.score.total > draft.score.total ? revision : draft;
+  // Two capped totals tie at the cap, so the uncapped sums decide.
+  const capped = revision.score.total - draft.score.total;
+  if (capped !== 0) return capped > 0 ? revision : draft;
+  return revision.score.uncapped > draft.score.uncapped ? revision : draft;
 }
 
 function qualityOf(
