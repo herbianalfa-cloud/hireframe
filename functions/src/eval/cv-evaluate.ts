@@ -146,9 +146,10 @@ function tallied(deps: LlmCallDeps): { deps: LlmCallDeps; tally: Tally } {
       transport: {
         countTokens: (request: LlmRequest) => inner.countTokens(request),
         async send(request: LlmRequest): Promise<LlmResponse> {
-          const response = await inner.send(request);
+          // Counted before the answer, so a send that throws still counts towards the call limit.
           tally.sends += 1;
           tally.byPurpose[request.purpose] = (tally.byPurpose[request.purpose] ?? 0) + 1;
+          const response = await inner.send(request);
           for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) {
             tally.tokens[key] += response.tokens[key];
           }
@@ -353,7 +354,10 @@ export async function evaluateCvCase(
       pages: await pageCount(fit.bytes),
       notePages: note.pages,
       textsMatch:
-        inOrder(pdfText, parts) && inOrder(docxText, parts) && inOrder(noteDocxText, noteParts),
+        inOrder(pdfText, parts) &&
+        inOrder(docxText, parts) &&
+        inOrder(noteText, noteParts) &&
+        inOrder(noteDocxText, noteParts),
       emDash: everything.includes(EM_DASH),
       markerLeaked: everything.includes(INJECTION_MARKER),
       ...('data' in judged ? { judge: judged.data } : {}),
