@@ -223,7 +223,7 @@ export async function evaluateCvCase(
   let composed: ComposeResult | null = null;
   // `composeCv` turns a failed revision into a skip and ships the draft. A missing recording is
   // not a skip: it is kept here and rethrown once `composeCv` returns, so the CLI says "stale".
-  let staleRevision: RecordingMissingError | null = null;
+  const stale: { error?: RecordingMissingError } = {};
   try {
     for (let attempt = 1; attempt <= limits.maxWrites; attempt += 1) {
       counted = attempt;
@@ -255,7 +255,7 @@ export async function evaluateCvCase(
               spent += revised.costPence;
               return revised;
             } catch (error) {
-              if (error instanceof RecordingMissingError) staleRevision = error;
+              if (error instanceof RecordingMissingError) stale.error = error;
               throw error;
             }
           },
@@ -275,7 +275,7 @@ export async function evaluateCvCase(
           writeCostPence: written.costPence,
         },
       );
-      if (staleRevision) throw staleRevision;
+      if (stale.error) throw stale.error;
       writeIssues.push(composed.kind === 'invalid' ? [...composed.issues] : []);
       if (composed.kind === 'invalid') skillsDropped += composed.skillsDropped;
       else if (composed.kind === 'composed') skillsDropped += composed.draft.skillsDropped;
