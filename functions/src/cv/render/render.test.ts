@@ -13,17 +13,32 @@ import mammoth from 'mammoth';
 import { getDocumentProxy } from 'unpdf';
 import { describe, expect, it } from 'vitest';
 
-import { CV_ALIASES, CV_FACTS, validCv } from '../../../../packages/shared/src/fixtures/cv.js';
+import {
+  CV_ALIASES,
+  CV_FACTS,
+  fullCv,
+  validCv,
+} from '../../../../packages/shared/src/fixtures/cv.js';
 import { extractText } from '../extract.js';
 import {
   CvRenderError,
-  fitOnePage,
+  fitPage,
   renderCvDocx,
   renderCvPdf,
   renderNoteDocx,
   renderNotePdf,
 } from './index.js';
 import { FAKE_HEADER, WIDE_HEADER, fakeDateOf, filler, maxCv, wideCv } from './fixtures.js';
+import {
+  BODY_SIZES,
+  CONTENT_WIDTH,
+  USABLE_HEIGHT,
+  baseSpec,
+  cvBlocks,
+  layoutBlocks,
+  resolveStyles,
+} from './layout.js';
+import { makePdfMeasure } from './pdf.js';
 
 const squash = (text: string) => text.replace(/\s+/g, ' ');
 
@@ -42,10 +57,13 @@ function expectInOrder(text: string, parts: readonly string[]): void {
 /** The texts a reader should meet, top to bottom, for a CV rendered with `fakeDateOf`. */
 function readingOrder(content: TrimmedCvContent): string[] {
   const parts: string[] = [FAKE_HEADER.name, FAKE_HEADER.email];
-  if (content.summary !== null) parts.push('Summary', content.summary.text);
+  if (content.summary !== null) parts.push('SUMMARY', content.summary.text);
+  if (content.education.length > 0) {
+    parts.push('EDUCATION', ...content.education.map((line) => line.line));
+  }
   for (const [title, entries] of [
-    ['Experience', content.experience],
-    ['Projects', content.projects],
+    ['EXPERIENCE', content.experience],
+    ['PROJECTS', content.projects],
   ] as const) {
     if (entries.length === 0) continue;
     parts.push(title);
@@ -54,8 +72,7 @@ function readingOrder(content: TrimmedCvContent): string[] {
       for (const bullet of entry.bullets) parts.push(bullet.text);
     }
   }
-  parts.push('Education', ...content.education.map((line) => line.line));
-  parts.push('Skills', ...content.skills.map((skill) => skill.label));
+  parts.push('SKILLS', ...content.skills.map((skill) => skill.label));
   return parts;
 }
 
@@ -115,8 +132,8 @@ describe('renderCvPdf', () => {
       (await renderCvPdf(FAKE_HEADER, trimmed, fakeDateOf)).bytes,
       'pdf',
     );
-    expect(text).not.toContain('Summary');
-    expect(text).toContain('Experience');
+    expect(text).not.toContain('SUMMARY');
+    expect(text).toContain('EXPERIENCE');
   });
 
   it('is deterministic and holds no font file, image or date', async () => {
@@ -176,8 +193,8 @@ describe('renderCvDocx', () => {
   it('uses real headings and real bullets', async () => {
     const bytes = await renderCvDocx(FAKE_HEADER, content, fakeDateOf);
     const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
-    expect(html).toContain('<h1><strong>Experience</strong></h1>');
-    expect(html).toContain('<h2><strong>Customer Onboarding Intern, Example Cloud Ltd');
+    expect(html).toContain('<h1><strong>EXPERIENCE</strong></h1>');
+    expect(html).toContain('<h2><strong>Customer Onboarding Intern</strong>, Example Cloud Ltd');
     expect(html).toContain('<ul><li>Led onboarding for 12 clients.</li>');
     expect(html).not.toContain('<table');
   });
@@ -187,9 +204,7 @@ describe('renderCvDocx', () => {
     const zip = await JSZip.loadAsync(bytes);
     const body = (await zip.file('word/document.xml')?.async('string')) ?? '';
     const paragraphs = body.match(/<w:p>.*?<\/w:p>/gs) ?? [];
-    const entry = paragraphs.find((p) =>
-      p.includes('Customer Onboarding Intern, Example Cloud Ltd'),
-    );
+    const entry = paragraphs.find((p) => p.includes('Example Cloud Ltd</w:t>'));
     expect(entry).toBeDefined();
     // Title, then a tab element, then the dates; and a right tab stop for it to jump to.
     const title = entry?.indexOf('Example Cloud Ltd</w:t>') ?? -1;
@@ -246,9 +261,9 @@ describe('renderCvDocx', () => {
   });
 });
 
-describe('fitOnePage', () => {
+describe('fitPage', () => {
   it('leaves a CV that fits untouched', async () => {
-    const fit = await fitOnePage(FAKE_HEADER, validCv(), fakeDateOf);
+    const fit = await fitPage(FAKE_HEADER, validCv(), fakeDateOf);
     expect(fit.ok && fit.trimmed).toBe(0);
     expect(fit.ok && fit.content).toEqual(applyTrim(validCv(), 0));
   });
@@ -257,7 +272,7 @@ describe('fitOnePage', () => {
     const content = maxCv();
     const full = await renderCvPdf(FAKE_HEADER, applyTrim(content, 0), fakeDateOf);
     expect(full.pages).toBeGreaterThan(1);
-    const fit = await fitOnePage(FAKE_HEADER, content, fakeDateOf);
+    const fit = await fitPage(FAKE_HEADER, content, fakeDateOf);
     if (!fit.ok) throw new Error('did not fit');
     expect(fit.trimmed).toBeGreaterThan(0);
     expect(await pageCount(fit.bytes)).toBe(1);
@@ -269,7 +284,7 @@ describe('fitOnePage', () => {
   it('fits the maximum-size content after trimming, whose text still passes the schema', async () => {
     const content = maxCv();
     expect(CvContentSchema.safeParse(content).success).toBe(true);
-    const fit = await fitOnePage(FAKE_HEADER, content, fakeDateOf);
+    const fit = await fitPage(FAKE_HEADER, content, fakeDateOf);
     if (!fit.ok) throw new Error('maximum content did not fit');
     expect(fit.trimmed).toBeGreaterThan(0);
     expect(await pageCount(fit.bytes)).toBe(1);
@@ -282,7 +297,7 @@ describe('fitOnePage', () => {
   });
 
   it('also fits the maximum content in the DOCX at the same trim', async () => {
-    const fit = await fitOnePage(FAKE_HEADER, maxCv(), fakeDateOf);
+    const fit = await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
     if (!fit.ok) throw new Error('did not fit');
     const docx = await renderCvDocx(FAKE_HEADER, fit.content, fakeDateOf);
     expectInOrder(await extractText(docx, 'docx'), readingOrder(fit.content));
@@ -295,7 +310,7 @@ describe('fitOnePage', () => {
     const last = trimOrder(content).length;
     const trimmed = await renderCvPdf(FAKE_HEADER, applyTrim(content, last), fakeDateOf);
     expect(trimmed.pages).toBeGreaterThan(1);
-    expect(await fitOnePage(FAKE_HEADER, content, fakeDateOf)).toEqual({
+    expect(await fitPage(FAKE_HEADER, content, fakeDateOf)).toEqual({
       ok: false,
       code: 'too_long',
     });
@@ -303,7 +318,7 @@ describe('fitOnePage', () => {
 
   it('wraps a header at every ceiling (three 200-character links) and still fits a short CV', async () => {
     expect(WIDE_HEADER.links?.map((link) => link.length)).toEqual([200, 200, 200]);
-    const fit = await fitOnePage(WIDE_HEADER, validCv(), fakeDateOf);
+    const fit = await fitPage(WIDE_HEADER, validCv(), fakeDateOf);
     if (!fit.ok) throw new Error('did not fit');
     expect(await pageCount(fit.bytes)).toBe(1);
     const text = squash(await extractText(fit.bytes, 'pdf')).replaceAll(' ', '');
@@ -324,7 +339,7 @@ describe('fitOnePage', () => {
       heading: { role: filler(80, i), org: filler(80, i + 1), factRef: 'F1' },
       bullets: [],
     }));
-    expect(await fitOnePage(FAKE_HEADER, huge, fakeDateOf)).toEqual({
+    expect(await fitPage(FAKE_HEADER, huge, fakeDateOf)).toEqual({
       ok: false,
       code: 'too_long',
     });
@@ -333,7 +348,7 @@ describe('fitOnePage', () => {
   it('renders content the validator accepted, with the cited facts the document stores', async () => {
     const content: CvContent = validCv();
     expect(validateCv(content, CV_ALIASES, CV_FACTS)).toEqual({ ok: true });
-    const fit = await fitOnePage(FAKE_HEADER, content, fakeDateOf);
+    const fit = await fitPage(FAKE_HEADER, content, fakeDateOf);
     expect(fit.ok).toBe(true);
     expect(citedFactIds(content, CV_ALIASES).length).toBeGreaterThan(0);
   });
@@ -385,5 +400,219 @@ describe('cover note', () => {
     await expect(renderNoteDocx(FAKE_HEADER, bad)).rejects.toMatchObject({
       code: 'unsupported_char',
     });
+  });
+});
+
+describe('fitPage fills the page', () => {
+  it('spreads a full CV over the page and keeps it to one', async () => {
+    const fit = await fitPage(FAKE_HEADER, fullCv(), fakeDateOf);
+    if (!fit.ok) throw new Error('did not fit');
+    expect(fit.trimmed).toBe(0);
+    expect(fit.fill).toBeGreaterThanOrEqual(0.93);
+    expect(fit.fill).toBeLessThan(1);
+    // The 6 pt reserve is kept.
+    expect(fit.fill * USABLE_HEIGHT).toBeLessThanOrEqual(USABLE_HEIGHT - 6);
+    expect(await pageCount(fit.bytes)).toBe(1);
+  });
+
+  it('takes the bigger body size when it fits, with fewer cuts before a bigger font', async () => {
+    const fit = await fitPage(FAKE_HEADER, fullCv(), fakeDateOf);
+    expect(fit.ok && fit.spec.bodySize).toBe(10.5);
+    const dense = await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
+    if (!dense.ok) throw new Error('did not fit');
+    // Cuts come first: at the size ladder's bottom rung only when 10.5 needs more cuts.
+    expect(dense.spec.bodySize).toBe(10);
+    const bigger = await fitPage(FAKE_HEADER, { ...maxCv() }, fakeDateOf);
+    expect(bigger.ok && bigger.trimmed).toBe(dense.trimmed);
+  });
+
+  it('spreads a small CV as far as the caps allow, and no further', async () => {
+    const fit = await fitPage(FAKE_HEADER, validCv(), fakeDateOf);
+    if (!fit.ok) throw new Error('did not fit');
+    expect(fit.spec).toMatchObject({
+      leadingScale: 1.06,
+      sectionGapScale: 1.6,
+      entryGapScale: 1.6,
+      bulletGapScale: 1.6,
+    });
+    expect(fit.fill).toBeLessThan(0.93);
+  });
+
+  it('fills a maximum-size CV after trimming too', async () => {
+    const fit = await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
+    if (!fit.ok) throw new Error('did not fit');
+    expect(fit.fill).toBeGreaterThanOrEqual(0.93);
+    expect(await pageCount(fit.bytes)).toBe(1);
+  });
+
+  it('never makes a second page, at any body size, for any fixture', async () => {
+    const measure = await makePdfMeasure();
+    for (const content of [validCv(), fullCv(), maxCv(), wideCv()]) {
+      for (const size of BODY_SIZES) {
+        const blocks = cvBlocks(FAKE_HEADER, applyTrim(content, 0), fakeDateOf);
+        const { pages } = layoutBlocks(blocks, measure, resolveStyles(baseSpec(size)));
+        const fit = await fitPage(FAKE_HEADER, content, fakeDateOf);
+        if (fit.ok) expect(await pageCount(fit.bytes)).toBe(1);
+        expect(pages).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  it('reports the lines of each bullet and the heading wraps', async () => {
+    const fit = await fitPage(FAKE_HEADER, fullCv(), fakeDateOf);
+    if (!fit.ok) throw new Error('did not fit');
+    const bullets = fit.content.experience
+      .concat(fit.content.projects)
+      .reduce((n, entry) => n + entry.bullets.length, 0);
+    expect(fit.lines.bullets).toHaveLength(bullets);
+    expect(fit.lines.bullets.every((n) => n >= 1)).toBe(true);
+    expect(fit.lines.headingWraps).toBe(0);
+    // A heading too long for one line is counted.
+    const wrapped = await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
+    expect(wrapped.ok && wrapped.lines.headingWraps).toBeGreaterThan(0);
+  });
+
+  it('is deterministic: same input, same bytes and same spec', async () => {
+    const one = await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
+    const two = await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
+    if (!one.ok || !two.ok) throw new Error('did not fit');
+    expect(Buffer.from(one.bytes).equals(Buffer.from(two.bytes))).toBe(true);
+    expect(one.spec).toEqual(two.spec);
+    expect(one.fill).toBe(two.fill);
+  });
+
+  it('takes under 300 ms at the schema limits', async () => {
+    await fitPage(FAKE_HEADER, maxCv(), fakeDateOf); // warm
+    const start = performance.now();
+    await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
+    await fitPage(FAKE_HEADER, wideCv(), fakeDateOf);
+    expect(performance.now() - start).toBeLessThan(300);
+  });
+});
+
+describe('PDF and DOCX agree', () => {
+  it('never wraps later in the PDF than Word will: more lines at the PDF width than at the DOCX width', async () => {
+    const measure = await makePdfMeasure();
+    const fixtures = [
+      [FAKE_HEADER, validCv()],
+      [FAKE_HEADER, fullCv()],
+      [FAKE_HEADER, maxCv()],
+      [FAKE_HEADER, wideCv()],
+      [WIDE_HEADER, maxCv()],
+    ] as const;
+    for (const [header, content] of fixtures) {
+      for (const size of BODY_SIZES) {
+        const styles = resolveStyles(baseSpec(size));
+        const blocks = cvBlocks(header, applyTrim(content, 0), fakeDateOf);
+        const pdf = layoutBlocks(blocks, measure, styles);
+        const word = layoutBlocks(blocks, measure, styles, CONTENT_WIDTH);
+        word.blockLines.forEach((lines, i) => {
+          expect(lines).toBeLessThanOrEqual(pdf.blockLines[i] ?? 0);
+        });
+        expect(word.usedHeight).toBeLessThanOrEqual(pdf.usedHeight);
+      }
+    }
+  });
+
+  async function docxParts(spec = baseSpec(10.5)) {
+    const zip = await JSZip.loadAsync(
+      await renderCvDocx(FAKE_HEADER, applyTrim(validCv(), 0), fakeDateOf, spec),
+    );
+    return {
+      styles: (await zip.file('word/styles.xml')?.async('string')) ?? '',
+      body: (await zip.file('word/document.xml')?.async('string')) ?? '',
+    };
+  }
+
+  it('overrides the built-in Title and Heading styles: black, Arial, our sizes, kept with the next paragraph', async () => {
+    const { styles } = await docxParts();
+    expect(styles).not.toMatch(/2E74B5|1F4D78|365F91|4F81BD/i);
+    for (const id of ['Title', 'Heading1', 'Heading2']) {
+      const style = new RegExp(`<w:style [^>]*w:styleId="${id}".*?</w:style>`, 's').exec(
+        styles,
+      )?.[0];
+      expect(style, id).toBeDefined();
+      expect(style).toContain('<w:color w:val="000000"/>');
+      expect(style).toContain('w:ascii="Arial"');
+      expect(style).toContain('<w:keepNext/>');
+      expect(style).toContain('<w:b/>');
+    }
+    const sizeOf = (id: string) =>
+      /<w:sz w:val="(\d+)"/.exec(
+        new RegExp(`w:styleId="${id}".*?</w:style>`, 's').exec(styles)?.[0] ?? '',
+      )?.[1];
+    expect(sizeOf('Title')).toBe('36');
+    expect(sizeOf('Heading1')).toBe('23');
+    expect(sizeOf('Heading2')).toBe('22');
+    expect(styles).not.toMatch(/<w:color w:val="(?!000000")/);
+  });
+
+  it('writes the spec spacing in twips, the same numbers the PDF used', async () => {
+    const spec = {
+      ...baseSpec(10.5),
+      sectionGapScale: 1.3,
+      bulletGapScale: 1.45,
+      leadingScale: 1.04,
+    };
+    const { body } = await docxParts(spec);
+    const styles = resolveStyles(spec);
+    const twips = (points: number) => String(Math.round(points * 20));
+    const paragraphs = body.match(/<w:p>.*?<\/w:p>/gs) ?? [];
+    const spacingOf = (needle: string) =>
+      paragraphs.find((p) => p.includes(needle))?.match(/<w:spacing ([^/]*)\/>/)?.[1] ?? '';
+    const section = spacingOf('>EXPERIENCE<');
+    expect(section).toContain(`w:before="${twips(styles.section.before)}"`);
+    expect(section).toContain(`w:after="${twips(styles.section.after)}"`);
+    expect(section).toContain(`w:line="${twips(styles.section.leading)}"`);
+    const bullet = spacingOf('Led onboarding for 12 clients.');
+    expect(bullet).toContain(`w:after="${twips(styles.bullet.after)}"`);
+    expect(bullet).toContain(`w:line="${twips(styles.bullet.leading)}"`);
+    expect(bullet).toContain('w:lineRule="exact"');
+  });
+
+  it('writes a bold role and a regular organisation, and centres the header', async () => {
+    const { body } = await docxParts();
+    const paragraphs = body.match(/<w:p>.*?<\/w:p>/gs) ?? [];
+    const entry = paragraphs.find((p) => p.includes('Example Cloud Ltd</w:t>')) ?? '';
+    const runs = entry.match(/<w:r>.*?<\/w:r>/gs) ?? [];
+    expect(runs[0]).toContain('<w:b/>');
+    expect(runs[0]).toContain('Customer Onboarding Intern</w:t>');
+    expect(runs[1]).not.toContain('<w:b/>');
+    expect(runs[1]).toContain(', Example Cloud Ltd</w:t>');
+    // The dates are regular too.
+    expect(runs[runs.length - 1]).not.toContain('<w:b/>');
+    const name = paragraphs.find((p) => p.includes('Alex Example</w:t>')) ?? '';
+    expect(name).toContain('<w:jc w:val="center"/>');
+    const contact = paragraphs.find((p) => p.includes('alex@example.com')) ?? '';
+    expect(contact).toContain('<w:jc w:val="center"/>');
+  });
+
+  it('writes the same text as the PDF for the spread layout too', async () => {
+    const fit = await fitPage(FAKE_HEADER, fullCv(), fakeDateOf);
+    if (!fit.ok) throw new Error('did not fit');
+    const docx = await renderCvDocx(FAKE_HEADER, fit.content, fakeDateOf, fit.spec);
+    const pdf = await extractText(fit.bytes, 'pdf');
+    const order = readingOrder(fit.content);
+    expectInOrder(await extractText(docx, 'docx'), order);
+    expectInOrder(pdf, order);
+    const zip = await JSZip.loadAsync(docx);
+    expect(Object.keys(zip.files).filter((name) => /media\/|header|footer/.test(name))).toEqual([]);
+  });
+
+  it('draws the dates on the title’s last line in the PDF', async () => {
+    const cv = structuredClone(validCv());
+    const entry = cv.experience[0];
+    if (entry === undefined) throw new Error('fixture');
+    entry.heading.role = filler(80, 1);
+    entry.heading.org = 'Example Cloud Ltd';
+    const fit = await fitPage(FAKE_HEADER, cv, fakeDateOf);
+    if (!fit.ok) throw new Error('did not fit');
+    const text = await extractText(fit.bytes, 'pdf');
+    const lines = text.split('\n');
+    const at = lines.findIndex((line) => line.includes('Oct 2023 – May 2024'));
+    expect(at).toBeGreaterThan(0);
+    // The line before the dates is part of the title, and the title's end shares the dates' line.
+    expect(lines[at]).toContain('Ltd');
+    expect(lines[at - 1] ?? '').not.toContain('Ltd');
   });
 });

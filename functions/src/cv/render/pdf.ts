@@ -1,19 +1,23 @@
 import type { CvHeader, TrimmedCvContent } from '@hireframe/shared';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
 
 import {
+  BASE_SPEC,
   CONTENT_WIDTH,
   PAGE,
   cvBlocks,
   layoutBlocks,
   noteBlocks,
+  resolveStyles,
   type Block,
   type DateOf,
+  type LayoutSpec,
+  type Measure,
 } from './layout.js';
 
 /**
- * PDF output (ADR-054): pdf-lib, A4, one column, the standard Helvetica (no font files), real
- * text only: no images, no tables. Wrapping is ours (`layoutBlocks` with Helvetica's own
+ * PDF output (ADR-054, ADR-062): pdf-lib, A4, one column, the standard Helvetica (no font files),
+ * real text only: no images, no tables. Wrapping is ours (`layoutBlocks` with Helvetica's own
  * widths), so the page count is exact. Same bytes in, same bytes out: no dates are written.
  */
 
@@ -22,14 +26,37 @@ export interface RenderedPdf {
   pages: number;
 }
 
-async function renderBlocksPdf(blocks: readonly Block[], title: string): Promise<RenderedPdf> {
-  const doc = await PDFDocument.create({ updateMetadata: false });
-  const regular = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const fontOf = (isBold: boolean) => (isBold ? bold : regular);
+interface Fonts {
+  regular: PDFFont;
+  bold: PDFFont;
+}
 
-  const { lines, pages } = layoutBlocks(blocks, (text, isBold, size) =>
-    fontOf(isBold).widthOfTextAtSize(text, size),
+async function embedFonts(doc: PDFDocument): Promise<Fonts> {
+  return {
+    regular: await doc.embedFont(StandardFonts.Helvetica),
+    bold: await doc.embedFont(StandardFonts.HelveticaBold),
+  };
+}
+
+/** Helvetica's own widths, for the fit to lay out without rendering a PDF each time. */
+export async function makePdfMeasure(): Promise<Measure> {
+  const { regular, bold } = await embedFonts(await PDFDocument.create({ updateMetadata: false }));
+  return (text, isBold, size) => (isBold ? bold : regular).widthOfTextAtSize(text, size);
+}
+
+async function renderBlocksPdf(
+  blocks: readonly Block[],
+  title: string,
+  spec: LayoutSpec,
+): Promise<RenderedPdf> {
+  const doc = await PDFDocument.create({ updateMetadata: false });
+  const fonts = await embedFonts(doc);
+  const fontOf = (isBold: boolean) => (isBold ? fonts.bold : fonts.regular);
+
+  const { lines, pages } = layoutBlocks(
+    blocks,
+    (text, isBold, size) => fontOf(isBold).widthOfTextAtSize(text, size),
+    resolveStyles(spec),
   );
 
   doc.setTitle(title);
@@ -40,25 +67,30 @@ async function renderBlocksPdf(blocks: readonly Block[], title: string): Promise
   for (const line of lines) {
     const sheet = sheets[line.page];
     if (sheet === undefined) continue;
-    const font = fontOf(line.bold);
     const baseline = PAGE.height - PAGE.margin - line.top - (line.leading + line.size * 0.7) / 2;
     if (line.bullet === true) {
       sheet.drawText('•', {
         x: PAGE.margin + 2,
         y: baseline,
         size: line.size,
-        font: regular,
+        font: fonts.regular,
       });
     }
-    sheet.drawText(line.text, { x: PAGE.margin + line.x, y: baseline, size: line.size, font });
+    const widths = line.runs.map((run) => fontOf(run.bold).widthOfTextAtSize(run.text, line.size));
+    const total = widths.reduce((sum, width) => sum + width, 0);
+    let x = PAGE.margin + line.x;
+    if (line.align === 'center') x = PAGE.margin + (CONTENT_WIDTH - total) / 2;
+    line.runs.forEach((run, i) => {
+      sheet.drawText(run.text, { x, y: baseline, size: line.size, font: fontOf(run.bold) });
+      x += widths[i] ?? 0;
+    });
     if (line.dates !== undefined) {
-      const { text, page, top, leading, size } = line.dates;
-      const width = regular.widthOfTextAtSize(text, size);
-      sheets[page]?.drawText(text, {
-        x: PAGE.margin + CONTENT_WIDTH - width,
-        y: PAGE.height - PAGE.margin - top - (leading + size * 0.7) / 2,
+      const { text, size } = line.dates;
+      sheet.drawText(text, {
+        x: PAGE.margin + CONTENT_WIDTH - fonts.regular.widthOfTextAtSize(text, size),
+        y: baseline,
         size,
-        font: regular,
+        font: fonts.regular,
       });
     }
     if (line.rule === true) {
@@ -78,13 +110,14 @@ export async function renderCvPdf(
   header: CvHeader,
   content: TrimmedCvContent,
   dateOf: DateOf,
+  spec: LayoutSpec = BASE_SPEC,
 ): Promise<RenderedPdf> {
-  return await renderBlocksPdf(cvBlocks(header, content, dateOf), `${header.name} CV`);
+  return await renderBlocksPdf(cvBlocks(header, content, dateOf), `${header.name} CV`, spec);
 }
 
 export async function renderNotePdf(
   header: CvHeader,
   note: TrimmedCvContent['coverNote'],
 ): Promise<RenderedPdf> {
-  return await renderBlocksPdf(noteBlocks(header, note), `${header.name} cover note`);
+  return await renderBlocksPdf(noteBlocks(header, note), `${header.name} cover note`, BASE_SPEC);
 }
