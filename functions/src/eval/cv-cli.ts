@@ -78,7 +78,7 @@ export async function runCvSuite(args: readonly string[], live: boolean): Promis
 
   if (missing.length > 0) {
     console.error(
-      `cv eval: recordings stale for ${missing.join(', ')}. A CV prompt, schema, model, case or the renderer's output changed: run \`LIVE=1 npm run eval -- --suite cv\` locally (about 60p, cap ${String(CV_EVAL_CAP_PENCE)}p) and commit evals/cv-recordings.jsonl.`,
+      `cv eval: recordings stale for ${missing.join(', ')}. A CV prompt, schema, model or case changed: run \`LIVE=1 npm run eval -- --suite cv\` locally (about 60p, cap ${String(CV_EVAL_CAP_PENCE)}p) and commit evals/cv-recordings.jsonl.`,
     );
     process.exitCode = 1;
     return;
