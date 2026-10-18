@@ -724,13 +724,21 @@ const CLASSIFICATION_WORDS: ReadonlySet<string> = new Set(
 );
 /** The two classifications written as figures; the only figures an achievement may lend. */
 const CLASSIFICATION_FIGURES = /\b2\s?:\s?[12]\b/;
-const DEGREE_TOKENS =
-  /\b(?:bsc|msc|ba|ma|mba|phd|dphil|meng|beng|mphil|mres|llb|llm|bed|med|mchem|mmath|mphys|bcom|mcom|bfa|mfa)\b/g;
+const DEGREE_TOKENS = /\b(?:bsc|ba|beng|msc|ma|meng|mba|phd|llb|mphil)\b/g;
+
+/** Whether a fact names a degree, so a certificate or an A-level is not one. */
+function hasDegreeToken(fact: CvFact): boolean {
+  DEGREE_TOKENS.lastIndex = 0;
+  return DEGREE_TOKENS.test(foldDegree(fact));
+}
+
+const foldDegree = (fact: CvFact): string =>
+  `${fact.text}\n${fact.evidence}`.toLowerCase().replaceAll('.', '');
 
 /** Whether an achievement belongs to this degree: a degree token or a year in both texts. */
 function sharesDegree(education: CvFact, achievement: CvFact): boolean {
   const tokens = (fact: CvFact, pattern: RegExp): Set<string> =>
-    new Set(`${fact.text}\n${fact.evidence}`.toLowerCase().match(pattern) ?? []);
+    new Set(foldDegree(fact).match(pattern) ?? []);
   const degrees = tokens(achievement, DEGREE_TOKENS);
   if ([...tokens(education, DEGREE_TOKENS)].some((token) => degrees.has(token))) return true;
   const years = tokens(achievement, /\b(?:19|20)\d{2}\b/g);
@@ -862,10 +870,14 @@ export function validateCv(
     const lender = cite.classification === true ? byIndex[1] : undefined;
     const owner = cite.classification === true ? byIndex[0] : undefined;
     if (lender !== undefined && owner !== undefined && lender !== owner) {
-      const educationFacts = facts.filter(
-        (fact) => fact.status === 'active' && EDUCATION_FACT_TYPES.includes(fact.type),
+      // Only degrees count: certificates and A-levels name no degree token.
+      const degrees = facts.filter(
+        (fact) =>
+          fact.status === 'active' &&
+          EDUCATION_FACT_TYPES.includes(fact.type) &&
+          hasDegreeToken(fact),
       );
-      if (educationFacts.length >= 2 && !sharesDegree(owner, lender)) {
+      if (degrees.length >= 2 && !sharesDegree(owner, lender)) {
         add(cite.path, 'wrong_fact_type');
       }
     }
