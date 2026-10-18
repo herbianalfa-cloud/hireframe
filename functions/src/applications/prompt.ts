@@ -161,7 +161,7 @@ const VOICE = `Voice: write as a recent graduate describing their own work plain
 - Start each bullet with a plain past-tense verb (present tense for a current role). One idea per bullet, 10 to 25 words, at most 2 lines. When a fact has a figure, use it.
 - Do not write em dashes or en dashes. Use a comma or a full stop.
 - The summary is 1 or 2 plain sentences, at most 3 lines. It never says where the candidate lives or is based: the header carries the location. Skills: up to 14, the most relevant first, each citing a skill fact; with no skill fact for it, leave it out.
-- The cover note is 180 to 250 words in the first person, in 2 to 4 paragraphs. Name the company once in the body (without a domain). Name one or two of the job's requirements and the facts that meet them. No greeting, no sign-off, no company name in a greeting. A number in the cover note must appear in a fact that same paragraph cites. Never repeat numbers or terms from the posting (days in the office, a first-30-days plan, a team size, a salary): the posting says what they ask for, the facts say what the candidate did.
+- The cover note is 180 to 250 words in the first person, in 2 to 4 paragraphs. Name the company once in the body (without a domain). Name one or two of the job's requirements and the facts that meet them. No greeting, no sign-off, no company name in a greeting. A number in the cover note must appear in a fact that same paragraph cites. Never repeat the posting's logistics: office days, onboarding timelines (first 30, 60 or 90 days), team size, salary, dates or locations, unless a fact that paragraph cites has them. Naming the job's skills, tools and requirements is wanted: say which of them the cited facts meet.
 Patterns that are checked for and cost points (each with a bad and a good example, on placeholder text):
 - A contrast ("not X, but Y", "it's not X, it's Y", "not only X but also Y", "less X, more Y"). Bad: "Not just [task A], but [task B]." Good: "[Past-tense verb] [task A] and [task B]."
 - Stacked buzzwords or vague adjectives (leverage, synergy, innovative, dynamic, driven, dedicated, proactive). Bad: "Leveraged innovative, dynamic [thing]." Good: "Built [thing] in [tool]."
@@ -216,7 +216,7 @@ const ISSUE_GUIDANCE: Readonly<Record<CvIssueCode, string>> = {
   wrong_fact_type:
     'cite only the fact types each part allows (rule 3): skills cite skill facts, education lines an education fact (and one achievement for a classification)',
   unsupported_number:
-    'write only figures that a cited fact has, in the same form (rule 2); in the cover note, a figure must be in a fact that same paragraph cites, and none from the posting',
+    'write only figures that a cited fact has, in the same form (rule 2); in the cover note, a figure must be in a fact that same paragraph cites',
   unsupported_text:
     'copy role, org, education and skill words exactly from the cited fact (rules 4 and 5)',
   contact_in_text: 'remove links, addresses and domains (rule 6)',
