@@ -309,3 +309,23 @@ Sonnet 5.5 at $2/$10 per MTok, FX 0.85 (ADR-053's basis). A write is about 10k t
 5. **Showing the score on the Ready card** is a small web change inside this scope (needed for ship-best). Confirm it's wanted, or keep the score server-side only.
 
 On approval: save this plan to `docs/plans/cv-quality-plan.md` on `feat/cv-quality`, commit (`docs:`), and stop before Session 1.
+
+## Addendum (18 Oct, Beeb)
+
+**Compared with Beeb's manual CV prompt.** The plan already covers: one page filled, monochrome and formal, the 8/10 score with revision, no em dashes, no "not X, it's Y", human graduate tone, apply/skip first (funnel verdict and gaps). Outreach tips stay out of scope (Wave 3 referral and recruiter finder). The 9/10 stretch gets no extra round: the gate stays 8.
+
+**Answers to the open questions:**
+1. No separate list. Beeb's manual prompt is the list, and this addendum folds it in.
+2. Keep the en dash in code-made date ranges.
+3. Keep "Dear Hiring Team,". Do not print the company name in the greeting.
+4. LIVE CV eval in Session 3: allowed, about 60p, 200p cap. Ask Beeb for OK right before the run.
+5. Show the score on the Ready card: yes.
+
+**Font:** keep Arial (DOCX) and Helvetica (PDF). Sans-serif reads as modern for tech and product roles; both are ATS-safe.
+
+**Added to Session 2: gap questions.**
+- First read the 7D "Needs your input" path (application callable, answerFact, transitions, Pipeline screen).
+- If it fits that path: code makes up to 3 questions per job from S3 requirements with level must and match missing or partial (skip logistics and hard-blocker types). Question text is a fixed code template plus the requirement text (untrusted: printable-checked, length-limited). No new model call to make the questions, no new function, trigger or schedule. Answers go through the existing answerFact call, its verification and its 60p/day cap, as today.
+- If it does not fit cleanly: do not build it. Park it in docs/ROADMAP.md parking lot and give the reason in handoff 2.
+
+**Added to Session 3: luck score on the Ready card.** Show "Quality 8.6/10 · Luck 7/10", with luck from the job's luckScore. A job without luckScore shows the quality only.
