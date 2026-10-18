@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { CV_ISSUE_CODES, type CvIssueCode } from './applications.js';
+import { FINDING_CODES } from './cv-findings.js';
 import { foldText, LEGAL_SUFFIXES } from './normalise.js';
 import { EMAIL, PHONE, isPhoneLike } from './pii.js';
 import type { Fact, FactContent } from './profile.js';
@@ -150,6 +151,53 @@ export function cvId(jobId: string, version: number): string {
   return `${jobId}-v${String(version)}`;
 }
 
+/** The rubric's criteria, in the order `scoreCv` adds them up (cv-score.ts). */
+export const CV_CRITERIA = [
+  'fill',
+  'writing',
+  'numbers',
+  'tailoring',
+  'craft',
+  'structure',
+] as const;
+export type CvCriterion = (typeof CV_CRITERIA)[number];
+
+/** Why a below-target draft was not revised. */
+export const REVISION_SKIPPED = [
+  'deadline',
+  'cap',
+  'error',
+  'output',
+  'not_fixable',
+  'attempts',
+] as const;
+export type RevisionSkipped = (typeof REVISION_SKIPPED)[number];
+
+/**
+ * What the quality score keeps on a `cvs` doc: codes and paths only, never the text found.
+ * `draftTotal` is the first draft's score when a revision was tried.
+ */
+export const CvQualitySchema = z.strictObject({
+  rubric: z.string().min(1).max(40),
+  total: z.number().min(0).max(10),
+  criteria: z.strictObject(
+    Object.fromEntries(CV_CRITERIA.map((name) => [name, z.number().min(0).max(10)])) as Record<
+      CvCriterion,
+      z.ZodNumber
+    >,
+  ),
+  findings: z
+    .array(z.strictObject({ code: z.enum(FINDING_CODES), path: z.string().min(1).max(80) }))
+    .max(20),
+  revised: z.boolean(),
+  revisionSkipped: z.enum(REVISION_SKIPPED).exactOptional(),
+  draftTotal: z.number().min(0).max(10).exactOptional(),
+  /** Dashes `scrubDashes` replaced in the model's output. */
+  dashesReplaced: z.int().min(0),
+  layout: z.strictObject({ bodySize: z.number().positive(), fill: z.number().min(0).max(1) }),
+});
+export type CvQuality = z.infer<typeof CvQualitySchema>;
+
 /** `cvs/{cvId}`: one generated CV and cover note, kept as a version. */
 export const CvDocSchema = z.strictObject({
   jobId: z.string().min(1),
@@ -169,6 +217,8 @@ export const CvDocSchema = z.strictObject({
   }),
   /** `trimOrder` steps the one-page fit applied. */
   trimmed: z.int().min(0),
+  /** The quality score (CV quality plan §3). Absent on CVs written before rubric v1. */
+  quality: CvQualitySchema.exactOptional(),
   notes: z.string().trim().min(1).max(500).exactOptional(),
   model: z.string().min(1),
   costPence: z.number().min(0),

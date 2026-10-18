@@ -114,6 +114,16 @@ function application(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe('APPLICATION_LIMITS', () => {
+  it('allows two writes and one revision, three calls in all', () => {
+    expect(APPLICATION_LIMITS.maxWrites).toBe(2);
+    expect(APPLICATION_LIMITS.maxRevisions).toBe(1);
+    expect(APPLICATION_LIMITS.maxAttempts).toBe(
+      APPLICATION_LIMITS.maxWrites + APPLICATION_LIMITS.maxRevisions,
+    );
+  });
+});
+
 describe('ApplicationSchema', () => {
   it('accepts an application in every stage', () => {
     for (const stage of APPLICATION_STAGES) {
@@ -144,7 +154,8 @@ describe('ApplicationSchema', () => {
   });
 
   it('bounds attempts, questions, notes and the blocked code', () => {
-    expect(ApplicationSchema.safeParse(application({ attempt: 3 })).success).toBe(false);
+    expect(ApplicationSchema.safeParse(application({ attempt: 3 })).success).toBe(true);
+    expect(ApplicationSchema.safeParse(application({ attempt: 4 })).success).toBe(false);
     expect(ApplicationSchema.safeParse(application({ notes: 'x'.repeat(501) })).success).toBe(
       false,
     );
