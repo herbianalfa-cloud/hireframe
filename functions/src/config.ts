@@ -40,6 +40,7 @@ export type LlmPurpose =
   | 'pasteParse'
   | 'cvWrite'
   | 'cvRevise'
+  | 'cvJudge'
   | 'answerFact';
 
 export interface ModelConfig {
@@ -107,6 +108,17 @@ export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
     timeoutMs: 150_000,
     budgetMs: 300_000,
   },
+  /**
+   * The CV eval's report-only judge (CV quality plan §4). Called only by `npm run eval`, never by
+   * a function; the callable below is the nearest budget it is checked against.
+   */
+  cvJudge: {
+    id: 'claude-sonnet-5-5',
+    effort: 'low',
+    maxTokens: 1_500,
+    timeoutMs: 40_000,
+    budgetMs: 60_000,
+  },
   /** An application answer turned into facts, with the `addFact` prompt (M7). */
   answerFact: { id: 'claude-haiku-4-5', maxTokens: 4_000, timeoutMs: 45_000, budgetMs: 90_000 },
 };
@@ -121,6 +133,8 @@ export const PURPOSE_CALLABLE = {
   pasteParse: 'lookup',
   cvWrite: 'generateCvs',
   cvRevise: 'generateCvs',
+  /** Eval only: no function calls it. */
+  cvJudge: 'generateCvs',
   answerFact: 'application',
 } as const satisfies Record<LlmPurpose, CallableName>;
 
