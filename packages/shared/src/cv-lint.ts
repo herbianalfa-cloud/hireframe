@@ -6,7 +6,9 @@ import { makeFinding, type Finding, type FindingCode } from './cv-findings.js';
  * It reads the summary, the bullets and the cover note; headings, education lines and skill
  * labels are checked against their facts by `validateCv`, not here. A finding is a code and a
  * path, never the text found. Words a cited fact uses itself are allowed ("Led onboarding for 12
- * clients" passes when the fact says "Led"), because the fact is the owner's own claim.
+ * clients" passes when the fact says "Led"), because the fact is the owner's own claim. The words
+ * of the job's own title ("Manager" in "Technical Account Manager") and a denied use ("not
+ * managed", "never led") are not an inflated claim either.
  */
 
 type Part = 'cv' | 'note';
@@ -183,14 +185,43 @@ function textsOf(
 /** Whether the pattern matches in the text of a fact the text cites: the fact's own word. */
 const ownedByFact = (pattern: RegExp, text: Text): boolean => pattern.test(text.cited);
 
-function check(text: Text): FindingCode[] {
+/** "not managed", "never led", "didn't lead", "without managing": the word is denied, not claimed. */
+const NEGATION_BEFORE = /(?:\b(?:not|never|no|without|neither|nor|cannot)|n't)\s+(?:[a-z]+\s+)?$/i;
+
+/** The words of a job's title, lower case ("Product Manager (Graduate Scheme)" has four). */
+function titleWords(title: string | undefined): ReadonlySet<string> {
+  return new Set(
+    title === undefined
+      ? []
+      : (plain(title)
+          .toLowerCase()
+          .match(/[\p{L}]+/gu) ?? []),
+  );
+}
+
+/**
+ * Whether `pattern` claims something in `value`: a match that is neither a word of the job's
+ * title ("Product Manager": saying which job it is for is not claiming its seniority) nor
+ * denied in the words just before it ("not managed"). "Managed" is not "manager", so a claim
+ * beyond the title is still found.
+ */
+function claims(pattern: RegExp, value: string, title: ReadonlySet<string>): boolean {
+  const every = new RegExp(pattern.source, 'gi');
+  for (const match of value.matchAll(every)) {
+    if (title.has(match[0].toLowerCase())) continue;
+    if (!NEGATION_BEFORE.test(value.slice(Math.max(0, match.index - 24), match.index))) return true;
+  }
+  return false;
+}
+
+function check(text: Text, title: ReadonlySet<string>): FindingCode[] {
   const codes = new Set<FindingCode>();
   const value = text.value;
 
   if (CONTRAST.some((pattern) => pattern.test(value))) codes.add('contrast_pattern');
   if (CLICHE.some((pattern) => pattern.test(value))) codes.add('cliche');
 
-  if (INFLATED.some((pattern) => pattern.test(value) && !ownedByFact(pattern, text))) {
+  if (INFLATED.some((pattern) => claims(pattern, value, title) && !ownedByFact(pattern, text))) {
     codes.add('inflated_claim');
   }
 
@@ -230,6 +261,7 @@ export function lintCv(
   content: CvContent | TrimmedCvContent,
   facts: readonly CvFact[],
   aliases: ReadonlyMap<string, string>,
+  job: { jobTitle?: string | undefined } = {},
 ): Finding[] {
   const byId = new Map(facts.map((fact) => [fact.id, fact]));
   const citedOf = (refs: readonly string[]): string =>
@@ -242,9 +274,10 @@ export function lintCv(
         })
         .join('\n'),
     );
+  const title = titleWords(job.jobTitle);
   const findings: Finding[] = [];
   for (const text of textsOf(content, citedOf)) {
-    for (const code of check(text)) findings.push(makeFinding(code, text.path));
+    for (const code of check(text, title)) findings.push(makeFinding(code, text.path));
   }
   return findings;
 }
