@@ -167,7 +167,7 @@ describe('cvSystem voice and length', () => {
     for (const rule of [1, 2, 3, 4, 5, 6, 7]) expect(system).toContain(`\n${String(rule)}. `);
   });
 
-  it('limits the cover note to figures its own paragraph cites, and none from the posting', () => {
+  it('limits the cover note to figures its own paragraph cites, and bans only the posting's logistics', () => {
     const system = cvSystem(
       PLENTY,
       new Map(PLENTY.map((fact, i) => [fact.id, `F${String(i + 1)}`])),
@@ -176,8 +176,12 @@ describe('cvSystem voice and length', () => {
       'A number in the cover note must appear in a fact that same paragraph cites.',
     );
     expect(system).toContain(
-      'Never repeat numbers or terms from the posting (days in the office, a first-30-days plan, a team size, a salary)',
+      "Never repeat the posting's logistics: office days, onboarding timelines (first 30, 60 or 90 days), team size, salary, dates or locations, unless a fact that paragraph cites has them.",
     );
+    expect(system).toContain(
+      "Naming the job's skills, tools and requirements is wanted: say which of them the cited facts meet.",
+    );
+    expect(system).not.toContain('Never repeat numbers or terms from the posting');
   });
 
   it('makes every skill cite a skill fact, else leave it out', () => {
@@ -196,7 +200,7 @@ describe('cvSystem voice and length', () => {
       'a skill with no skill fact is left out',
     );
     expect(cvUser({ job: JOB, issues: ['unsupported_number'] })).toContain(
-      'in the cover note, a figure must be in a fact that same paragraph cites, and none from the posting',
+      'in the cover note, a figure must be in a fact that same paragraph cites',
     );
   });
 
