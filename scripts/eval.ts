@@ -25,7 +25,18 @@ await build({
   logLevel: 'warning',
   // Loaded from node_modules at run time: they're only reached through shared modules (the
   // logger, Timestamp conversion), and bundling their CommonJS internals breaks under ESM.
-  external: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*'],
+  // The CV suite's renderer and text extraction (mammoth, docx, pdf-lib) are CommonJS too.
+  external: [
+    'firebase-admin',
+    'firebase-admin/*',
+    'firebase-functions',
+    'firebase-functions/*',
+    'mammoth',
+    'docx',
+    'pdf-lib',
+    '@pdf-lib/*',
+    'unpdf',
+  ],
 });
 const cli = (await import(pathToFileURL(outfile).href)) as {
   main: (args: readonly string[]) => Promise<void>;
