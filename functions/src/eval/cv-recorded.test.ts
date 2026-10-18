@@ -74,8 +74,8 @@ describe('inflated_claim on the recorded c04 (job: Technical Account Manager)', 
     const { facts, toId } = setup('c04');
     // Without the title, "Manager" in the note reads as a claimed seniority.
     const findings = lintCv(shape(RECORDED.c04.draft), validatorFacts(facts), toId);
-    expect(findings.map((f) => `${f.code}@${f.path}`)).toContain(
-      'inflated_claim@coverNote.paragraphs[0]',
+    expect(findings.map((f) => `${f.code} at ${f.path}`)).toContain(
+      'inflated_claim at coverNote.paragraphs[0]',
     );
   });
 
