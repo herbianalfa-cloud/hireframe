@@ -417,6 +417,22 @@ describe('cvSystem prompt batch (fact types, education, org, location)', () => {
     );
   });
 
+  it('says where each code was found, by path and never by text', () => {
+    const retry = cvUser({
+      job: JOB,
+      issues: ['uncited', 'unsupported_number'],
+      where: [
+        { code: 'uncited', path: 'skills[2]' },
+        { code: 'uncited', path: 'skills[4]' },
+        { code: 'unsupported_number', path: 'coverNote.paragraphs[3]' },
+      ],
+    });
+    expect(retry).toContain(
+      'rejected (uncited at skills[2], skills[4]; unsupported_number at coverNote.paragraphs[3])',
+    );
+    expect(cvUser({ job: JOB, issues: ['uncited'] })).toContain('rejected (uncited)');
+  });
+
   it('points the wrong_fact_type retry at the table', () => {
     const retry = cvUser({ job: JOB, issues: ['wrong_fact_type'] });
     expect(retry).toContain('skills cite skill facts');

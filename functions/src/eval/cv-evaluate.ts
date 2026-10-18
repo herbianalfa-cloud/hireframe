@@ -4,6 +4,7 @@ import {
   FINDING_INFO,
   factAliases,
   type CvHeader,
+  type CvIssue,
   type CvIssueCode,
   type CvQuality,
   type TrimmedCvContent,
@@ -208,6 +209,7 @@ export async function evaluateCvCase(
   let counted = 0;
   let spent = 0;
   let issues: readonly CvIssueCode[] | undefined;
+  let where: readonly CvIssue[] | undefined;
   let firstWriteValid = false;
   let composed: ComposeResult | null = null;
   try {
@@ -216,7 +218,7 @@ export async function evaluateCvCase(
       const written = await llmCall(deps, {
         purpose: 'cvWrite',
         system,
-        user: cvUser({ job, notes: entry.notes, issues, toAlias }),
+        user: cvUser({ job, notes: entry.notes, issues, where, toAlias }),
         schema: CvContentShapeSchema,
         maxSends: 1,
       });
@@ -260,6 +262,7 @@ export async function evaluateCvCase(
       if (attempt === 1) firstWriteValid = composed.kind !== 'invalid';
       if (composed.kind !== 'invalid') break;
       issues = composed.issues;
+      where = composed.where;
     }
   } catch (error) {
     if (error instanceof LlmOutputError) {

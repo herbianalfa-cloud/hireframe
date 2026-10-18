@@ -72,6 +72,8 @@ export const APPLICATION_LIMITS = {
   answer: 2_000,
   /** CV versions kept per application. */
   cvIds: 50,
+  /** Code-and-path pairs kept from the last invalid output. */
+  issueAt: 24,
 } as const;
 
 export const QuestionAnswerSchema = z.discriminatedUnion('kind', [
@@ -120,6 +122,19 @@ export const ApplicationSchema = z
     attempt: z.int().min(0).max(APPLICATION_LIMITS.maxAttempts),
     /** Issue codes from the last invalid output, appended to the next call's prompt. */
     lastIssues: z.array(z.enum(CV_ISSUE_CODES)).max(CV_ISSUE_CODES.length).exactOptional(),
+    /** Where those codes were found (paths only, never the text), so the retry can say where. */
+    lastIssueAt: z
+      .array(
+        z.strictObject({
+          code: z.enum(CV_ISSUE_CODES),
+          path: z
+            .string()
+            .max(120)
+            .regex(/^[A-Za-z0-9_.[\]]+$/),
+        }),
+      )
+      .max(APPLICATION_LIMITS.issueAt)
+      .exactOptional(),
     notes: z.string().trim().min(1).max(APPLICATION_LIMITS.notes).exactOptional(),
     cvIds: z.array(z.string().min(1)).max(APPLICATION_LIMITS.cvIds),
     currentCvId: z.string().min(1).exactOptional(),

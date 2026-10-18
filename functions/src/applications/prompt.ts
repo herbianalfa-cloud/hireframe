@@ -245,6 +245,8 @@ export interface CvUserInput {
   notes?: string | undefined;
   /** Issue codes of the previous invalid output (the second attempt only). */
   issues?: readonly CvIssueCode[] | undefined;
+  /** Where each code was found: a code and a path, never the text. */
+  where?: readonly { code: CvIssueCode; path: string }[] | undefined;
   /** Fact ID → alias, as in `cvSystem`: maps each requirement to the facts that meet it. */
   toAlias?: ReadonlyMap<string, string> | undefined;
 }
@@ -281,11 +283,25 @@ function jobParts(input: CvUserInput): string[] {
   return parts;
 }
 
+/** The codes, each with the paths it was found at: "uncited at skills[2], skills[4]". */
+function rejected(
+  issues: readonly CvIssueCode[],
+  where: readonly { code: CvIssueCode; path: string }[] = [],
+): string {
+  // Codes alone read "a, b"; with paths each code is "a at x, y", so the codes split on ";".
+  return issues
+    .map((code) => {
+      const paths = where.filter((issue) => issue.code === code).map((issue) => issue.path);
+      return paths.length > 0 ? `${code} at ${paths.join(', ')}` : code;
+    })
+    .join(where.length > 0 ? '; ' : ', ');
+}
+
 export function cvUser(input: CvUserInput): string {
   const parts = jobParts(input);
   if (input.issues && input.issues.length > 0) {
     parts.push(
-      `Your previous output was rejected (${input.issues.join(', ')}). Fix it: ${input.issues
+      `Your previous output was rejected (${rejected(input.issues, input.where)}). Fix it: ${input.issues
         .map((code) => ISSUE_GUIDANCE[code])
         .join('; ')}.`,
     );

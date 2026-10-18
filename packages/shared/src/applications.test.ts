@@ -153,6 +153,17 @@ describe('ApplicationSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('keeps the code-and-path pairs of the last invalid output, and parses a doc without them', () => {
+    const at = [{ code: 'uncited', path: 'skills[2]' }];
+    expect(ApplicationSchema.safeParse(application({ lastIssueAt: at })).success).toBe(true);
+    expect(ApplicationSchema.safeParse(application({})).success).toBe(true);
+    // A path is structure only: text with spaces or punctuation is refused.
+    const bad = [{ code: 'uncited', path: 'Led a team of 4!' }];
+    expect(ApplicationSchema.safeParse(application({ lastIssueAt: bad })).success).toBe(false);
+    const many = Array.from({ length: 25 }, (_, i) => ({ code: 'uncited', path: `skills[${String(i)}]` }));
+    expect(ApplicationSchema.safeParse(application({ lastIssueAt: many })).success).toBe(false);
+  });
+
   it('bounds attempts, questions, notes and the blocked code', () => {
     expect(ApplicationSchema.safeParse(application({ attempt: 3 })).success).toBe(true);
     expect(ApplicationSchema.safeParse(application({ attempt: 4 })).success).toBe(false);

@@ -342,12 +342,17 @@ describe('runCvWorker: an invalid output', () => {
       stage: 'generating',
       attempt: 1,
       lastIssues: ['unsupported_number'],
+      lastIssueAt: [{ code: 'unsupported_number', path: 'experience[0].bullets[0]' }],
     });
     expect(h.calls[0]?.user).not.toContain('previous output was rejected');
 
     const second = await h.run();
     expect(second).toMatchObject({ ready: 1 });
-    expect(h.calls[1]?.user).toContain('previous output was rejected (unsupported_number)');
+    expect(h.calls[1]?.user).toContain(
+      'previous output was rejected (unsupported_number at experience[0].bullets[0])',
+    );
+    // Paths only: the offending text is never sent back.
+    expect(h.calls[1]?.user).not.toContain('saved 99% of costs');
     expect(get(h, 'job-1')).toMatchObject({ stage: 'ready', attempt: 2 });
     expect(get(h, 'job-1').lastIssues).toBeUndefined();
     expect(h.calls).toHaveLength(2);
