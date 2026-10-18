@@ -43,12 +43,7 @@ import { planAttempt, planBlocked, planReady, planRetry } from './transitions.js
 /** The renderer's surface the worker uses; loaded on first use (`schedule.ts`). */
 export type CvRenderer = Pick<
   typeof Render,
-  | 'fitPage'
-  | 'renderCvDocx'
-  | 'renderNotePdf'
-  | 'renderNoteDocx'
-  | 'makeDateOf'
-  | 'CvRenderError'
+  'fitPage' | 'renderCvDocx' | 'renderNotePdf' | 'renderNoteDocx' | 'makeDateOf' | 'CvRenderError'
 >;
 
 export interface CvWorkerLimits {
