@@ -122,6 +122,20 @@ export function gateCv(
 
 const num = (value: number): string => value.toFixed(2);
 
+/** One line per case with a write that did not validate: which write, and why. */
+function writeIssueLines(results: readonly CvCaseResult[]): string[] {
+  const lines = results.flatMap((r) => {
+    if (!r.writeIssues.some((codes) => codes.length > 0)) return [];
+    const writes = r.writeIssues.map(
+      (codes, i) => `write ${String(i + 1)} ${codes.length === 0 ? 'valid' : codes.join(', ')}`,
+    );
+    return [`${r.id}: ${writes.join('; ')}`];
+  });
+  return lines.length === 0
+    ? []
+    : ['Writes that failed validation:', ...lines.map((l) => `  ${l}`), ''];
+}
+
 export function formatCvReport(results: readonly CvCaseResult[]): string {
   const summary = summariseCv(results);
   const rows = results.map((r) => {
@@ -139,6 +153,7 @@ export function formatCvReport(results: readonly CvCaseResult[]): string {
       revision,
       `${String(r.writeCalls)}+${String(r.reviseCalls)}`,
       q ? `${(q.layout.fill * 100).toFixed(0)}%@${String(q.layout.bodySize)}` : '-',
+      r.draftHard === undefined ? '-' : `${String(r.draftHard)}/${String(r.draftSoft ?? 0)}`,
       `${String(r.hard)}/${String(r.soft)}`,
       `${r.costPence.toFixed(1)}p`,
       judge,
@@ -153,6 +168,7 @@ export function formatCvReport(results: readonly CvCaseResult[]): string {
     'revision',
     'calls',
     'fill',
+    'draft h/s',
     'hard/soft',
     'cost',
     'judge g/p/t/n',
@@ -164,6 +180,7 @@ export function formatCvReport(results: readonly CvCaseResult[]): string {
     line(head),
     ...rows.map(line),
     '',
+    ...writeIssueLines(results),
     `Full profile: ${String(summary.passing)}/${String(summary.full)} at ${String(CV_SCORE_TARGET)} or more · mean ${num(summary.fullMean)}`,
     `Revisions: ${String(summary.revisions)}/${String(summary.cases)} (${(summary.revisionRate * 100).toFixed(0)}%)`,
     `Tokens (write + revision): ${String(summary.tokens.input)} in, ${String(summary.tokens.output)} out`,

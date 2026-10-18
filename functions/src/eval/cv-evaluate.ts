@@ -48,7 +48,12 @@ export interface CvCaseResult {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** `tokens` for the write and revision calls only. */
   cvTokens: { input: number; output: number };
+  /** The issue codes of each write, in order; an empty list is a write that validated. */
+  writeIssues: CvIssueCode[][];
   quality?: CvQuality;
+  /** The first draft's hard and soft finding counts (the final's are `hard` and `soft`). */
+  draftHard?: number;
+  draftSoft?: number;
   coverage?: number;
   hard: number;
   soft: number;
@@ -89,7 +94,11 @@ export function readingOrder(content: TrimmedCvContent): string[] {
   parts.push(...content.education.map((line) => line.line));
   for (const entries of [content.experience, content.projects]) {
     for (const entry of entries) {
-      parts.push(entry.heading.role, entry.heading.org, ...entry.bullets.map((b) => b.text));
+      parts.push(
+        entry.heading.role,
+        ...(entry.heading.org === '' ? [] : [entry.heading.org]),
+        ...entry.bullets.map((b) => b.text),
+      );
     }
   }
   parts.push(...content.skills.map((skill) => skill.label));
@@ -179,6 +188,7 @@ export async function evaluateCvCase(
     emDash: false,
     markerLeaked: false,
   } as const;
+  const writeIssues: CvIssueCode[][] = [];
   const finish = (
     extra: Partial<CvCaseResult> & Pick<CvCaseResult, 'firstWriteValid' | 'shipped'>,
     judgeCost: number,
@@ -187,6 +197,7 @@ export async function evaluateCvCase(
     calls: tally.sends,
     writeCalls: tally.byPurpose.cvWrite ?? 0,
     reviseCalls: tally.byPurpose.cvRevise ?? 0,
+    writeIssues,
     costPence: 0,
     judgeCostPence: judgeCost,
     tokens: tally.tokens,
@@ -245,6 +256,7 @@ export async function evaluateCvCase(
           writeCostPence: written.costPence,
         },
       );
+      writeIssues.push(composed.kind === 'invalid' ? [...composed.issues] : []);
       if (attempt === 1) firstWriteValid = composed.kind !== 'invalid';
       if (composed.kind !== 'invalid') break;
       issues = composed.issues;
@@ -310,6 +322,8 @@ export async function evaluateCvCase(
       firstWriteValid,
       shipped: true,
       quality,
+      draftHard: composed.draft.hard,
+      draftSoft: composed.draft.soft,
       coverage: quality.criteria.tailoring / 2,
       hard,
       soft: quality.findings.length - hard,

@@ -1012,7 +1012,7 @@ describe('runCvWorker: the revision', () => {
     expect(get(h, 'job-1')).toMatchObject({ stage: 'ready', attempt: 2 });
     expect(h.store.cvDocs.get('job-1-v1')?.quality).toMatchObject({
       revised: false,
-      revisionSkipped: 'output',
+      revisionSkipped: 'invalid',
     });
   });
 

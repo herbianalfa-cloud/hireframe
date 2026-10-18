@@ -85,6 +85,14 @@ export function bulletBudget(spec: LayoutSpec): BulletBudget {
 
 export const CV_BULLET_BUDGET: BulletBudget = bulletBudget(BASE_SPEC);
 
+/** Fact types a bullet can rest on; an unused one is room to write more. */
+export const BULLET_FACT_TYPES: ReadonlySet<string> = new Set([
+  'experience',
+  'achievement',
+  'metric',
+  'project',
+]);
+
 /** A fact as the prompt shows it. */
 export interface PromptFact {
   id: string;

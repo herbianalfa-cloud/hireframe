@@ -43,6 +43,7 @@ export type CvRenderer = Pick<
   | 'renderNoteDocx'
   | 'makeDateOf'
   | 'makeEndKeyOf'
+  | 'makeHasEndOf'
   | 'CvRenderError'
 >;
 

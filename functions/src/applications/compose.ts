@@ -3,6 +3,7 @@ import {
   CvContentSchema,
   FILL_FULL_BAND,
   citedFactIds,
+  clampCvCounts,
   issueCodes,
   normaliseCvText,
   orderEntries,
@@ -23,7 +24,7 @@ import type * as Render from '../cv/render/index.js';
 import type { LlmCallResult } from '../llm/call.js';
 import { DailyCapExceededError, LlmOutputError, SpendCapExceededError } from '../llm/errors.js';
 import { errorFields, log } from '../log.js';
-import { cvReviseUser, type CvReviseInput } from './prompt.js';
+import { BULLET_FACT_TYPES, cvReviseUser, type CvReviseInput } from './prompt.js';
 import type { JobForCv } from './store.js';
 
 /**
@@ -43,17 +44,10 @@ import type { JobForCv } from './store.js';
 
 export type ComposeRenderer = Pick<
   typeof Render,
-  'fitPage' | 'makeDateOf' | 'makeEndKeyOf' | 'CvRenderError'
+  'fitPage' | 'makeDateOf' | 'makeEndKeyOf' | 'makeHasEndOf' | 'CvRenderError'
 >;
 type FitOk = Extract<Awaited<ReturnType<ComposeRenderer['fitPage']>>, { ok: true }>;
 
-/** Fact types a bullet can rest on; an unused one is room to write more. */
-const BULLET_FACT_TYPES: ReadonlySet<string> = new Set([
-  'experience',
-  'achievement',
-  'metric',
-  'project',
-]);
 /** Underfill is worth a revision only when this many unused bullet facts could fill it. */
 const MIN_UNUSED_FOR_FILL = 2;
 /** Aliases of unused facts sent back to the model. */
@@ -123,6 +117,8 @@ export type ComposeResult =
   | {
       kind: 'composed';
       shipped: Shipped;
+      /** The first draft's score and findings (the eval reports them; they are not stored). */
+      draft: { total: number; hard: number; soft: number };
       /** Set when the revision's failure ends the run, after the draft ships. */
       stop?: 'cap' | 'error';
     };
@@ -145,7 +141,8 @@ async function prepare(
   facts: readonly ExistingFact[],
 ): Promise<Prepared> {
   // NFC first: the validator checks printability after NFC, the renderer does not.
-  const scrubbed = scrubDashes(normaliseCvText(raw));
+  // Counts next: a sixth bullet on one entry loses that bullet, not the whole output.
+  const scrubbed = scrubDashes(clampCvCounts(normaliseCvText(raw)));
   const verdict = validateCv(scrubbed.content, input.toId, validatorFacts(facts));
   if (!verdict.ok) return { ok: false, issues: issueCodes(verdict.issues) };
   const strict = CvContentSchema.safeParse(scrubbed.content);
@@ -153,7 +150,11 @@ async function prepare(
 
   const { render } = deps;
   const dated = facts.map((fact) => ({ id: fact.id, dates: fact.content.dates }));
-  const ordered = orderEntries(strict.data, render.makeEndKeyOf(input.toId, dated));
+  const ordered = orderEntries(
+    strict.data,
+    render.makeEndKeyOf(input.toId, dated),
+    render.makeHasEndOf(input.toId, dated),
+  );
   try {
     const fit = await render.fitPage(input.header, ordered, render.makeDateOf(input.toId, dated));
     if (!fit.ok) return { ok: false, issues: [fit.code] };
@@ -163,6 +164,7 @@ async function prepare(
       aliases: input.toId,
       requirements: input.job.requirements,
       company: input.job.company,
+      jobTitle: input.job.title,
       layout: {
         fill: fit.fill,
         bulletLines: fit.lines.bullets,
@@ -282,13 +284,31 @@ function revisionFailure(error: unknown): {
 export async function composeCv(deps: ComposeDeps, input: ComposeInput): Promise<ComposeResult> {
   const first = await prepare(deps, input, input.draft, input.facts);
   if (!first.ok) return { kind: 'invalid', issues: first.issues };
-  const draft = first.candidate;
+  const { score } = first.candidate;
+  const hard = hardCount(score);
+  const result = await reviseAndShip(deps, input, first.candidate);
+  if (result.kind !== 'composed') return result;
+  return {
+    ...result,
+    draft: { total: score.total, hard, soft: score.findings.length - hard },
+  };
+}
+
+type Composed = Extract<ComposeResult, { kind: 'composed' }>;
+type Shipping = Exclude<ComposeResult, Composed> | Omit<Composed, 'draft'>;
+
+/** The rest of the loop for a valid draft: revise when it can help, then ship the best. */
+async function reviseAndShip(
+  deps: ComposeDeps,
+  input: ComposeInput,
+  draft: Candidate,
+): Promise<Shipping> {
 
   const ship = (quality: Parameters<typeof qualityOf>[1], cost = input.writeCostPence) =>
     ({
       kind: 'composed',
       shipped: shippedOf(input, draft, qualityOf(draft, quality), cost),
-    }) satisfies ComposeResult;
+    }) as const;
 
   if (draft.score.gatePassed) return ship({ revised: false });
   const plan = revisionPlan(input, draft);
@@ -356,12 +376,16 @@ export async function composeCv(deps: ComposeDeps, input: ComposeInput): Promise
     return { kind: 'invalid', issues: again.issues };
   }
   if (!revisedOk) {
+    // The revision parsed but does not validate: the codes say why, the draft ships.
+    if (!revised.ok) {
+      log.warn('cv_worker.revision_invalid', { issues: revised.issues.join(',') });
+    }
     return {
       kind: 'composed',
       shipped: shippedOf(
         input,
         again.candidate,
-        qualityOf(again.candidate, { revised: false, revisionSkipped: 'output', ...extra }),
+        qualityOf(again.candidate, { revised: false, revisionSkipped: 'invalid', ...extra }),
         cost,
       ),
     };
