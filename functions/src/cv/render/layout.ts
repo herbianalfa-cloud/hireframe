@@ -80,7 +80,7 @@ export interface LayoutSpec {
 }
 
 /** Body sizes the fit tries, biggest first. */
-export const BODY_SIZES: readonly number[] = [10.5, 10];
+export const BODY_SIZES: readonly number[] = [11, 10.5, 10];
 /** The most a gap may grow, and the most the leading may. */
 export const SPREAD_CAPS = { gap: 1.6, leading: 1.06 } as const;
 

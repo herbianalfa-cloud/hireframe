@@ -7,13 +7,14 @@ import {
 import { z } from 'zod';
 
 import type { JobForCv } from '../applications/store.js';
-import { EVAL_FACTS, type GoldenCase } from './cases.js';
+import { type GoldenCase } from './cases.js';
+import { CV_EVAL_FACTS } from './cv-facts.js';
 
 /**
  * The CV eval's cases (`evals/cv-cases.jsonl`, CV quality plan §4): fake only. Each case freezes
  * the S3 requirements and talking points the CV prompt reads, exported once from the funnel's
  * recorded answers, so the two evals stay independent. The candidate is "Alex Example"
- * (`EVAL_FACTS`) or, for the thin-profile case, 15 of those facts.
+ * (`CV_EVAL_FACTS`: the funnel eval's facts at the length of a real master CV) or, for the thin-profile case, 15 of those facts.
  */
 export const CV_CASE_TAGS = [
   'apply',
@@ -82,7 +83,7 @@ export function parseCvCases(jsonl: string, golden: readonly GoldenCase[]): CvCa
       }
       return parsed.data;
     });
-  const known = new Set(EVAL_FACTS.map((fact) => fact.id));
+  const known = new Set(CV_EVAL_FACTS.map((fact) => fact.id));
   const goldenIds = new Set(golden.map((entry) => entry.id));
   for (const entry of cases) {
     const refs = [...entry.requirements.flatMap((r) => r.factIds), ...(entry.keep ?? [])];
@@ -139,5 +140,5 @@ function asExisting(fact: FunnelFact): ExistingFact {
 /** The candidate's facts for a case, as the worker reads them. */
 export function cvCaseFacts(entry: CvCase): ExistingFact[] {
   const kept = entry.keep ? new Set(entry.keep) : null;
-  return EVAL_FACTS.filter((fact) => kept === null || kept.has(fact.id)).map(asExisting);
+  return CV_EVAL_FACTS.filter((fact) => kept === null || kept.has(fact.id)).map(asExisting);
 }
