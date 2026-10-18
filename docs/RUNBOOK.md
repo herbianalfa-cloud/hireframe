@@ -430,6 +430,7 @@ Design: `docs/plans/m7-plan.md`, ADR-052 (digest), ADR-055 (pipeline). Steps I3 
     6. **Today** shows **Things to do** in the summary bar, and the Pipeline item in the navigation shows the same number. Both appear after the Apply list, never before.
     7. The next weekday's digest shows a **Pipeline** section ("n need your input · n generating · n ready to send · n applied this week of 10"). If the section is missing but the rest of the digest arrived, check the logs for `digest.pipeline_failed` (an index or criteria read failed); the digest is not held back for it.
     8. Measure the Today load again (step 89, three repeat visits): the badge and the bar's new item come after `hf:usable`, so the median should not move.
+    9. After any deploy that changes the `cvs` schema (a new `quality` or `achievementRef` field), reload open app tabs: a tab left open from before can't parse a newer `cvs` doc, so it shows no score line and no download until it is reloaded.
 
 96. **Apply the Storage CORS setting** (`v0.7.4`). The browser reads CV files straight from the bucket, so the bucket must allow `GET` and `HEAD` from the two app origins. Without it every download is blocked and spins. In Cloud Shell, from the repo folder:
     ```bash
