@@ -192,7 +192,7 @@ describe('evaluateCvCase', () => {
   it('reports a case that never validates, and stops after two writes', async () => {
     const { result, files } = await evaluateCvCase(first, golden, deps(breaking(() => true)));
     expect(result.shipped).toBe(false);
-    expect(result.failure).toBe('invalid');
+    expect(result.failure).toMatch(/^invalid \(unknown_fact\)/);
     expect(result.writeCalls).toBe(2);
     expect(result.reviseCalls).toBe(0);
     expect(files).toBeUndefined();
