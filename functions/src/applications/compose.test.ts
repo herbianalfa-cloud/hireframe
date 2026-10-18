@@ -264,6 +264,26 @@ describe('composeCv: before the loop', () => {
     ]);
   });
 
+  it('drops uncited and non-skill skills before validating, and counts them', async () => {
+    const cv = goodCv();
+    cv.skills = [
+      ...cv.skills,
+      { label: 'Zendesk', factRefs: [a('fact-intern')] },
+      { label: 'Excel', factRefs: [] },
+    ];
+    const result = await composeCv(probe().deps, input(cv));
+    if (result.kind !== 'composed') throw new Error(`expected composed: ${result.kind}`);
+    expect(result.draft.skillsDropped).toBe(2);
+    expect(result.shipped.fit.content.skills.map((skill) => skill.label)).not.toContain('Excel');
+  });
+
+  it('counts the dropped skills of an invalid draft too', async () => {
+    const bad = withBullet(goodCv(), 'Saved 99% of costs for clients.');
+    bad.skills = [...bad.skills, { label: 'Excel', factRefs: [] }];
+    const result = await composeCv(probe().deps, input(bad));
+    expect(result).toMatchObject({ kind: 'invalid', skillsDropped: 1 });
+  });
+
   it('refuses an invalid draft with its codes and calls nothing', async () => {
     const bad = withBullet(goodCv(), 'Saved 99% of costs for clients.');
     const p = probe();
@@ -272,6 +292,7 @@ describe('composeCv: before the loop', () => {
       kind: 'invalid',
       issues: ['unsupported_number'],
       where: [{ path: 'experience[0].bullets[0]', code: 'unsupported_number' }],
+      skillsDropped: 0,
     });
     expect(p.counted).toBe(0);
     expect(p.revisions).toEqual([]);
@@ -298,6 +319,7 @@ describe('composeCv: before the loop', () => {
       kind: 'invalid',
       issues: ['too_long'],
       where: [{ path: 'experience[0].bullets[0]', code: 'too_long' }],
+      skillsDropped: 0,
     });
   });
 
@@ -310,6 +332,7 @@ describe('composeCv: before the loop', () => {
       kind: 'invalid',
       issues: ['too_long'],
       where: [],
+      skillsDropped: 0,
     });
     const refusing: ComposeRenderer = {
       ...renderer,
@@ -319,6 +342,7 @@ describe('composeCv: before the loop', () => {
       kind: 'invalid',
       issues: ['unsupported_char'],
       where: [],
+      skillsDropped: 0,
     });
   });
 

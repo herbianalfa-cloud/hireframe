@@ -955,6 +955,31 @@ export function clampCvCounts<T extends CvContent | TrimmedCvContent>(content: T
   };
 }
 
+/**
+ * Drops each skill that cites no fact, or cites a fact that is not a skill ("Zendesk" from an
+ * experience fact belongs in a bullet, not the skills list). Only removes, so it never adds a
+ * claim; an alias or fact it can't resolve is left for `validateCv` to refuse. `dropped` is how
+ * many went, for the eval to report. Does not mutate.
+ */
+export function dropUnsupportedSkills<T extends CvContent | TrimmedCvContent>(
+  content: T,
+  aliases: ReadonlyMap<string, string>,
+  facts: readonly CvFact[],
+): { content: T; dropped: number } {
+  const typeOf = new Map(facts.map((fact) => [fact.id, fact.type]));
+  const unsupported = (skill: T['skills'][number]): boolean =>
+    skill.factRefs.length === 0 ||
+    skill.factRefs.some((ref) => {
+      const type = typeOf.get(aliases.get(ref) ?? '');
+      return type !== undefined && !SKILL_FACT_TYPES.includes(type);
+    });
+  const skills = content.skills.filter((skill) => !unsupported(skill));
+  return {
+    content: skills.length === content.skills.length ? content : { ...content, skills },
+    dropped: content.skills.length - skills.length,
+  };
+}
+
 // ---- Dashes ----
 
 /** Keys whose strings are citations, not prose. */

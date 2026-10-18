@@ -4,6 +4,7 @@ import { CV_ISSUE_CODES, type CvIssueCode } from './applications.js';
 import {
   applyTrim,
   clampCvCounts,
+  dropUnsupportedSkills,
   CV_LIMITS,
   CvContentSchema,
   CvContentShapeSchema,
@@ -1854,5 +1855,49 @@ describe('clampCvCounts', () => {
     expect(input).toEqual(before);
     const counts = (check(clamped) as { issues?: CvIssue[] }).issues ?? [];
     expect(counts.filter((i) => i.code === 'too_long')).toEqual([]);
+  });
+});
+
+describe('dropUnsupportedSkills', () => {
+  const sql = aliasOf('fact-sql');
+  const python = aliasOf('fact-python');
+  const intern = aliasOf('fact-intern');
+  const withSkills = (skills: CvContent['skills']): CvContent => ({ ...validCv(), skills });
+
+  it('drops a skill with no citation and one citing a fact that is not a skill', () => {
+    const cv = withSkills([
+      { label: 'SQL', factRefs: [sql] },
+      { label: 'Zendesk', factRefs: [intern] },
+      { label: 'Excel', factRefs: [] },
+      { label: 'Python', factRefs: [python] },
+      { label: 'Mixed', factRefs: [sql, intern] },
+    ]);
+    const { content, dropped } = dropUnsupportedSkills(cv, CV_ALIASES, CV_FACTS);
+    expect(content.skills.map((skill) => skill.label)).toEqual(['SQL', 'Python']);
+    expect(dropped).toBe(3);
+    // Removal only: nothing else changed, and the input is untouched.
+    expect(content.experience).toEqual(cv.experience);
+    expect(cv.skills).toHaveLength(5);
+  });
+
+  it('leaves an unresolvable citation for the validator, and returns the same object when none go', () => {
+    const cv = withSkills([
+      { label: 'SQL', factRefs: [sql] },
+      { label: 'Unknown', factRefs: ['F999'] },
+    ]);
+    const result = dropUnsupportedSkills(cv, CV_ALIASES, CV_FACTS);
+    expect(result.dropped).toBe(0);
+    expect(result.content).toBe(cv);
+    expect(check(result.content).ok).toBe(false);
+  });
+
+  it('turns a list of only unsupported skills into an empty one, which still validates', () => {
+    const { content } = dropUnsupportedSkills(
+      withSkills([{ label: 'Zendesk', factRefs: [intern] }]),
+      CV_ALIASES,
+      CV_FACTS,
+    );
+    expect(content.skills).toEqual([]);
+    expect(check(content).ok).toBe(true);
   });
 });

@@ -51,6 +51,8 @@ export interface CvCaseResult {
   cvTokens: { input: number; output: number };
   /** The issue codes of each write, in order; an empty list is a write that validated. */
   writeIssues: CvIssueCode[][];
+  /** Skills removed before validating, over every write: uncited, or citing a non-skill fact. */
+  skillsDropped: number;
   quality?: CvQuality;
   /** The first draft's hard and soft finding counts (the final's are `hard` and `soft`). */
   draftHard?: number;
@@ -190,6 +192,7 @@ export async function evaluateCvCase(
     markerLeaked: false,
   } as const;
   const writeIssues: CvIssueCode[][] = [];
+  let skillsDropped = 0;
   const finish = (
     extra: Partial<CvCaseResult> & Pick<CvCaseResult, 'firstWriteValid' | 'shipped'>,
     judgeCost: number,
@@ -199,6 +202,7 @@ export async function evaluateCvCase(
     writeCalls: tally.byPurpose.cvWrite ?? 0,
     reviseCalls: tally.byPurpose.cvRevise ?? 0,
     writeIssues,
+    skillsDropped,
     costPence: 0,
     judgeCostPence: judgeCost,
     tokens: tally.tokens,
@@ -259,6 +263,8 @@ export async function evaluateCvCase(
         },
       );
       writeIssues.push(composed.kind === 'invalid' ? [...composed.issues] : []);
+      if (composed.kind === 'invalid') skillsDropped += composed.skillsDropped;
+      else if (composed.kind === 'composed') skillsDropped += composed.draft.skillsDropped;
       if (attempt === 1) firstWriteValid = composed.kind !== 'invalid';
       if (composed.kind !== 'invalid') break;
       issues = composed.issues;
