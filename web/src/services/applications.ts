@@ -6,6 +6,7 @@ import {
   appliedApplicationsSpec,
   COLLECTIONS,
   CvDocSchema,
+  JobFunnelFieldsSchema,
   PATHS,
   type Application,
   type ApplicationInput,
@@ -14,6 +15,7 @@ import {
   type CvDoc,
   type CvFileFormat,
   type CvFileKind,
+  type CvQuality,
   type QuerySpec,
 } from '@hireframe/shared';
 import { collection, doc, getCountFromServer, getDoc, limit, query } from 'firebase/firestore';
@@ -297,6 +299,37 @@ export async function loadCvDoc(cvId: string): Promise<CvDoc | null> {
   );
   if (!snapshot.exists()) return null;
   return CvDocSchema.parse(timestampsToDates(snapshot.data()));
+}
+
+export interface ReadyScores {
+  /** The shipped CV's quality score; null for a version written before scoring. */
+  quality: CvQuality | null;
+  /** The job's luck score (0 to 10); null when the job has none. */
+  luck: number | null;
+}
+
+/**
+ * What the Ready card shows beside the downloads: the version's quality score (from its `cvs`
+ * document) and the job's luck score. Two reads per card, and only for a Ready application.
+ */
+export async function loadReadyScores(jobId: string, cvId: string): Promise<ReadyScores> {
+  const { db } = await getFirebase();
+  const [cv, job] = await Promise.all([
+    loadCvDoc(cvId),
+    withRetry(
+      () =>
+        withTimeout(
+          tally(getDoc(doc(db, PATHS.job(jobId))), 'applications:getDoc'),
+          READ_TIMEOUT_MS,
+          'job luck',
+        ),
+      { label: 'applications.job_luck', isRetryable: isTransient },
+    ),
+  ]);
+  const luck = JobFunnelFieldsSchema.shape.luckScore.safeParse(
+    job.exists() ? job.data().luckScore : undefined,
+  );
+  return { quality: cv?.quality ?? null, luck: luck.success ? luck.data : null };
 }
 
 export interface CvFile {
