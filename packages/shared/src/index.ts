@@ -8,6 +8,7 @@ export * from './criteria.js';
 export * from './cv.js';
 export * from './cv-findings.js';
 export * from './cv-lint.js';
+export * from './cv-score.js';
 export * from './dedupe.js';
 export * from './digest.js';
 export * from './alerts/linkedin.js';
