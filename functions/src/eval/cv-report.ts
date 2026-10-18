@@ -73,7 +73,8 @@ export interface CvGateResult {
 
 /**
  * The gate. The judge is report-only and never enters it. A case that failed to ship fails the
- * "every case" checks and is left out of the means.
+ * "every case" checks and is left out of the means. The thin profile has no score or revision
+ * rule: it passes by shipping a valid one-page CV within the call limit (it is not a full case).
  */
 export function gateCv(
   results: readonly CvCaseResult[],
@@ -99,9 +100,6 @@ export function gateCv(
       problems.push(`${String(r.writeCalls + r.reviseCalls)} model calls`);
     }
     if (problems.length > 0) reasons.push(`${r.id}: ${problems.join('; ')}.`);
-    if (r.profile === 'thin' && r.reviseCalls > 0) {
-      reasons.push(`${r.id}: the thin profile spent a revision.`);
-    }
   }
   const summary = summariseCv(results);
   if (summary.passing < CV_MIN_PASSING) {

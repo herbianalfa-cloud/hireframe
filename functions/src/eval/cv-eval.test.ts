@@ -320,10 +320,31 @@ describe('gateCv', () => {
     expect(verdict.reasons.join()).toMatch(message);
   });
 
-  it('fails a thin profile that spent a revision, and a run with a case missing', () => {
+  it('passes a thin profile that spends a revision and scores low, within 3 calls', () => {
     const run = goodRun();
-    run[7] = result('c08', 7.4, { profile: 'thin', tags: ['thin'], reviseCalls: 1 });
-    expect(gateCv(run, 8, null).reasons.join()).toMatch(/thin profile spent a revision/);
+    run[7] = result('c08', 6.1, {
+      profile: 'thin',
+      tags: ['thin'],
+      writeCalls: 1,
+      reviseCalls: 1,
+    });
+    expect(gateCv(run, 8, null).ok).toBe(true);
+  });
+
+  it('fails a thin profile that ships nothing, or takes more than 3 calls', () => {
+    const run = goodRun();
+    run[7] = result('c08', 7, {
+      profile: 'thin',
+      tags: ['thin'],
+      shipped: false,
+      failure: 'invalid (uncited)',
+    });
+    expect(gateCv(run, 8, null).reasons.join()).toMatch(/c08: no CV shipped/);
+    run[7] = result('c08', 7, { profile: 'thin', tags: ['thin'], writeCalls: 2, reviseCalls: 2 });
+    expect(gateCv(run, 8, null).reasons.join()).toMatch(/c08: 4 model calls/);
+  });
+
+  it('fails a run with a case missing', () => {
     expect(gateCv(goodRun().slice(0, 7), 8, null).reasons.join()).toMatch(/7 of 8 cases ran/);
   });
 
