@@ -1,7 +1,10 @@
 import {
   CV_CRITERIA,
+  CV_SCORE_TARGET,
+  CV_WEIGHTS,
   CvContentSchema,
   FILL_FULL_BAND,
+  findingCost,
   citedFactIds,
   clampCvCounts,
   dropUnsupportedSkills,
@@ -234,9 +237,20 @@ function revisionPlan(
     new Set(citedFactIds(draft.cited, input.toId)),
   ).filter((fact) => input.toAlias.has(fact.id));
   const underfilled = 1 - draft.fit.fill > FILL_FULL_BAND;
+  const fillable = underfilled && unused.length >= MIN_UNUSED_FOR_FILL;
+  const fixing = draft.score.findings.filter((finding) => finding.fixable);
+  // A hard finding always pays for a revision (it caps the total below the target). Otherwise
+  // the revision must be able to reach the target: the total, plus what the findings cost, plus
+  // the fill points that unused facts could win back (ADR-063: a thin profile never pays for a
+  // revision it can't use).
+  const hard = hardCount(draft.score) > 0;
+  const reachable =
+    draft.score.total +
+    fixing.reduce((sum, finding) => sum + findingCost(finding), 0) +
+    (fillable ? CV_WEIGHTS.fill - draft.score.criteria.fill : 0);
   const fixable =
-    draft.score.findings.some((finding) => finding.fixable) ||
-    (underfilled && unused.length >= MIN_UNUSED_FOR_FILL);
+    (fixing.length > 0 || fillable) &&
+    (hard || reachable >= (input.scoreTarget ?? CV_SCORE_TARGET));
   if (!fixable) return { fixable: false };
   // The ones the job asks for come first.
   const wanted = new Set(input.job.requirements.flatMap((requirement) => requirement.factIds));
