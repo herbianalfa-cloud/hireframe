@@ -568,8 +568,12 @@ export const APPLICATIONS = {
   /** Daily spend on CV writing and answers; `config/app.applications.dailyCapPence` overrides it. */
   dailyCapPence: 60,
   maxQuestions: APPLICATION_LIMITS.maxQuestions,
-  /** Model calls one job may cost, kills included: the worker counts an attempt before it calls. */
-  maxAttempts: APPLICATION_LIMITS.maxAttempts,
+  /**
+   * Calls the worker allows one job today, kills included: it counts an attempt before it calls.
+   * This is the write limit (`maxWrites`) until the revision loop lands (CV quality Session 2b),
+   * which moves the worker to `APPLICATION_LIMITS.maxAttempts` (writes plus one revision).
+   */
+  maxAttempts: APPLICATION_LIMITS.maxWrites,
   /** A CV scores "good enough" at this total with no hard finding (`scoreCv`). */
   scoreTarget: CV_SCORE_TARGET,
   workerMaxPerRun: 10,

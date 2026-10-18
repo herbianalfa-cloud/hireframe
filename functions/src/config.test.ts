@@ -80,10 +80,11 @@ describe('CV worker budgets (M7, ADR-053)', () => {
     ).toBeLessThanOrEqual(workerMs);
   });
 
-  it('a job costs at most two writes and one revision', () => {
+  it('a job costs at most two writes and one revision, but the worker still stops at two calls until 2b', () => {
     expect(APPLICATION_LIMITS.maxWrites + APPLICATION_LIMITS.maxRevisions).toBe(
-      APPLICATIONS.maxAttempts,
+      APPLICATION_LIMITS.maxAttempts,
     );
+    expect(APPLICATIONS.maxAttempts).toBe(APPLICATION_LIMITS.maxWrites);
   });
 
   it('answers turn into facts under the application callable timeout', () => {
@@ -96,7 +97,7 @@ describe('CV worker budgets (M7, ADR-053)', () => {
     expect(APPLICATIONS).toMatchObject({
       dailyCapPence: 60,
       maxQuestions: 5,
-      maxAttempts: 3,
+      maxAttempts: 2,
       scoreTarget: 8,
       workerMaxPerRun: 10,
     });
