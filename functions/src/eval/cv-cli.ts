@@ -51,8 +51,9 @@ export async function runCvSuite(args: readonly string[], live: boolean): Promis
     : null;
 
   const recorder = live ? recordingTransport(anthropicTransport(apiKey())) : null;
+  const replay = recorder ? null : replayTransport(recordings);
   const deps: LlmCallDeps = {
-    transport: recorder ?? replayTransport(recordings),
+    transport: recorder ?? replay ?? replayTransport(recordings),
     usage: memoryUsage(CV_EVAL_CAP_PENCE),
     capPence: CV_EVAL_CAP_PENCE,
     fxUsdToGbp: DEFAULT_FX_USD_TO_GBP,
@@ -91,6 +92,11 @@ export async function runCvSuite(args: readonly string[], live: boolean): Promis
   }
 
   console.log(formatCvReport(results));
+  if (replay && replay.used.size < recordings.size) {
+    console.log(
+      `cv eval: ${String(recordings.size - replay.used.size)} of ${String(recordings.size)} recordings unused (a prompt or case change left them behind; re-record to drop them).`,
+    );
+  }
   const verdict = gateCv(results, cases.length, baseline);
   if (!verdict.ok) {
     console.error(`\ncv eval: FAILED\n- ${verdict.reasons.join('\n- ')}`);
