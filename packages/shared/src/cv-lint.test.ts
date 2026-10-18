@@ -1,0 +1,294 @@
+import { describe, expect, it } from 'vitest';
+
+import type { CvContent } from './cv.js';
+import { FINDING_CODES, FINDING_INFO, findingLabel } from './cv-findings.js';
+import { lintCv } from './cv-lint.js';
+import { aliasOf, CV_ALIASES, CV_FACTS, validCv } from './fixtures/cv.js';
+
+const lint = (content: CvContent) => lintCv(content, CV_FACTS, CV_ALIASES);
+
+/** The valid CV with one bullet's text (citing `fact-articles`, which has no leadership words). */
+function withBullet(text: string, fact = 'fact-articles'): CvContent {
+  const cv = structuredClone(validCv());
+  const entry = cv.experience[0];
+  if (entry === undefined) throw new Error('fixture');
+  entry.bullets = [{ text, factRefs: [aliasOf(fact)] }];
+  return cv;
+}
+
+const BULLET = 'experience[0].bullets[0]';
+
+function codesOf(text: string, fact?: string): string[] {
+  return lint(withBullet(text, fact))
+    .filter((finding) => finding.path === BULLET)
+    .map((finding) => finding.code);
+}
+
+function withNote(paragraphs: string[]): CvContent {
+  const cv = structuredClone(validCv());
+  cv.coverNote.paragraphs = paragraphs.map((text) => ({
+    text,
+    factRefs: [aliasOf('fact-clients')],
+  }));
+  return cv;
+}
+
+describe('lintCv on the valid fixture', () => {
+  it('finds nothing in the valid CV, including a fact-backed "Led"', () => {
+    expect(lint(validCv())).toEqual([]);
+  });
+
+  it('reads a trimmed CV with no summary', () => {
+    const cv = { ...validCv(), summary: null };
+    expect(lintCv(cv, CV_FACTS, CV_ALIASES)).toEqual([]);
+  });
+});
+
+describe('contrast_pattern (hard)', () => {
+  it.each([
+    'Not just a tidy dataset, but a clear story for the team.',
+    'It was not only faster but also easier to read.',
+    "This isn't about reports, it's about decisions.",
+    "It's not a spreadsheet. It's a way of working.",
+    'Built a tool that is not a dashboard, but a habit.',
+    'Wrote less code, more tests.',
+    'Not merely cleaned data; it is the base for every report.',
+    'It’s not the tooling. It’s the habit.',
+  ])('flags: %s', (text) => {
+    expect(codesOf(text)).toContain('contrast_pattern');
+  });
+
+  it.each([
+    'Did not exceed the budget in any month.',
+    'Wrote 25 help-centre articles, but none went out of date.',
+    'Not applicable to the role.',
+    'Tested the form and fixed the bugs found.',
+    'Wrote less than a page for each report.',
+  ])('does not flag: %s', (text) => {
+    expect(codesOf(text)).not.toContain('contrast_pattern');
+  });
+
+  it('is hard and fixable', () => {
+    const finding = lint(withBullet('Not just a report, but a plan.')).find(
+      (item) => item.code === 'contrast_pattern',
+    );
+    expect(finding).toMatchObject({ path: BULLET, severity: 'hard', fixable: true });
+  });
+});
+
+describe('cliche (hard)', () => {
+  it.each([
+    'Passionate about customer success.',
+    'A proven track record of onboarding clients.',
+    'Results-driven analyst.',
+    'A team player who writes clear notes.',
+    'Used to a fast-paced environment.',
+    'Ready to hit the ground running.',
+  ])('flags: %s', (text) => {
+    expect(codesOf(text)).toContain('cliche');
+  });
+
+  it('flags "I am writing to apply" in the note', () => {
+    const cv = withNote([
+      'I am writing to apply for the role.',
+      'I led onboarding for 12 clients.',
+    ]);
+    expect(lint(cv).map((f) => f.code)).toContain('cliche');
+  });
+
+  it('does not flag plain wording', () => {
+    expect(codesOf('Wrote 25 help-centre articles for the setup flow.')).toEqual([]);
+    expect(codesOf('Worked in a team of four on the setup flow.')).toEqual([]);
+  });
+});
+
+describe('buzzword_stack (hard) and buzzword (soft)', () => {
+  it('flags two buzzwords in one sentence', () => {
+    expect(codesOf('Leveraged innovative tooling for reports.')).toContain('buzzword_stack');
+    expect(codesOf('Leveraged innovative tooling for reports.')).not.toContain('buzzword');
+  });
+
+  it('flags a chain of three vague adjectives', () => {
+    expect(codesOf('A motivated, dedicated and proactive analyst.')).toContain('buzzword_stack');
+    expect(codesOf('Dependable, versatile, resourceful.')).toContain('buzzword_stack');
+  });
+
+  it('flags one buzzword as soft', () => {
+    expect(codesOf('Leveraged SQL to write reports.')).toEqual(['buzzword']);
+    expect(lint(withBullet('Leveraged SQL to write reports.'))[0]).toMatchObject({
+      severity: 'soft',
+    });
+  });
+
+  it('counts buzzwords per sentence, not per text', () => {
+    expect(codesOf('Leveraged SQL for reports. Used dynamic filters in them.')).toEqual([
+      'buzzword',
+    ]);
+  });
+
+  it('allows a buzzword a cited fact uses itself', () => {
+    const cv = withBullet('Built dynamic filters in SQL.', 'fact-sql');
+    const facts = CV_FACTS.map((fact) =>
+      fact.id === 'fact-sql' ? { ...fact, text: 'Dynamic SQL', evidence: 'Dynamic SQL' } : fact,
+    );
+    expect(lintCv(cv, facts, CV_ALIASES).filter((f) => f.path === BULLET)).toEqual([]);
+    expect(codesOf('Built dynamic filters in SQL.', 'fact-sql')).toEqual(['buzzword']);
+  });
+
+  it('does not flag two adjectives or ordinary words', () => {
+    expect(codesOf('A reliable and organised analyst.')).toEqual([]);
+  });
+});
+
+describe('inflated_claim (hard)', () => {
+  it.each([
+    'Spearheaded the help-centre rewrite.',
+    'Pioneered a new setup flow.',
+    'Orchestrated 25 help-centre articles.',
+    'Architected the setup flow.',
+    'Championed clear writing.',
+    'An expert in setup flows.',
+    'Seasoned analyst with extensive reporting experience.',
+    'World-class documentation.',
+    'Led the help-centre rewrite.',
+    'Managed 25 help-centre articles.',
+    'Oversaw the setup flow.',
+    'Strategic planning for documentation.',
+  ])('flags when no cited fact has the word: %s', (text) => {
+    expect(codesOf(text)).toContain('inflated_claim');
+  });
+
+  it('allows the word when a cited fact has the same stem', () => {
+    // fact-clients says "Led onboarding for 12 clients".
+    expect(codesOf('Led onboarding for 12 clients.', 'fact-clients')).toEqual([]);
+    expect(codesOf('Led onboarding for 12 clients.')).toContain('inflated_claim');
+  });
+
+  it('does not take a different word of the same fact', () => {
+    expect(codesOf('Managed onboarding for 12 clients.', 'fact-clients')).toContain(
+      'inflated_claim',
+    );
+  });
+
+  it.each([
+    'Misled readers were corrected.',
+    'Wrote the lead paragraph of each article.',
+    'Edited a model of the flow.',
+  ])('does not flag a lookalike: %s', (text) => {
+    expect(codesOf(text)).not.toContain('inflated_claim');
+  });
+});
+
+describe('soft findings', () => {
+  it.each([
+    ['intensifier', 'Successfully wrote 25 help-centre articles.'],
+    ['intensifier', 'Wrote articles that significantly cut tickets.'],
+    ['weak_opener', 'Responsible for the help-centre articles.'],
+    ['weak_opener', 'Worked on the setup flow.'],
+    ['weak_opener', 'Tasked with writing articles.'],
+    ['weak_opener', 'Helped to write articles.'],
+    ['first_person', 'I wrote 25 help-centre articles.'],
+    ['first_person', 'Wrote articles for my team.'],
+    ['exclamation', 'Wrote 25 help-centre articles!'],
+    [
+      'long_sentence',
+      'Wrote help-centre articles for the setup flow and then reviewed them with the support team and the product owner and rewrote them again after feedback from three customers and two colleagues.',
+    ],
+  ])('%s: %s', (code, text) => {
+    const found = lint(withBullet(text)).filter((f) => f.path === BULLET);
+    expect(found.map((f) => f.code)).toContain(code);
+    expect(found.find((f) => f.code === code)).toMatchObject({ severity: 'soft', fixable: true });
+  });
+
+  it.each([
+    'Wrote 25 help-centre articles for the setup flow.',
+    'Worked with the support team on the setup flow.',
+    'Edited the highlights of each article.',
+    'Wrote a short summary. Added a second one for the setup flow.',
+  ])('is quiet on: %s', (text) => {
+    expect(codesOf(text)).toEqual([]);
+  });
+
+  it('allows first person in the cover note and not in the summary', () => {
+    expect(lint(withNote(['I would like to apply.', 'I led onboarding for 12 clients.']))).toEqual(
+      [],
+    );
+    const cv = structuredClone(validCv());
+    cv.summary = { text: 'I am an analyst who writes clearly.', factRefs: [aliasOf('fact-ttl')] };
+    expect(lint(cv)).toEqual([
+      { code: 'first_person', path: 'summary', severity: 'soft', fixable: true },
+    ]);
+  });
+
+  it('flags a greeting at the top and a sign-off at the end of the note, not elsewhere', () => {
+    const greeted = lint(
+      withNote(['Dear hiring team, I would like to apply.', 'I led onboarding.']),
+    );
+    expect(greeted).toEqual([
+      { code: 'note_greeting', path: 'coverNote.paragraphs[0]', severity: 'soft', fixable: true },
+    ]);
+    const signed = lint(
+      withNote(['I would like to apply.', 'I led onboarding. Kind regards, Alex Example']),
+    );
+    expect(signed.map((f) => f.code)).toEqual(['note_greeting']);
+    expect(
+      lint(
+        withNote([
+          'I would like to apply.',
+          'I led onboarding and send my regards to the team lead.',
+        ]),
+      ).filter((f) => f.code === 'note_greeting'),
+    ).toEqual([]);
+  });
+
+  it('checks sentence length in the note too', () => {
+    const long = `${Array.from({ length: 32 }, () => 'word').join(' ')}.`;
+    expect(lint(withNote(['I would like to apply.', long])).map((f) => f.code)).toEqual([
+      'long_sentence',
+    ]);
+  });
+});
+
+describe('findings', () => {
+  it('never hold the text they found', () => {
+    const marker = 'Zqxjv';
+    const cv = withBullet(`Spearheaded ${marker} not just for me, but for all! Successfully.`);
+    const findings = lint(cv);
+    expect(findings.length).toBeGreaterThan(2);
+    expect(JSON.stringify(findings)).not.toContain(marker);
+    expect(Object.keys(findings[0] ?? {}).sort()).toEqual(['code', 'fixable', 'path', 'severity']);
+  });
+
+  it('are listed once per code and place, in document order', () => {
+    const cv = withBullet('Successfully and effectively wrote articles.');
+    expect(lint(cv).filter((f) => f.code === 'intensifier')).toHaveLength(1);
+    const two = structuredClone(cv);
+    two.summary = { text: 'Successfully cut tickets by 30%.', factRefs: [aliasOf('fact-ttl')] };
+    expect(lint(two).map((f) => f.path)).toEqual(['summary', BULLET]);
+  });
+
+  it('are not changed by curly quotes or the case of the text', () => {
+    expect(codesOf('IT’S NOT A SPREADSHEET. IT’S A WAY OF WORKING.')).toContain('contrast_pattern');
+  });
+});
+
+describe('cv-findings', () => {
+  it('gives every code a severity, a label in words and a fixed guidance line', () => {
+    for (const code of FINDING_CODES) {
+      const info = FINDING_INFO[code];
+      expect(['hard', 'soft']).toContain(info.severity);
+      expect(findingLabel(code)).toBe(info.label);
+      expect(info.label.length).toBeGreaterThan(10);
+      expect(info.guidance.length).toBeGreaterThan(10);
+    }
+  });
+
+  it('has the four hard codes the plan names', () => {
+    expect(FINDING_CODES.filter((code) => FINDING_INFO[code].severity === 'hard')).toEqual([
+      'contrast_pattern',
+      'buzzword_stack',
+      'inflated_claim',
+      'cliche',
+    ]);
+  });
+});
