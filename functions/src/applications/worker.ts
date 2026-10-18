@@ -43,7 +43,7 @@ import { planAttempt, planBlocked, planReady, planRetry } from './transitions.js
 /** The renderer's surface the worker uses; loaded on first use (`schedule.ts`). */
 export type CvRenderer = Pick<
   typeof Render,
-  | 'fitOnePage'
+  | 'fitPage'
   | 'renderCvDocx'
   | 'renderNotePdf'
   | 'renderNoteDocx'
@@ -254,9 +254,9 @@ async function fail(deps: CvWorkerDeps, counted: Counted, error: unknown): Promi
 }
 
 type Rendered = { ok: true; fit: FitOk; bytes: CvFileBytes } | { ok: false; code: CvIssueCode };
-type FitOk = Extract<Awaited<ReturnType<CvRenderer['fitOnePage']>>, { ok: true }>;
+type FitOk = Extract<Awaited<ReturnType<CvRenderer['fitPage']>>, { ok: true }>;
 
-/** The one-page fit and the four files; a content that can't be rendered is an issue code. */
+/** The one-page fit-and-fill and the four files; a content that can't be rendered is an issue code. */
 async function renderFiles(
   render: CvRenderer,
   header: CvHeader,
@@ -264,7 +264,7 @@ async function renderFiles(
   dateOf: ReturnType<CvRenderer['makeDateOf']>,
 ): Promise<Rendered> {
   try {
-    const fit = await render.fitOnePage(header, content, dateOf);
+    const fit = await render.fitPage(header, content, dateOf);
     if (!fit.ok) return { ok: false, code: fit.code };
     const note = await render.renderNotePdf(header, fit.content.coverNote);
     // The 250-word limit makes this hold; `pages` is exact, so it is checked, not assumed.
@@ -274,7 +274,7 @@ async function renderFiles(
       fit,
       bytes: {
         cvPdf: fit.bytes,
-        cvDocx: await render.renderCvDocx(header, fit.content, dateOf),
+        cvDocx: await render.renderCvDocx(header, fit.content, dateOf, fit.spec),
         notePdf: note.bytes,
         noteDocx: await render.renderNoteDocx(header, fit.content.coverNote),
       },

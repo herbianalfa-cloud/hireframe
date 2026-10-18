@@ -409,7 +409,7 @@ describe('runCvWorker: an invalid output', () => {
   it('retries with too_long when the CV cannot be fitted on one page', async () => {
     const renderer: CvRenderer = {
       ...realRenderer,
-      fitOnePage: () => Promise.resolve({ ok: false, code: 'too_long' }),
+      fitPage: () => Promise.resolve({ ok: false, code: 'too_long' }),
     };
     const h = harness({ renderer });
     add(h, 'job-1');
@@ -773,7 +773,7 @@ describe('runCvWorker: the run', () => {
   it('treats a render error that is not a CvRenderError as a failure, not an output issue', async () => {
     const renderer: CvRenderer = {
       ...realRenderer,
-      fitOnePage: () => Promise.reject(new Error('pdf-lib exploded')),
+      fitPage: () => Promise.reject(new Error('pdf-lib exploded')),
     };
     const h = harness({ renderer });
     add(h, 'job-1');
