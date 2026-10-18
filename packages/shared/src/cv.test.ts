@@ -1080,6 +1080,53 @@ describe('schemas', () => {
     expect(CvDocSchema.safeParse(doc).success).toBe(true);
     expect(CvDocSchema.safeParse({ ...doc, tokens: 5 }).success).toBe(false);
   });
+
+  describe('quality', () => {
+    const quality = {
+      rubric: 'rubric-v1',
+      total: 8.6,
+      criteria: { fill: 2, writing: 2.25, numbers: 1, tailoring: 1.6, craft: 1.5, structure: 0.25 },
+      findings: [{ code: 'intensifier', path: 'experience[0].bullets[1]' }],
+      revised: true,
+      draftTotal: 7.2,
+      dashesReplaced: 2,
+      layout: { bodySize: 10.5, fill: 0.97 },
+    };
+    const doc = {
+      jobId: 'job-1',
+      applicationVersion: 1,
+      content: { ...validCv(), summary: null },
+      aliases: Object.fromEntries(CV_ALIASES),
+      factIds: [],
+      storagePaths: { cvPdf: 'a', cvDocx: 'b', notePdf: 'c', noteDocx: 'd' },
+      trimmed: 0,
+      model: 'claude-sonnet-5-5',
+      costPence: 4.3,
+      createdAt: new Date(),
+      schemaVersion: 1,
+    };
+
+    it('parses with a quality, and an old doc without one still parses', () => {
+      expect(CvDocSchema.safeParse(doc).success).toBe(true);
+      expect(CvDocSchema.safeParse({ ...doc, quality }).success).toBe(true);
+      expect(
+        CvDocSchema.safeParse({ ...doc, quality: { ...quality, revisionSkipped: 'not_fixable' } })
+          .success,
+      ).toBe(true);
+    });
+
+    it('refuses a finding with text, an unknown code, 21 findings or a score over 10', () => {
+      const bad = (override: object) =>
+        CvDocSchema.safeParse({ ...doc, quality: { ...quality, ...override } }).success;
+      expect(bad({ findings: [{ code: 'cliche', path: 'summary', text: 'x' }] })).toBe(false);
+      expect(bad({ findings: [{ code: 'other', path: 'summary' }] })).toBe(false);
+      expect(
+        bad({ findings: Array.from({ length: 21 }, () => ({ code: 'cliche', path: 'summary' })) }),
+      ).toBe(false);
+      expect(bad({ total: 10.5 })).toBe(false);
+      expect(bad({ revisionSkipped: 'because' })).toBe(false);
+    });
+  });
 });
 
 /** The valid CV with its first experience heading, and an education line, replaced. */

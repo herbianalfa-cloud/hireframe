@@ -60,8 +60,12 @@ export type CvIssueCode = (typeof CV_ISSUE_CODES)[number];
 export const APPLICATION_LIMITS = {
   /** Questions asked about one job. */
   maxQuestions: 5,
-  /** Model calls one job may cost (the worker counts an attempt before it calls). */
-  maxAttempts: 2,
+  /** Writes one job may cost: the first draft and one retry after an invalid output. */
+  maxWrites: 2,
+  /** Revision calls one job may cost. */
+  maxRevisions: 1,
+  /** Model calls one job may cost, writes and revision together (counted before each call). */
+  maxAttempts: 3,
   requirement: FUNNEL_LIMITS.requirementText,
   notes: 500,
   /** Answer text sent to the `application` callable. */
