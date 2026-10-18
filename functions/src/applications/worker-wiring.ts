@@ -1,4 +1,4 @@
-import { DEFAULT_MONTHLY_CAP_PENCE, type AppConfig } from '@hireframe/shared';
+import { APPLICATION_LIMITS, DEFAULT_MONTHLY_CAP_PENCE, type AppConfig } from '@hireframe/shared';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Storage } from 'firebase-admin/storage';
 
@@ -47,7 +47,9 @@ export function cvWorkerDeps(input: {
       maxPerRun: APPLICATIONS.workerMaxPerRun,
       readLimit: APPLICATIONS.workerReadLimit,
       startDeadlineMs: APPLICATIONS.workerStartDeadlineMs,
-      maxAttempts: APPLICATIONS.maxAttempts,
+      maxWrites: APPLICATION_LIMITS.maxWrites,
+      maxAttempts: APPLICATION_LIMITS.maxAttempts,
+      scoreTarget: APPLICATIONS.scoreTarget,
     },
   };
 }
