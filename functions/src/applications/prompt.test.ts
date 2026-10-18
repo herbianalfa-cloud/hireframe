@@ -16,6 +16,7 @@ import {
   CV_PROMPT_VERSION,
   bulletBudget,
   cvFactsBlock,
+  lengthTarget,
   cvReviseUser,
   cvSystem,
   cvUser,
@@ -64,7 +65,7 @@ describe('cvSystem', () => {
     expect(system).toMatch(/No links, no email addresses, no phone numbers/);
     expect(system).toMatch(/Every number, percentage, currency amount, multiplier/);
     expect(system).toMatch(/Write "Python", not "Python 3"/);
-    expect(system).toMatch(/Experience headings cite an experience fact/);
+    expect(system).toMatch(/Experience heading: an experience fact/);
     expect(system).toMatch(/Nothing cites a preference fact/);
     expect(system).toMatch(/must fit one A4 page/);
     expect(system).toMatch(/never write a date/);
@@ -124,6 +125,14 @@ describe('cvUser', () => {
   });
 });
 
+/** A profile of 40 bullet facts of 120 characters, as a real master CV has. */
+const PLENTY: PromptFact[] = Array.from({ length: 40 }, (_, i) => ({
+  id: `fact-${String(i)}`,
+  type: 'experience',
+  text: `Fact ${String(i)} `.padEnd(120, 'x'),
+  dates: {},
+}));
+
 describe('cvSystem voice and length', () => {
   const system = cvSystem(FACTS, TO_ALIAS);
 
@@ -146,6 +155,11 @@ describe('cvSystem voice and length', () => {
 
   it('states the length target from the layout, and keeps rules 1 to 7', () => {
     const { bullets, chars } = CV_BULLET_BUDGET;
+    // A profile with plenty of bullet facts gets the layout's budget.
+    const system = cvSystem(
+      PLENTY,
+      new Map(PLENTY.map((fact, i) => [fact.id, `F${String(i + 1)}`])),
+    );
     expect(system).toContain(`Write ${String(bullets.min)} to ${String(bullets.max)} bullets`);
     expect(system).toContain(`about ${String(chars)} characters of bullets`);
     expect(system).not.toMatch(/Fewer, stronger bullets beat many/);
@@ -154,7 +168,7 @@ describe('cvSystem voice and length', () => {
   });
 
   it('bumps the version', () => {
-    expect(CV_PROMPT_VERSION).toBe('cv-2026-10-18');
+    expect(CV_PROMPT_VERSION).toBe('cv-2026-10-18b');
   });
 });
 
@@ -316,7 +330,149 @@ describe('cvReviseUser', () => {
     expect(user.lastIndexOf('</draft_cv>')).toBeLessThan(user.indexOf('Your draft was checked'));
   });
 
+  it('restates the bullet limit and names the entries that have room', () => {
+    const entry = (bullets: number) => ({
+      heading: { role: 'Role', org: 'Org', factRef: 'F1' },
+      bullets: Array.from({ length: bullets }, () => ({ text: 'A bullet.', factRefs: ['F1'] })),
+    });
+    const draft: CvContent = {
+      ...DRAFT,
+      experience: [entry(5), entry(3)],
+      projects: [entry(1), entry(5)],
+    };
+    const user = revise({ draft });
+    expect(user).toContain('Keep to at most 5 bullets per entry; a sixth is cut.');
+    expect(user).toContain(
+      'Entries with room: experience[1] has 3 (room for 2 more); projects[0] has 1 (room for 4 more).',
+    );
+    expect(user).not.toContain('experience[0] has');
+    expect(user).not.toContain('projects[1] has');
+  });
+
+  it('says when every entry is at the limit, and when the draft has no entries', () => {
+    const full = {
+      heading: { role: 'Role', org: 'Org', factRef: 'F1' },
+      bullets: Array.from({ length: 5 }, () => ({ text: 'A bullet.', factRefs: ['F1'] })),
+    };
+    expect(revise({ draft: { ...DRAFT, experience: [full] } })).toContain(
+      'Every entry is already at that limit, so add nothing to an entry.',
+    );
+    // No entries at all: the limit is restated and nothing is said about room.
+    expect(revise()).toContain('at most 5 bullets per entry; a sixth is cut.');
+    expect(revise()).not.toContain('Every entry');
+    expect(revise()).not.toContain('Entries with room');
+  });
+
   it('copes with no findings', () => {
     expect(revise({ findings: [] })).toContain('- No writing findings.');
+  });
+});
+
+describe('cvSystem prompt batch (fact types, education, org, location)', () => {
+  const system = cvSystem(FACTS, TO_ALIAS);
+
+  it('has a fact-type table with a line per part', () => {
+    expect(system).toContain('3. Each part cites only the fact types it allows:');
+    expect(system).toContain(
+      '- Summary and cover note: any type except preference. Only these two may cite a constraint fact.',
+    );
+    expect(system).toContain('- Experience heading: an experience fact.');
+    expect(system).toContain('- Project heading: a project or an experience fact.');
+    expect(system).toContain(
+      '- Bullet: an experience, achievement, metric, project, skill or education fact. Never a constraint or a preference.',
+    );
+    expect(system).toContain('- Skill: skill facts only.');
+    expect(system).toContain('Nothing cites a preference fact.');
+  });
+
+  it('sends a tool that only an experience fact mentions to a bullet, never to Skills', () => {
+    expect(system).toContain(
+      'A tool or method that only an experience fact mentions (no skill fact) goes in a bullet, never in Skills.',
+    );
+  });
+
+  it('limits an education line to its cited facts, plus a classification from one achievement', () => {
+    expect(system).toContain(
+      '- Education line: an education fact in factRef. If the line states a classification (First Class Honours), also one achievement fact in achievementRef; no other fact.',
+    );
+    expect(system).toContain(
+      "An education line uses only the words of the facts it cites: the education fact's words, and from the achievement fact only the classification (for example First Class Honours); no module names, grades or years of your own.",
+    );
+    expect(system).toContain(
+      '"education": [ { "line": string, "factRef": "F1", "achievementRef": "F2" } ]',
+    );
+    expect(system).toContain('achievementRef is optional');
+  });
+
+  it('gives a project with no organisation "" for org, and an experience entry always one', () => {
+    expect(system).toContain(
+      'A project with no organisation gets "" for org; an experience entry always has one.',
+    );
+    expect(system).toContain('A project with no organisation has "org": ""');
+  });
+
+  it('keeps the location out of the summary', () => {
+    expect(system).toContain(
+      'It never says where the candidate lives or is based: the header carries the location.',
+    );
+  });
+
+  it('points the wrong_fact_type retry at the table', () => {
+    const retry = cvUser({ job: JOB, issues: ['wrong_fact_type'] });
+    expect(retry).toContain('skills cite skill facts');
+    expect(retry).toContain('an education fact (and one achievement for a classification)');
+  });
+});
+
+describe('lengthTarget', () => {
+  const fact = (type: string, chars: number, i = 0): PromptFact => ({
+    id: `f${String(i)}`,
+    type,
+    text: 'x'.repeat(chars),
+    dates: {},
+  });
+
+  it('is the layout budget when the profile has plenty of bullet-fact text', () => {
+    expect(lengthTarget(PLENTY)).toEqual(CV_BULLET_BUDGET);
+  });
+
+  it('is about 1.3 times the bullet-fact text when that is less, with fewer bullets to match', () => {
+    const thin = [
+      fact('experience', 100, 1),
+      fact('metric', 120, 2),
+      fact('achievement', 80, 3),
+      fact('project', 100, 4),
+    ];
+    // 400 characters of bullet facts: 520, rounded to 500.
+    const target = lengthTarget(thin);
+    expect(target.chars).toBe(500);
+    expect(target.chars).toBeLessThan(CV_BULLET_BUDGET.chars);
+    expect(target.bullets.max).toBeLessThan(CV_BULLET_BUDGET.bullets.max);
+    expect(target.bullets.max).toBeGreaterThanOrEqual(2);
+    expect(target.bullets.min).toBeGreaterThanOrEqual(1);
+    expect(target.bullets.max - target.bullets.min).toBeLessThanOrEqual(3);
+  });
+
+  it('counts only the types a bullet can rest on', () => {
+    const noise = [fact('skill', 5000, 1), fact('education', 5000, 2), fact('constraint', 5000, 3)];
+    const bullets = [fact('experience', 100, 4)];
+    expect(lengthTarget([...noise, ...bullets])).toEqual(lengthTarget(bullets));
+    expect(lengthTarget(bullets).chars).toBe(100);
+  });
+
+  it('never asks for fewer than 2 bullets or 100 characters, even with no bullet facts', () => {
+    const target = lengthTarget([]);
+    expect(target.chars).toBe(100);
+    expect(target.bullets.max).toBe(2);
+    expect(target.bullets.min).toBe(1);
+  });
+
+  it('writes the profile’s target in the prompt, not the layout’s, for a thin profile', () => {
+    const thin = [fact('experience', 100, 1), fact('metric', 120, 2)];
+    const system = cvSystem(thin, new Map(thin.map((f, i) => [f.id, `F${String(i + 1)}`])));
+    const { bullets, chars } = lengthTarget(thin);
+    expect(system).toContain(`Write ${String(bullets.min)} to ${String(bullets.max)} bullets`);
+    expect(system).toContain(`about ${String(chars)} characters of bullets`);
+    expect(system).not.toContain(`about ${String(CV_BULLET_BUDGET.chars)} characters of bullets`);
   });
 });
