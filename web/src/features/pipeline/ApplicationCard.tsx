@@ -351,7 +351,7 @@ function Ready({
       current = false;
     };
   }, [application.jobId, cvId]);
-  const scores = loaded?.cvId === cvId ? loaded.scores : undefined;
+  const scores = loaded && loaded.cvId === cvId ? loaded.scores : undefined;
 
   async function download(file: (typeof FILES)[number]) {
     if (!cvId) return;
