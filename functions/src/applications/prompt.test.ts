@@ -167,8 +167,41 @@ describe('cvSystem voice and length', () => {
     for (const rule of [1, 2, 3, 4, 5, 6, 7]) expect(system).toContain(`\n${String(rule)}. `);
   });
 
+  it('limits the cover note to figures its own paragraph cites, and none from the posting', () => {
+    const system = cvSystem(
+      PLENTY,
+      new Map(PLENTY.map((fact, i) => [fact.id, `F${String(i + 1)}`])),
+    );
+    expect(system).toContain(
+      'A number in the cover note must appear in a fact that same paragraph cites.',
+    );
+    expect(system).toContain(
+      'Never repeat numbers or terms from the posting (days in the office, a first-30-days plan, a team size, a salary)',
+    );
+  });
+
+  it('makes every skill cite a skill fact, else leave it out', () => {
+    const system = cvSystem(
+      PLENTY,
+      new Map(PLENTY.map((fact, i) => [fact.id, `F${String(i + 1)}`])),
+    );
+    expect(system).toContain('each citing a skill fact; with no skill fact for it, leave it out.');
+    expect(system).toContain(
+      '5. Skills: every skill cites a skill fact; if there is none for it, leave it out.',
+    );
+  });
+
+  it('tells the retry about the skill and the cover-note figure', () => {
+    expect(cvUser({ job: JOB, issues: ['uncited'] })).toContain(
+      'a skill with no skill fact is left out',
+    );
+    expect(cvUser({ job: JOB, issues: ['unsupported_number'] })).toContain(
+      'in the cover note, a figure must be in a fact that same paragraph cites, and none from the posting',
+    );
+  });
+
   it('bumps the version', () => {
-    expect(CV_PROMPT_VERSION).toBe('cv-2026-10-18b');
+    expect(CV_PROMPT_VERSION).toBe('cv-2026-10-18c');
   });
 });
 
