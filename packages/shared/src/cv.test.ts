@@ -1533,6 +1533,10 @@ describe('scrubDashes', () => {
     scrubDashes({ ...validCv(), summary: { text, factRefs: ['F1'] } });
   const text = (value: string) => scrub(value).content.summary.text;
 
+  it('writes a spaced dash between two figures as a hyphen, so a range stays a range', () => {
+    expect(text('Trained teams of 10 \u2013 15 people')).toBe('Trained teams of 10-15 people');
+  });
+
   it('turns a spaced em or en dash into a comma and an unspaced one into a hyphen', () => {
     expect(text('Built dashboards \u2014 and trained users')).toBe(
       'Built dashboards, and trained users',
