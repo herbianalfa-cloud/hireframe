@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { CV_CRITERIA, type CvQuality } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
-import { APPLICATIONS, DEFAULT_FX_USD_TO_GBP } from '../config.js';
+import { DEFAULT_FX_USD_TO_GBP } from '../config.js';
 import { fakeTransport } from '../llm/fake-transport.js';
 import type { LlmCallDeps } from '../llm/call.js';
 import type { LlmRequest, LlmTransport } from '../llm/transport.js';
@@ -231,26 +231,28 @@ describe('a revision with no recording', () => {
 
   it('rejects with RecordingMissingError instead of shipping the draft as a skip', async () => {
     // Every answer but the revision's is the fake model's, as a replay map missing only cvRevise.
+    // The write carries a contrast, a hard finding, so the draft always asks for a revision.
     const fake = transport();
     const replay: LlmTransport = {
       countTokens: (request) => fake.countTokens(request),
-      send: (request) =>
-        request.purpose === 'cvRevise'
-          ? Promise.reject(new RecordingMissingError('no recording for cvRevise'))
-          : fake.send(request),
+      send: async (request) => {
+        if (request.purpose === 'cvRevise') {
+          throw new RecordingMissingError('no recording for cvRevise');
+        }
+        const answer = await fake.send(request);
+        if (request.purpose !== 'cvWrite') return answer;
+        const written = JSON.parse(answer.text ?? '{}') as {
+          experience: { bullets: { text: string }[] }[];
+        };
+        const bullet = written.experience[0]?.bullets[0];
+        if (bullet) bullet.text = 'Not just ran onboarding, but also wrote the setup guides.';
+        return { ...answer, text: JSON.stringify(written) };
+      },
     };
-    // A target no draft reaches, so the first draft asks for a revision.
-    const config = APPLICATIONS as { scoreTarget: number };
-    const was = config.scoreTarget;
-    config.scoreTarget = 10.5;
-    try {
-      await expect(evaluateCvCase(first, golden, deps(replay))).rejects.toBeInstanceOf(
-        RecordingMissingError,
-      );
-      expect(fake.purposes).not.toContain('cvJudge');
-    } finally {
-      config.scoreTarget = was;
-    }
+    await expect(evaluateCvCase(first, golden, deps(replay))).rejects.toBeInstanceOf(
+      RecordingMissingError,
+    );
+    expect(fake.purposes).not.toContain('cvJudge');
   });
 });
 
