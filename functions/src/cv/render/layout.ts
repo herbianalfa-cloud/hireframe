@@ -1,5 +1,6 @@
 import {
   factEndKey,
+  formatEducationDates,
   formatFactDates,
   isPrintable,
   type CvHeader,
@@ -188,8 +189,11 @@ export interface DatedFact {
   dates: FactContent['dates'];
 }
 
-/** Dates for a citation (`F3`), from the cited fact and never from model text. */
-export type DateOf = (factRef: string) => string;
+/**
+ * Dates for a citation (`F3`), from the cited fact and never from model text. An education line
+ * asks with `'education'` and gets the year only.
+ */
+export type DateOf = (factRef: string, section?: 'education') => string;
 
 /** `aliases` is alias → fact ID, as stored on the `cvs` doc. */
 export function makeDateOf(
@@ -197,10 +201,23 @@ export function makeDateOf(
   facts: readonly DatedFact[],
 ): DateOf {
   const byId = new Map(facts.map((fact) => [fact.id, fact]));
-  return (factRef) => {
+  return (factRef, section) => {
     const id = aliases.get(factRef);
     const fact = id === undefined ? undefined : byId.get(id);
-    return fact === undefined ? '' : formatFactDates(fact.dates);
+    if (fact === undefined) return '';
+    return section === 'education' ? formatEducationDates(fact.dates) : formatFactDates(fact.dates);
+  };
+}
+
+/** Whether a citation's fact has an end date (`orderEntries` puts those education lines first). */
+export function makeHasEndOf(
+  aliases: ReadonlyMap<string, string>,
+  facts: readonly DatedFact[],
+): (factRef: string) => boolean {
+  const byId = new Map(facts.map((fact) => [fact.id, fact]));
+  return (factRef) => {
+    const id = aliases.get(factRef);
+    return id !== undefined && byId.get(id)?.dates.end !== undefined;
   };
 }
 
@@ -233,14 +250,14 @@ function headerBlocks(header: CvHeader): Block[] {
   return [block('name', header.name, true), block('contact', contact.join(CONTACT_SEPARATOR))];
 }
 
-/** "**Role**, Org" on one line, with the dates to the right. */
+/** "**Role**, Org" on one line, with the dates to the right. A project may have no org. */
 function entryBlock(role: string, org: string, dates: string): Block {
   const made: Block = {
     kind: 'entry',
-    text: `${role}, ${org}`,
+    text: org === '' ? role : `${role}, ${org}`,
     runs: [
       { text: role, bold: true },
-      { text: `, ${org}`, bold: false },
+      ...(org === '' ? [] : [{ text: `, ${org}`, bold: false }]),
     ],
   };
   if (dates !== '') made.dates = dates;
@@ -276,7 +293,7 @@ export function cvBlocks(header: CvHeader, content: TrimmedCvContent, dateOf: Da
         if (content.education.length > 0) {
           section(title);
           for (const line of content.education) {
-            blocks.push(block('education', line.line, false, dateOf(line.factRef)));
+            blocks.push(block('education', line.line, false, dateOf(line.factRef, 'education')));
           }
         }
         break;

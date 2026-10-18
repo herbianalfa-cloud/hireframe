@@ -41,7 +41,11 @@ export function judgeText(content: TrimmedCvContent): string {
     if (entries.length === 0) continue;
     lines.push(title);
     for (const entry of entries) {
-      lines.push(`${entry.heading.role}, ${entry.heading.org}`);
+      lines.push(
+        entry.heading.org === ''
+          ? entry.heading.role
+          : `${entry.heading.role}, ${entry.heading.org}`,
+      );
       for (const bullet of entry.bullets) lines.push(`- ${bullet.text}`);
     }
   }

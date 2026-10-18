@@ -40,6 +40,8 @@ export const CV_LIMITS = {
 export const EXPERIENCE_HEADING_FACT_TYPES: readonly Fact['type'][] = ['experience'];
 export const PROJECT_HEADING_FACT_TYPES: readonly Fact['type'][] = ['project', 'experience'];
 export const EDUCATION_FACT_TYPES: readonly Fact['type'][] = ['education'];
+/** The one other fact an education line may cite: its classification ("First Class Honours"). */
+export const EDUCATION_ACHIEVEMENT_FACT_TYPES: readonly Fact['type'][] = ['achievement'];
 export const SKILL_FACT_TYPES: readonly Fact['type'][] = ['skill'];
 
 /**
@@ -68,12 +70,15 @@ function contentSchema(strict: boolean) {
     strict ? z.array(item).min(min).max(max) : z.array(item).max(max * 4);
 
   const cited = (max: number) => z.strictObject({ text: text(max), factRefs: refs });
-  const entry = (maxEntries: number) =>
+  /** A project may have no organisation ("" is a real answer); an experience entry may not. */
+  const org = (optional: boolean) =>
+    strict && optional ? z.string().trim().max(CV_LIMITS.org) : text(CV_LIMITS.org);
+  const entry = (maxEntries: number, optionalOrg: boolean) =>
     list(
       z.strictObject({
         heading: z.strictObject({
           role: text(CV_LIMITS.role),
-          org: text(CV_LIMITS.org),
+          org: org(optionalOrg),
           factRef: ref,
         }),
         bullets: list(cited(CV_LIMITS.bullet), 0, CV_LIMITS.bulletsPerEntry),
@@ -84,10 +89,15 @@ function contentSchema(strict: boolean) {
 
   return z.strictObject({
     summary: cited(CV_LIMITS.summary),
-    experience: entry(CV_LIMITS.experienceEntries),
-    projects: entry(CV_LIMITS.projectEntries),
+    experience: entry(CV_LIMITS.experienceEntries, false),
+    projects: entry(CV_LIMITS.projectEntries, true),
     education: list(
-      z.strictObject({ line: text(CV_LIMITS.educationLine), factRef: ref }),
+      z.strictObject({
+        line: text(CV_LIMITS.educationLine),
+        factRef: ref,
+        /** An achievement fact the line may borrow its classification from ("First Class Honours"). */
+        achievementRef: ref.exactOptional(),
+      }),
       0,
       CV_LIMITS.educationEntries,
     ),
@@ -168,6 +178,8 @@ export const REVISION_SKIPPED = [
   'cap',
   'error',
   'output',
+  /** The revision came back but did not validate (its issue codes are logged). */
+  'invalid',
   'not_fixable',
   'attempts',
 ] as const;
@@ -245,6 +257,17 @@ export function formatFactDates(dates: FactContent['dates']): string {
   if (start !== undefined) return `${formatPartialDate(start)} – Present`;
   if (end !== undefined) return end === 'present' ? 'Present' : formatPartialDate(end);
   return '';
+}
+
+/**
+ * An education line's date: the year only, of the end (a graduation year) or, with no end, the
+ * start (a certificate). Never "2021 – Present"; a course still running says "Present".
+ */
+export function formatEducationDates(dates: FactContent['dates']): string {
+  const { start, end } = dates;
+  const year = (value: string): string => value.split('-')[0] ?? value;
+  if (end !== undefined) return end === 'present' ? 'Present' : year(end);
+  return start === undefined ? '' : year(start);
 }
 
 // ---- Characters the PDF can print ----
@@ -536,10 +559,12 @@ interface Cite {
   /** Fact types that may never be cited here. */
   denied: readonly Fact['type'][];
   /** Model texts under this citation, each with its path (length limits are reported per text). */
-  texts: { path: string; value: string; max: number }[];
+  texts: { path: string; value: string; max: number; allowEmpty?: boolean }[];
   refs: readonly string[];
   /** Fact types the cited facts must have; `undefined` for any. */
   types?: readonly Fact['type'][];
+  /** Fact types for the ref at the same index, where the refs are not alike (an education line). */
+  typesByRef?: readonly (readonly Fact['type'][])[];
 }
 
 function cites(content: CvContent): Cite[] {
@@ -558,7 +583,12 @@ function cites(content: CvContent): Cite[] {
         path: `${base}.heading`,
         texts: [
           { path: `${base}.heading.role`, value: entry.heading.role, max: CV_LIMITS.role },
-          { path: `${base}.heading.org`, value: entry.heading.org, max: CV_LIMITS.org },
+          {
+            path: `${base}.heading.org`,
+            value: entry.heading.org,
+            max: CV_LIMITS.org,
+            allowEmpty: section === 'projects',
+          },
         ],
         refs: entry.heading.factRef === '' ? [] : [entry.heading.factRef],
         types:
@@ -581,11 +611,13 @@ function cites(content: CvContent): Cite[] {
   entries('projects');
   content.education.forEach((entry, i) => {
     const path = `education[${String(i)}]`;
+    const achievement = entry.achievementRef ?? '';
     out.push({
       path,
       texts: [{ path, value: entry.line, max: CV_LIMITS.educationLine }],
-      refs: entry.factRef === '' ? [] : [entry.factRef],
-      types: EDUCATION_FACT_TYPES,
+      refs: entry.factRef === '' ? [] : [entry.factRef, ...(achievement === '' ? [] : [achievement])],
+      // The line's own fact first, then at most one achievement for the classification.
+      typesByRef: [EDUCATION_FACT_TYPES, EDUCATION_ACHIEVEMENT_FACT_TYPES],
       words: 'fact',
       denied: NOT_IN_ENTRIES,
     });
@@ -768,25 +800,29 @@ export function validateCv(
 
     // Distinct refs only: the work below is per fact, not per mention.
     const cited: CvFact[] = [];
-    for (const ref of new Set(cite.refs)) {
+    const seen = new Set<string>();
+    cite.refs.forEach((ref, index) => {
+      if (seen.has(ref)) return;
+      seen.add(ref);
       const id = aliases.get(ref);
       const fact = id === undefined ? undefined : byId.get(id);
       if (fact?.status !== 'active') {
         add(cite.path, 'unknown_fact');
-        continue;
+        return;
       }
+      const types = cite.typesByRef?.[index] ?? cite.types;
       const wrongType =
-        cite.denied.includes(fact.type) ||
-        (cite.types !== undefined && !cite.types.includes(fact.type));
+        cite.denied.includes(fact.type) || (types !== undefined && !types.includes(fact.type));
       if (wrongType) add(cite.path, 'wrong_fact_type');
       if (!cited.includes(fact)) cited.push(fact);
-    }
+    });
     const citedReads = cited.map(readsOf);
 
     // Contact allowance: the cited facts' text only, tokenised once for every text under the cite.
     const allowance = contactAllowance(cited.map((fact) => fact.text).join('\n'));
     for (const text of cite.texts) {
-      if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
+      const empty = text.value.trim() === '' && text.allowEmpty !== true;
+      if (text.value.length > text.max || empty) add(text.path, 'too_long');
       if (hasContactDetails(text.value, allowance)) add(text.path, 'contact_in_text');
       // NFC first: "e" + a combining accent is the é the font has, written the long way.
       // Never dropped or swapped silently: the PDF fonts can't print it (ADR-054).
@@ -852,32 +888,76 @@ export function factEndKey(dates: FactContent['dates'] | undefined): string {
 }
 
 /**
- * `content` with experience, projects and education newest first, by the end date of the heading
- * fact each entry cites (`endKeyOf(factRef)`, e.g. through `factEndKey`). Ties keep the model's
- * order, so the model's relevance order survives among equal dates. Bullets are the model's.
- * Does not mutate.
+ * `content` with experience, projects and education ordered by the heading fact each entry cites
+ * (`endKeyOf(factRef)`, e.g. through `factEndKey`). Ties keep the model's order, so the model's
+ * relevance order survives among equal dates. Bullets are the model's. Does not mutate.
+ *   - Experience and projects: newest first; no end date counts as Present.
+ *   - Education: lines with an end date first, newest first; lines with no end date or only a
+ *     start date after them, in the model's order. `hasEndOf` says which (all do when omitted).
  */
 export function orderEntries<T extends CvContent | TrimmedCvContent>(
   content: T,
   endKeyOf: (factRef: string) => string,
+  hasEndOf: (factRef: string) => boolean = () => true,
 ): T {
-  const newestFirst = <E>(list: readonly E[], refOf: (item: E) => string): E[] =>
+  const newestFirst = <E>(
+    list: readonly E[],
+    refOf: (item: E) => string,
+    dated: (item: E) => boolean = () => true,
+  ): E[] =>
     list
-      .map((item, index) => ({ item, index, key: endKeyOf(refOf(item)) }))
-      .sort((x, y) => (x.key === y.key ? x.index - y.index : x.key < y.key ? 1 : -1))
+      .map((item, index) => ({ item, index, key: endKeyOf(refOf(item)), dated: dated(item) }))
+      .sort((x, y) => {
+        if (x.dated !== y.dated) return x.dated ? -1 : 1;
+        if (!x.dated || x.key === y.key) return x.index - y.index;
+        return x.key < y.key ? 1 : -1;
+      })
       .map(({ item }) => item);
   return {
     ...content,
     experience: newestFirst(content.experience, (entry) => entry.heading.factRef),
     projects: newestFirst(content.projects, (entry) => entry.heading.factRef),
-    education: newestFirst(content.education, (line) => line.factRef),
+    education: newestFirst(
+      content.education,
+      (line) => line.factRef,
+      (line) => hasEndOf(line.factRef),
+    ),
+  };
+}
+
+// ---- Count limits ----
+
+/**
+ * `content` cut down to the count limits: entries per section, bullets per entry, education
+ * lines, skills and note paragraphs. It only ever removes items, from the end (the model puts
+ * the most relevant first), so it can't add a claim. Run it on every model output before
+ * `validateCv`: a revision that adds a sixth bullet to an entry then loses that bullet instead
+ * of the whole revision. Texts, citations and counts below the limits are left alone. Does not
+ * mutate.
+ */
+export function clampCvCounts<T extends CvContent | TrimmedCvContent>(content: T): T {
+  const entries = (list: T['experience'], max: number): T['experience'] =>
+    list.slice(0, max).map((entry) => ({
+      ...entry,
+      bullets: entry.bullets.slice(0, CV_LIMITS.bulletsPerEntry),
+    }));
+  return {
+    ...content,
+    experience: entries(content.experience, CV_LIMITS.experienceEntries),
+    projects: entries(content.projects, CV_LIMITS.projectEntries),
+    education: content.education.slice(0, CV_LIMITS.educationEntries),
+    skills: content.skills.slice(0, CV_LIMITS.skills),
+    coverNote: {
+      ...content.coverNote,
+      paragraphs: content.coverNote.paragraphs.slice(0, CV_LIMITS.noteParagraphsMax),
+    },
   };
 }
 
 // ---- Dashes ----
 
 /** Keys whose strings are citations, not prose. */
-const CITATION_KEYS: ReadonlySet<string> = new Set(['factRef', 'factRefs']);
+const CITATION_KEYS: ReadonlySet<string> = new Set(['factRef', 'factRefs', 'achievementRef']);
 
 /** An em or en dash, with the whitespace around it. */
 const DASH = /(\s*)([\u2013\u2014])(\s*)/g;

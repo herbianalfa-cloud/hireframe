@@ -21,7 +21,9 @@ import {
   cvBlocks,
   layoutBlocks,
   lineText,
+  makeDateOf,
   makeEndKeyOf,
+  makeHasEndOf,
   resolveStyles,
   spreadSpec,
   toTwip,
@@ -165,6 +167,34 @@ describe('cvBlocks', () => {
     expect(skills?.text).toBe('SQL, Python');
   });
 
+  it('writes a project with no organisation as the bold role alone, with no trailing comma', () => {
+    const cv = applyTrim(validCv(), 0);
+    const project = cv.projects[0];
+    if (project === undefined) throw new Error('no project');
+    const blocks = cvBlocks(
+      FAKE_HEADER,
+      { ...cv, projects: [{ ...project, heading: { ...project.heading, org: '' } }] },
+      fakeDateOf,
+    );
+    const entry = blocks.filter((block) => block.kind === 'entry')[1];
+    expect(entry?.runs).toEqual([{ text: 'Analysis project', bold: true }]);
+    expect(entry?.text).toBe('Analysis project');
+  });
+
+  it('dates an education line by its year only, and an entry by its range', () => {
+    const facts = [
+      { id: 'fact-scrum', dates: { start: '2021', end: '2024' } },
+      { id: 'fact-intern', dates: { start: '2023-10' } },
+    ];
+    const dateOf = makeDateOf(CV_ALIASES, facts);
+    const blocks = cvBlocks(FAKE_HEADER, applyTrim(validCv(), 0), dateOf);
+    expect(blocks.find((block) => block.kind === 'education')?.dates).toBe('2024');
+    expect(blocks.find((block) => block.kind === 'entry')?.dates).toBe('Oct 2023 – Present');
+    const startOnly = makeDateOf(CV_ALIASES, [{ id: 'fact-scrum', dates: { start: '2023-05' } }]);
+    expect(startOnly(aliasOf('fact-scrum'), 'education')).toBe('2023');
+    expect(startOnly(aliasOf('fact-scrum'))).toBe('May 2023 – Present');
+  });
+
   it('keeps the dates off a block that has none', () => {
     const blocks = cvBlocks(FAKE_HEADER, applyTrim(validCv(), 0), () => '');
     expect(blocks.some((block) => block.dates !== undefined)).toBe(false);
@@ -275,6 +305,20 @@ describe('layoutBlocks', () => {
     const { blockLines } = layoutBlocks(blocks, measure, styles);
     expect(blockLines).toHaveLength(blocks.length);
     expect(blockLines.every((n) => n >= 1)).toBe(true);
+  });
+});
+
+describe('makeHasEndOf', () => {
+  it('is true only for a fact with an end date', () => {
+    const hasEnd = makeHasEndOf(CV_ALIASES, [
+      ...FAKE_DATES,
+      { id: 'fact-clients', dates: { start: '2024' } },
+    ]);
+    expect(hasEnd(aliasOf('fact-intern'))).toBe(true);
+    expect(hasEnd(aliasOf('fact-scrum'))).toBe(true);
+    expect(hasEnd(aliasOf('fact-clients'))).toBe(false);
+    expect(hasEnd(aliasOf('fact-sql'))).toBe(false);
+    expect(hasEnd('F999')).toBe(false);
   });
 });
 
