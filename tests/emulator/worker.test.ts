@@ -4,7 +4,8 @@
  * the real store, the real renderer and the four Storage objects; a schema-valid `cvs` doc at the
  * path the owner-read rule covers (tests/rules); one `application_stage` event per move; the
  * spend recorded under `cvWrite` with an `application-` reservation; and that two overlapping
- * runs make one model call between them (the attempt precondition).
+ * runs never both call the model (the attempt precondition). The fake CV is revised once, so a
+ * job costs a write and a revision.
  */
 import {
   AppConfigSchema,
@@ -166,16 +167,17 @@ const config = AppConfigSchema.parse({
 });
 
 /** The fake transport with a count of the requests that reached "the API". */
-function countingTransport(): LlmTransport & { sends: () => number } {
+function countingTransport(): LlmTransport & { sends: () => number; purposes: string[] } {
   const inner = fakeTransport();
-  let sends = 0;
+  const purposes: string[] = [];
   return {
     countTokens: (request) => inner.countTokens(request),
     send(request) {
-      sends += 1;
+      purposes.push(request.purpose);
       return inner.send(request);
     },
-    sends: () => sends,
+    sends: () => purposes.length,
+    purposes,
   };
 }
 
@@ -235,12 +237,14 @@ describe('the CV worker on the emulator', () => {
     const transport = countingTransport();
     const summary = await runCvWorker(workerDeps(transport));
     expect(summary).toMatchObject({ read: 1, ready: 1, stoppedBy: null });
-    expect(transport.sends()).toBe(1);
+    // The fake CV scores under 8 with something to fix, so it is revised once; the fake model
+    // answers the revision with the draft, which ships. Each call was counted first.
+    expect(transport.purposes).toEqual(['cvWrite', 'cvRevise']);
 
     const stored = await application();
     expect(stored).toMatchObject({
       stage: 'ready',
-      attempt: 1,
+      attempt: 2,
       cvIds: [`${JOB_ID}-v1`],
       currentCvId: `${JOB_ID}-v1`,
     });
@@ -282,7 +286,7 @@ describe('the CV worker on the emulator', () => {
     expect(usage.reservations).toEqual({});
   });
 
-  it('makes one model call when two runs overlap: the attempt count is a precondition', async () => {
+  it('makes calls from one run only when two overlap: the attempt count is a precondition', async () => {
     await startGenerating();
     const a = countingTransport();
     const b = countingTransport();
@@ -292,12 +296,13 @@ describe('the CV worker on the emulator', () => {
       runCvWorker(workerDepsAfter(a, arrive)),
       runCvWorker(workerDepsAfter(b, arrive)),
     ]);
-    expect(a.sends() + b.sends()).toBe(1);
+    // One run wins the count and makes both calls (write, then revision); the other makes none.
+    expect([a.sends(), b.sends()].sort()).toEqual([0, 2]);
     expect(results.map((r) => r.read)).toEqual([1, 1]);
     expect(results.reduce((sum, r) => sum + r.ready, 0)).toBe(1);
     expect(results.reduce((sum, r) => sum + r.lost, 0)).toBe(1);
     expect((await application()).stage).toBe('ready');
-    expect((await application()).attempt).toBe(1);
+    expect((await application()).attempt).toBe(2);
   });
 
   it('blocks a job with no header without a call or a count', async () => {
