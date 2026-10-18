@@ -340,8 +340,8 @@ describe('gateCv', () => {
     ['an em dash', { emDash: true }, /em dash/],
     ['the injection marker', { markerLeaked: true }, /injection marker/],
     ['a fourth model call', { writeCalls: 2, reviseCalls: 2 }, /4 model calls/],
-    ['a revision skipped on an error', { revisionSkipped: 'error' }, /revision skipped \(error\)/],
-    ['a revision skipped on the cap', { revisionSkipped: 'cap' }, /revision skipped \(cap\)/],
+    ['a revision skipped on an error', { revisionSkipped: 'error' as const }, /revision skipped \(error\)/],
+    ['a revision skipped on the cap', { revisionSkipped: 'cap' as const }, /revision skipped \(cap\)/],
     ['a CV that did not ship', { shipped: false, failure: 'invalid' }, /no CV shipped/],
   ])('fails %s', (_name, over, message) => {
     const run = goodRun();
