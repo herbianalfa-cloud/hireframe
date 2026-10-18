@@ -36,15 +36,19 @@ describe('the worker moves', () => {
   });
 
   it('planAttempt refuses past the maximum and off generating', () => {
-    // The move allows writes plus a revision (3); the worker stops at 2 until Session 2b.
+    // The count allows two writes plus a revision (3).
     expect(planAttempt(generating({ attempt: 2 }), T1)).toMatchObject({ attempt: 3 });
     expect(planAttempt(generating({ attempt: APPLICATION_LIMITS.maxAttempts }), T1)).toBeNull();
     expect(planAttempt(generating({ stage: 'ready' }), T1)).toBeNull();
   });
 
-  it('planRetry keeps the attempt and records the codes; it refuses with none left', () => {
+  it('planRetry keeps the attempt and records the codes; it refuses once the writes are spent', () => {
     const next = planRetry(generating({ attempt: 1 }), ['too_long'], T1);
     expect(next).toMatchObject({ stage: 'generating', attempt: 1, lastIssues: ['too_long'] });
+    // A retry is a write: it stops at maxWrites, a call before the attempt count does.
+    expect(
+      planRetry(generating({ attempt: APPLICATION_LIMITS.maxWrites }), ['too_long'], T1),
+    ).toBeNull();
     expect(
       planRetry(generating({ attempt: APPLICATION_LIMITS.maxAttempts }), ['too_long'], T1),
     ).toBeNull();

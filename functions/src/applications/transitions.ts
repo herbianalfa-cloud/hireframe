@@ -245,15 +245,16 @@ export function planAttempt(current: Application, now: Date): Application | null
 }
 
 /**
- * An invalid output with an attempt left: stays generating, with the codes the next call is told.
- * `attempt` stays as counted, so the next run's call is the second and the last.
+ * An invalid output with a write left: stays generating, with the codes the next call is told.
+ * `attempt` stays as counted, so the next run's call is the second write and the last. A revision
+ * is never retried: only a write is, so this is bounded by `maxWrites`, not `maxAttempts`.
  */
 export function planRetry(
   current: Application,
   issues: readonly CvIssueCode[],
   now: Date,
 ): Application | null {
-  if (!generating(current) || current.attempt >= APPLICATION_LIMITS.maxAttempts) return null;
+  if (!generating(current) || current.attempt >= APPLICATION_LIMITS.maxWrites) return null;
   const next: Application = { ...current, updatedAt: now };
   if (issues.length > 0) next.lastIssues = [...issues];
   else delete next.lastIssues;
