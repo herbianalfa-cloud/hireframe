@@ -1,4 +1,4 @@
-import type { Application } from '@hireframe/shared';
+import { APPLICATION_LIMITS, type Application } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -36,14 +36,18 @@ describe('the worker moves', () => {
   });
 
   it('planAttempt refuses past the maximum and off generating', () => {
-    expect(planAttempt(generating({ attempt: 2 }), T1)).toBeNull();
+    // The move allows writes plus a revision (3); the worker stops at 2 until Session 2b.
+    expect(planAttempt(generating({ attempt: 2 }), T1)).toMatchObject({ attempt: 3 });
+    expect(planAttempt(generating({ attempt: APPLICATION_LIMITS.maxAttempts }), T1)).toBeNull();
     expect(planAttempt(generating({ stage: 'ready' }), T1)).toBeNull();
   });
 
   it('planRetry keeps the attempt and records the codes; it refuses with none left', () => {
     const next = planRetry(generating({ attempt: 1 }), ['too_long'], T1);
     expect(next).toMatchObject({ stage: 'generating', attempt: 1, lastIssues: ['too_long'] });
-    expect(planRetry(generating({ attempt: 2 }), ['too_long'], T1)).toBeNull();
+    expect(
+      planRetry(generating({ attempt: APPLICATION_LIMITS.maxAttempts }), ['too_long'], T1),
+    ).toBeNull();
     const cleared = planRetry(generating({ attempt: 1, lastIssues: ['uncited'] }), [], T1);
     expect(cleared?.lastIssues).toBeUndefined();
   });
@@ -90,10 +94,12 @@ describe('the worker moves', () => {
       headerExists: true,
       now: T1,
     };
-    const spent = generating({ attempt: 2 });
+    const spent = generating({ attempt: APPLICATION_LIMITS.maxAttempts });
     expect(planAttempt(spent, T1)).toBeNull();
     // The worker's own moves keep the counter...
-    expect(planBlocked(spent, 'attempts_exhausted', T1)?.attempt).toBe(2);
+    expect(planBlocked(spent, 'attempts_exhausted', T1)?.attempt).toBe(
+      APPLICATION_LIMITS.maxAttempts,
+    );
     // ...and the owner's moves from the places it ends up put it back.
     const blocked = planBlocked(spent, 'attempts_exhausted', T1);
     expect(blocked && planStart('job-1', blocked, known, 'retry')?.attempt).toBe(0);
