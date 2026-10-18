@@ -438,8 +438,9 @@ describe('fitPage fills the page', () => {
   });
 
   it('takes the bigger body size when it fits, with fewer cuts before a bigger font', async () => {
+    expect(BODY_SIZES).toEqual([11, 10.5, 10]);
     const fit = await fitPage(FAKE_HEADER, fullCv(), fakeDateOf);
-    expect(fit.ok && fit.spec.bodySize).toBe(10.5);
+    expect(fit.ok && fit.spec.bodySize).toBe(11);
     const dense = await fitPage(FAKE_HEADER, maxCv(), fakeDateOf);
     if (!dense.ok) throw new Error('did not fit');
     // Cuts come first: at the size ladder's bottom rung only when 10.5 needs more cuts.
