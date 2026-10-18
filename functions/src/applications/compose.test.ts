@@ -1,5 +1,5 @@
 import { CvContentShapeSchema, type CvContent, type ExistingFact } from '@hireframe/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 
 import {
   aliasOf,
@@ -20,6 +20,7 @@ import {
   type ComposeRenderer,
   type ComposeResult,
 } from './compose.js';
+import { setLogSink } from '../log.js';
 import type { JobForCv } from './store.js';
 
 const a = aliasOf;
@@ -272,13 +273,22 @@ describe('composeCv: before the loop', () => {
     expect(p.revisions).toEqual([]);
   });
 
-  it('refuses a draft over the limits as too_long', async () => {
+  it('clamps a draft over the count limits instead of refusing it', async () => {
     const long = goodCv();
-    at(long.experience, 0).bullets = Array.from({ length: 6 }, () => ({
-      text: 'Led onboarding for 12 clients.',
+    at(long.experience, 0).bullets = Array.from({ length: 6 }, (_, i) => ({
+      text: `Led onboarding for 12 clients, part ${'abcdef'[i] ?? ''}.`,
       factRefs: [a('fact-clients')],
     }));
     expect(CvContentShapeSchema.safeParse(long).success).toBe(true);
+    const { shipped } = composed(await composeCv(probe().deps, input(long)));
+    expect(at(shipped.cited.experience, 0).bullets).toHaveLength(5);
+    // The sixth went, the first five stayed in the model's order.
+    expect(at(at(shipped.cited.experience, 0).bullets, 4).text).toContain('part e');
+  });
+
+  it('still refuses a draft that is too long in its text', async () => {
+    const long = goodCv();
+    at(at(long.experience, 0).bullets, 0).text = `Led onboarding. ${'x'.repeat(230)}`;
     const result = await composeCv(probe().deps, input(long));
     expect(result).toEqual({ kind: 'invalid', issues: ['too_long'] });
   });
@@ -470,11 +480,20 @@ describe('composeCv: choosing between the candidates', () => {
   });
 
   it('drops an invalid revision and ships the draft, saying why', async () => {
+    const logs: Record<string, unknown>[] = [];
+    setLogSink((_level, event, fields) => logs.push({ event, ...fields }));
+    onTestFinished(() => {
+      setLogSink();
+    });
     const bad = withBullet(goodCv(), 'Saved 99% of costs for clients.');
     const { shipped } = composed(
       await composeCv(probe(() => bad).deps, input(withContrast(goodCv()))),
     );
-    expect(shipped.quality).toMatchObject({ revised: false, revisionSkipped: 'output' });
+    expect(shipped.quality).toMatchObject({ revised: false, revisionSkipped: 'invalid' });
+    expect(logs).toContainEqual({
+      event: 'cv_worker.revision_invalid',
+      issues: 'unsupported_number',
+    });
     expect(shipped.quality.draftTotal).toBeDefined();
     expect(shipped.cited).toEqual(withContrast(goodCv()));
   });

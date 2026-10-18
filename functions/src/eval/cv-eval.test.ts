@@ -187,6 +187,10 @@ describe('evaluateCvCase', () => {
     expect(result.writeCalls).toBe(2);
     expect(result.shipped).toBe(true);
     expect(result.writeCalls + result.reviseCalls).toBeLessThanOrEqual(3);
+    // The first write's codes, then an empty list for the write that validated.
+    expect(result.writeIssues).toEqual([['unknown_fact'], []]);
+    expect(result.draftHard).toBeTypeOf('number');
+    expect(result.draftSoft).toBeTypeOf('number');
   });
 
   it('reports a case that never validates, and stops after two writes', async () => {
@@ -195,6 +199,8 @@ describe('evaluateCvCase', () => {
     expect(result.failure).toMatch(/^invalid \(unknown_fact\)/);
     expect(result.writeCalls).toBe(2);
     expect(result.reviseCalls).toBe(0);
+    expect(result.writeIssues).toEqual([['unknown_fact'], ['unknown_fact']]);
+    expect(result.draftHard).toBeUndefined();
     expect(files).toBeUndefined();
   });
 
@@ -233,6 +239,9 @@ function result(id: string, total: number, over: Partial<CvCaseResult> = {}): Cv
     calls: 2,
     writeCalls: 1,
     reviseCalls: 0,
+    writeIssues: [[]],
+    draftHard: 0,
+    draftSoft: 1,
     costPence: 4,
     judgeCostPence: 1,
     tokens: { input: 10_000, output: 3_000, cacheRead: 0, cacheWrite: 0 },
@@ -348,6 +357,22 @@ describe('summariseCv and formatCvReport', () => {
     expect(text).toContain('c08');
     expect(text).toContain('7/8/7/6');
     expect(text).toMatch(/Judge means \(report only\)/);
+    expect(text).toContain('draft h/s');
+    expect(text).toContain('0/1');
+    expect(text).not.toContain('Writes that failed validation');
+  });
+
+  it('lists the issue codes of every write that failed validation, per case', () => {
+    const run = goodRun().map((r, i): CvCaseResult => {
+      if (i === 0) return { ...r, writeIssues: [['unsupported_text', 'wrong_fact_type'], []] };
+      if (i === 3) return { ...r, shipped: false, writeIssues: [['too_long'], ['uncited']] };
+      return r;
+    });
+    const text = formatCvReport(run);
+    expect(text).toContain('Writes that failed validation:');
+    expect(text).toContain('  c01: write 1 unsupported_text, wrong_fact_type; write 2 valid');
+    expect(text).toContain('  c04: write 1 too_long; write 2 uncited');
+    expect(text).not.toContain('c02: write');
   });
 });
 
