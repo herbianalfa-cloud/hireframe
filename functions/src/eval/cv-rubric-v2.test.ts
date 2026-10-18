@@ -12,17 +12,18 @@ import { memoryUsage } from './runtime.js';
 
 /**
  * Pins the rubric v2 totals of the committed CV recordings (CV quality review M4), so a later
- * rubric change shows up as a diff here. Replay only: no API key, no model call.
+ * rubric change shows up as a diff here. Re-pinned for the `cv-2026-10-19a` recordings (Fix B);
+ * c08 is a thin profile that now skips its revision as not_fixable (L2). Replay only: no API key, no model call.
  */
 const V2_TOTALS = {
-  c01: 9.0,
-  c02: 8.75,
-  c03: 9.25,
-  c04: 9.0,
-  c05: 8.38,
-  c06: 8.75,
-  c07: 9.25,
-  c08: 6.8,
+  c01: 9.75,
+  c02: 9.5,
+  c03: 9.75,
+  c04: 9.46,
+  c05: 9.89,
+  c06: 9.75,
+  c07: 9.5,
+  c08: 7.25,
 } as const;
 
 describe('rubric v2 over the committed recordings', () => {
@@ -43,7 +44,7 @@ describe('rubric v2 over the committed recordings', () => {
       const { result } = await evaluateCvCase(entry, golden, deps);
       totals[entry.id] = result.quality?.total ?? -1;
       expect(result.quality?.rubric).toBe('rubric-v2');
-      if (entry.profile === 'full') expect(result.reviseCalls).toBe(0);
+      expect(result.reviseCalls).toBe(0);
     }
     expect(totals).toEqual(V2_TOTALS);
   });
