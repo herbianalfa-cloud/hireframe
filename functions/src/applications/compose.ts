@@ -303,7 +303,6 @@ async function reviseAndShip(
   input: ComposeInput,
   draft: Candidate,
 ): Promise<Shipping> {
-
   const ship = (quality: Parameters<typeof qualityOf>[1], cost = input.writeCostPence) =>
     ({
       kind: 'composed',

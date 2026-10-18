@@ -255,10 +255,7 @@ function entryBlock(role: string, org: string, dates: string): Block {
   const made: Block = {
     kind: 'entry',
     text: org === '' ? role : `${role}, ${org}`,
-    runs: [
-      { text: role, bold: true },
-      ...(org === '' ? [] : [{ text: `, ${org}`, bold: false }]),
-    ],
+    runs: [{ text: role, bold: true }, ...(org === '' ? [] : [{ text: `, ${org}`, bold: false }])],
   };
   if (dates !== '') made.dates = dates;
   return made;
