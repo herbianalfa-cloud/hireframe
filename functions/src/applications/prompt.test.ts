@@ -167,7 +167,7 @@ describe('cvSystem voice and length', () => {
     for (const rule of [1, 2, 3, 4, 5, 6, 7]) expect(system).toContain(`\n${String(rule)}. `);
   });
 
-  it('limits the cover note to figures its own paragraph cites, and bans only the posting's logistics', () => {
+  it('limits the cover note to figures its own paragraph cites, and bans only posting logistics', () => {
     const system = cvSystem(
       PLENTY,
       new Map(PLENTY.map((fact, i) => [fact.id, `F${String(i + 1)}`])),
