@@ -99,14 +99,16 @@ function paragraph(item: Block, styles: Styles): Paragraph {
   return new Paragraph({
     ...base,
     ...(item.kind === 'section'
-      ? { border: {
+      ? {
+          border: {
             bottom: {
               style: BorderStyle.SINGLE,
               size: RULE_SIZE * 8,
               space: RULE_SPACE,
               color: BLACK,
             },
-          } }
+          },
+        }
       : {}),
     children: runs,
   });
