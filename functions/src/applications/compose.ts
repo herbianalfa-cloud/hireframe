@@ -372,9 +372,23 @@ async function reviseAndShip(
     raw = await deps.revise(cvReviseUser(request));
   } catch (error) {
     const failure = revisionFailure(error);
+    // The call can take minutes: the draft is checked again against the facts as they are now.
+    const fresh = await deps.facts();
+    const again = await prepare(deps, input, input.draft, fresh);
+    if (!again.ok) {
+      return {
+        kind: 'invalid',
+        issues: again.issues,
+        where: again.where,
+        skillsDropped: again.skillsDropped,
+      };
+    }
     return {
-      ...ship(
-        { revised: false, revisionSkipped: failure.skipped },
+      kind: 'composed',
+      shipped: shippedOf(
+        input,
+        again.candidate,
+        qualityOf(again.candidate, { revised: false, revisionSkipped: failure.skipped }),
         input.writeCostPence + failure.costPence,
       ),
       ...(failure.stop ? { stop: failure.stop } : {}),
