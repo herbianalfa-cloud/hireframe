@@ -2,6 +2,23 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [Unreleased]
+### Added
+- **CV quality** (ADR-062, ADR-063, ADR-064; plan `docs/plans/cv-quality-plan.md`; PR #42, **not to merge before v1.0.0**).
+  - **Layout v2:** `fitPage` replaces `fitOnePage` (measured fit-and-fill over body sizes 11, 10.5 and 10, spacing spread within caps, one PDF render, twip-identical PDF and DOCX specs). Black only, centred name and contact line, bold role with a regular organisation, entries newest first, order Summary, Education, Experience, Projects, Skills. `trimOrder` v2 trims the entry with the most bullets first. The PDF wraps 1.5% narrower than the DOCX, and an entry's dates sit on the title's last line.
+  - **Writing rules in code:** `scrubDashes`, `lintCv` (hard and soft findings that never hold text), prompt v2 (voice, length target from the layout, `(facts: F3, F7)` mapping), removal-only clamps and `dropUnsupportedSkills` before validation.
+  - **Quality score:** `scoreCv` (rubric v1, gate 8 with no hard finding), stored as `cvs/{cvId}.quality`, shown on the Ready card as "Quality n/10 · Luck n/10" with "Below target" findings in words.
+  - **One revision round:** `composeCv` writes, scores and revises once when a finding is fixable (`cvRevise`, `<draft_cv>`), re-validates both candidates against re-read facts and ships the best valid one. A job costs at most 3 model calls per owner move (was 2), kills included.
+  - **CV eval:** 8 fake cases, recorded answers, a gate in `npm run check`, a report-only judge (`cvJudge`), `--suite funnel|cv`. Three LIVE runs cost 46.7p, 30.4p and 27.9p; the last passed (7 of 7 at 8 or more, mean 9.77).
+  - **Docs:** ADR-062 to ADR-064, "Amended by" lines on ADR-053 and ADR-054, PRD R10, ARCHITECTURE, SECURITY, FUNNEL S4, RUNBOOK I7, `evals/README.md`, CLAUDE.md, ROADMAP.
+### Changed
+- `ApplicationSchema.attempt` is 0..3 and `lastIssueAt` is new (both optional-compatible); `APPLICATION_LIMITS` is the one source for `maxWrites` 2, `maxRevisions` 1 and `maxAttempts` 3.
+- Measured CV cost: a write about 2.5p to 3.1p and a revision about 3.0p (the plan estimated 4.3p and 4.6p). The reserved worst case per owner move is 26.8p (was 17.7p), so two worst-case moves fit under the 60p daily cap.
+- The cover note greeting is "Dear Hiring Team,".
+- A project's organisation may be empty. An education line cites `factRef` plus an optional `achievementRef`.
+### Not yet done
+- Opening one DOCX in Word and Google Docs (RUNBOOK I7), the Opus review rounds, and the rebase after PR #41.
+
 ## [0.9.1] - Unreleased
 ### Added
 - **M8 PR 8C1: billing kill switch, dry run** (ADR-059; plan `docs/plans/m8c-plan.md` §2).

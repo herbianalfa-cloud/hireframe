@@ -329,3 +329,5 @@ On approval: save this plan to `docs/plans/cv-quality-plan.md` on `feat/cv-quali
 - If it does not fit cleanly: do not build it. Park it in docs/ROADMAP.md parking lot and give the reason in handoff 2.
 
 **Added to Session 3: luck score on the Ready card.** Show "Quality 8.6/10 · Luck 7/10", with luck from the job's luckScore. A job without luckScore shows the quality only.
+
+**Thin-case gate (changed in Session 3a fix, handoff `cv-quality-handoff-3a-fix.md`, fix 12):** the thin-profile case now passes by shipping "a valid one-page CV within 3 calls", with no score or revision rule. The "must not spend a revision" rule in §4 no longer applies (ADR-064).
