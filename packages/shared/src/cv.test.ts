@@ -17,6 +17,9 @@ import {
   isWinAnsi,
   normaliseCvText,
   issueCodes,
+  factEndKey,
+  orderEntries,
+  scrubDashes,
   trimOrder,
   validateCv,
   type CvContent,
@@ -909,10 +912,10 @@ describe('trimOrder', () => {
   it('then projects, skills over 10 and the summary, and never a heading or education', () => {
     const steps = trimOrder(fullCv());
     const kinds = steps.map((step) => step.kind);
-    // 5+5+4+2 bullets down to one each: 16 - 4 = 12 bullet steps.
-    expect(kinds.filter((k) => k === 'bullet')).toHaveLength(12);
+    // Experience 5,5,4,2 down to 2 each (8 steps), and the 2-bullet project down to 1 (1 step).
+    expect(kinds.filter((k) => k === 'bullet')).toHaveLength(9);
     expect(kinds).toEqual([
-      ...Array<string>(12).fill('bullet'),
+      ...Array<string>(9).fill('bullet'),
       'project',
       'project',
       'project',
@@ -927,11 +930,52 @@ describe('trimOrder', () => {
     ]);
   });
 
-  it('leaves every experience entry one bullet and the education alone after all steps', () => {
+  it('takes bullets from Experience and Projects alike, the project first on a tie', () => {
+    const content = fullCv();
+    content.experience = [at(content.experience, 3)]; // 2 bullets: at its floor
+    const bullets = (n: number) =>
+      Array.from({ length: n }, () => ({ text: 'x', factRefs: [aliasOf('fact-clients')] }));
+    const project = at(content.projects, 0);
+    content.projects = [
+      { ...project, bullets: bullets(3) },
+      { ...project, bullets: bullets(3) },
+    ];
+    expect(trimOrder(content).slice(0, 4)).toEqual([
+      { kind: 'bullet', section: 'projects', entry: 1, index: 2 },
+      { kind: 'bullet', section: 'projects', entry: 0, index: 2 },
+      { kind: 'bullet', section: 'projects', entry: 1, index: 1 },
+      { kind: 'bullet', section: 'projects', entry: 0, index: 1 },
+    ]);
+  });
+
+  it('keeps 2 bullets on every experience entry and 1 on every project until they are removed whole', () => {
+    const content = fullCv();
+    const lastBullet = trimOrder(content).findLastIndex((step) => step.kind === 'bullet');
+    const trimmed = applyTrim(content, lastBullet + 1);
+    expect(trimmed.experience.map((e) => e.bullets.length)).toEqual([2, 2, 2, 2]);
+    expect(trimmed.projects.map((e) => e.bullets.length)).toEqual([1, 1, 1]);
+  });
+
+  it('removes projects oldest (last) first, keeping the newer ones', () => {
+    const content = fullCv();
+    const project = at(content.projects, 0);
+    content.projects = ['A', 'B', 'C'].map((role) => ({
+      ...project,
+      heading: { ...project.heading, role },
+    }));
+    const firstProject = trimOrder(content).findIndex((step) => step.kind === 'project');
+    expect(applyTrim(content, firstProject + 1).projects.map((p) => p.heading.role)).toEqual([
+      'A',
+      'B',
+    ]);
+    expect(applyTrim(content, firstProject + 2).projects.map((p) => p.heading.role)).toEqual(['A']);
+  });
+
+  it('leaves every experience entry two bullets and the education alone after all steps', () => {
     const content = fullCv();
     const all = trimOrder(content).length;
     const trimmed = applyTrim(content, all);
-    expect(trimmed.experience.map((e) => e.bullets.length)).toEqual([1, 1, 1, 1]);
+    expect(trimmed.experience.map((e) => e.bullets.length)).toEqual([2, 2, 2, 2]);
     expect(trimmed.experience.map((e) => e.heading)).toEqual(
       content.experience.map((e) => e.heading),
     );
@@ -939,6 +983,15 @@ describe('trimOrder', () => {
     expect(trimmed.projects).toEqual([]);
     expect(trimmed.skills).toHaveLength(10);
     expect(trimmed.summary).toBeNull();
+  });
+
+  it('never cuts an experience entry below 2 bullets, and an entry with fewer is left alone', () => {
+    const content = fullCv();
+    const one = at(content.experience, 0);
+    content.experience = [{ ...one, bullets: one.bullets.slice(0, 1) }];
+    expect(
+      trimOrder(content).some((step) => step.kind === 'bullet' && step.section === 'experience'),
+    ).toBe(false);
   });
 
   it('applies the first n steps only, and 0 changes nothing', () => {
@@ -949,10 +1002,9 @@ describe('trimOrder', () => {
     expect(one.summary).toEqual(content.summary);
   });
 
-  it('in a small CV removes two bullets, the project and the summary, and no more', () => {
+  it('in a small CV removes one bullet, the project and the summary, and no more', () => {
     expect(trimOrder(validCv())).toEqual([
       { kind: 'bullet', section: 'experience', entry: 0, index: 2 },
-      { kind: 'bullet', section: 'experience', entry: 0, index: 1 },
       { kind: 'project', index: 0 },
       { kind: 'summary' },
     ]);
@@ -1367,5 +1419,131 @@ describe('rules no other test pins', () => {
     const facts = factsWith('fact-ttl', 'Cut client time-to-live by 10 per cent');
     const left = issuesOf(bullet('Cut client time-to-live by ten per cent.'), facts);
     expect(left.filter((issue) => issue.path === 'experience[0].bullets[1]')).toEqual([]);
+  });
+});
+
+describe('factEndKey and orderEntries', () => {
+  it('keys a month, a bare year as its December, and present or no end date after everything', () => {
+    expect(factEndKey({ start: '2023-10', end: '2024-05' })).toBe('2024-05');
+    expect(factEndKey({ end: '2024' })).toBe('2024-12');
+    expect(factEndKey({ start: '2024-01', end: 'present' })).toBe('9999-12');
+    expect(factEndKey({ start: '2024-01' })).toBe('9999-12');
+    expect(factEndKey({})).toBe('9999-12');
+    expect(factEndKey(undefined)).toBe('9999-12');
+    expect(factEndKey({ end: '2024-05' }) < factEndKey({ end: '2024' })).toBe(true);
+  });
+
+  const ends: Record<string, string> = { F1: '2022-06', F2: '2024-05', F3: '9999-12', F4: '2024' };
+  const endKeyOf = (ref: string) => ends[ref] ?? '9999-12';
+  const entry = (role: string, factRef: string) => ({
+    heading: { role, org: 'Org', factRef },
+    bullets: [],
+  });
+
+  it('sorts experience, projects and education newest first, ties in the model order', () => {
+    const content = {
+      ...validCv(),
+      experience: [entry('old', 'F1'), entry('current', 'F3'), entry('mid', 'F2')],
+      projects: [entry('p-old', 'F1'), entry('p-new', 'F2')],
+      education: [
+        { line: 'older', factRef: 'F1' },
+        { line: 'newer', factRef: 'F2' },
+      ],
+    };
+    const ordered = orderEntries(content, endKeyOf);
+    expect(ordered.experience.map((e) => e.heading.role)).toEqual(['current', 'mid', 'old']);
+    expect(ordered.projects.map((e) => e.heading.role)).toEqual(['p-new', 'p-old']);
+    expect(ordered.education.map((e) => e.line)).toEqual(['newer', 'older']);
+
+    const tied = {
+      ...content,
+      experience: [entry('b', 'F2'), entry('a', 'F2'), entry('c', 'F2')],
+    };
+    expect(orderEntries(tied, endKeyOf).experience.map((e) => e.heading.role)).toEqual([
+      'b',
+      'a',
+      'c',
+    ]);
+  });
+
+  it('does not mutate its input or touch the bullets, summary and skills', () => {
+    const content = { ...validCv(), experience: [entry('x', 'F1'), entry('y', 'F2')] };
+    const before = structuredClone(content);
+    const ordered = orderEntries(content, endKeyOf);
+    expect(content).toEqual(before);
+    expect(ordered.summary).toEqual(content.summary);
+    expect(ordered.skills).toEqual(content.skills);
+    expect(ordered.coverNote).toEqual(content.coverNote);
+  });
+});
+
+describe('scrubDashes', () => {
+  const scrub = (text: string) =>
+    scrubDashes({ ...validCv(), summary: { text, factRefs: ['F1'] } });
+  const text = (value: string) => scrub(value).content.summary.text;
+
+  it('turns a spaced em or en dash into a comma and an unspaced one into a hyphen', () => {
+    expect(text('Built dashboards \u2014 and trained users')).toBe(
+      'Built dashboards, and trained users',
+    );
+    expect(text('Built dashboards \u2013 and trained users')).toBe(
+      'Built dashboards, and trained users',
+    );
+    expect(text('data\u2014driven and 2019\u20132021')).toBe('data-driven and 2019-2021');
+  });
+
+  it('leaves no doubled punctuation and no dash at an edge', () => {
+    expect(text('Done. \u2014 Then more')).toBe('Done. Then more');
+    expect(text('One \u2014, two')).toBe('One, two');
+    expect(text('Two \u2014. Three')).toBe('Two. Three');
+    expect(text('\u2014 starts here')).toBe('starts here');
+    expect(text('ends here \u2014')).toBe('ends here');
+  });
+
+  it('counts what it replaced and reports 0 when there is nothing', () => {
+    expect(scrub('a \u2014 b \u2013 c d\u2014e').replaced).toBe(3);
+    const clean = scrub('Nothing to see, here.');
+    expect(clean.replaced).toBe(0);
+    expect(clean.content).toEqual({
+      ...validCv(),
+      summary: { text: 'Nothing to see, here.', factRefs: ['F1'] },
+    });
+  });
+
+  it('leaves text without a dash byte for byte, including "e.g.," and hyphens', () => {
+    expect(text('Used SQL, e.g., joins - and time-to-live: 30%.')).toBe(
+      'Used SQL, e.g., joins - and time-to-live: 30%.',
+    );
+  });
+
+  it('does not mutate its input, and leaves citations alone', () => {
+    const content = validCv();
+    const before = structuredClone(content);
+    const { content: out } = scrubDashes(content);
+    expect(content).toEqual(before);
+    expect(out.summary.factRefs).toEqual(content.summary.factRefs);
+  });
+
+  it('keeps figures, skill label parts and headings valid: validateCv still passes', () => {
+    const content = validCv();
+    content.summary.text =
+      'Customer-facing analyst \u2014 cut client time-to-live by 30% \u2013 and wrote clear documentation.';
+    content.skills = [
+      { label: 'SQL \u2014 Python', factRefs: [aliasOf('fact-sql'), aliasOf('fact-python')] },
+    ];
+    expect(check(content).ok).toBe(true);
+    const { content: scrubbed, replaced } = scrubDashes(content);
+    expect(replaced).toBe(3);
+    expect(scrubbed.summary.text).toBe(
+      'Customer-facing analyst, cut client time-to-live by 30%, and wrote clear documentation.',
+    );
+    expect(scrubbed.skills[0]?.label).toBe('SQL, Python');
+    expect(check(scrubbed)).toEqual({ ok: true });
+    expect(figuresIn(scrubbed.summary.text)).toEqual(figuresIn(content.summary.text));
+  });
+
+  it('works on trimmed content (a null summary) too', () => {
+    const trimmed = applyTrim(validCv(), trimOrder(validCv()).length);
+    expect(scrubDashes(trimmed).content).toEqual(trimmed);
   });
 });
