@@ -8,6 +8,7 @@ import {
   type Application,
   type BlockedCode,
   type CvHeader,
+  type CvIssue,
   type CvIssueCode,
   type ExistingFact,
 } from '@hireframe/shared';
@@ -193,9 +194,10 @@ async function block(
   attempt: number,
   code: BlockedCode,
   issues: readonly CvIssueCode[] = [],
+  where: readonly CvIssue[] = [],
 ): Promise<JobOutcome> {
   const moved = await move(deps, application, attempt, (current) =>
-    planBlocked(current, code, deps.now(), issues),
+    planBlocked(current, code, deps.now(), issues, where),
   );
   log.info('cv_worker.job', { outcome: moved ? 'blocked' : 'lost', code, attempt });
   return moved ? 'blocked' : 'lost';
@@ -206,12 +208,13 @@ async function invalid(
   deps: CvWorkerDeps,
   counted: Counted,
   issues: readonly CvIssueCode[],
+  where: readonly CvIssue[],
 ): Promise<JobOutcome> {
   if (counted.attempt >= deps.limits.maxWrites) {
-    return block(deps, counted, counted.attempt, 'invalid_output', issues);
+    return block(deps, counted, counted.attempt, 'invalid_output', issues, where);
   }
   const moved = await move(deps, counted, counted.attempt, (current) =>
-    planRetry(current, issues, deps.now()),
+    planRetry(current, issues, deps.now(), where),
   );
   log.info('cv_worker.job', {
     outcome: moved ? 'retry' : 'lost',
@@ -234,7 +237,7 @@ async function fail(deps: CvWorkerDeps, counted: Counted, error: unknown): Promi
     if (error.failure === 'refusal' || error.failure === 'max_tokens') {
       return block(deps, counted, counted.attempt, 'invalid_output');
     }
-    return invalid(deps, counted, []);
+    return invalid(deps, counted, [], []);
   }
   // An API, storage or render failure. The attempt is already counted, so the next run's call is
   // the last write; once the writes are spent the job is blocked rather than left to run again.
@@ -326,6 +329,7 @@ async function generateOne(
         job,
         notes: counted.notes,
         issues: counted.attempt > 1 ? counted.lastIssues : undefined,
+        where: counted.attempt > 1 ? counted.lastIssueAt : undefined,
         toAlias,
       }),
       schema: CvContentShapeSchema,
@@ -369,7 +373,8 @@ async function generateOne(
       },
     );
     if (composed.kind === 'lost') return 'lost';
-    if (composed.kind === 'invalid') return await invalid(deps, counted, composed.issues);
+    if (composed.kind === 'invalid')
+      return await invalid(deps, counted, composed.issues, composed.where);
     const { shipped } = composed;
     const { fit } = shipped;
 
@@ -378,7 +383,7 @@ async function generateOne(
       shipped.facts.map((fact) => ({ id: fact.id, dates: fact.content.dates })),
     );
     const bytes = await renderFiles(render, header, fit, dateOf);
-    if (typeof bytes === 'string') return await invalid(deps, counted, [bytes]);
+    if (typeof bytes === 'string') return await invalid(deps, counted, [bytes], []);
     // Files first: a lost transaction leaves files the next attempt overwrites.
     files = 'unrecorded';
     await deps.files.put(id, bytes);

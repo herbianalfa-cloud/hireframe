@@ -56,6 +56,34 @@ describe('the worker moves', () => {
     expect(cleared?.lastIssues).toBeUndefined();
   });
 
+  it('planRetry and planBlocked keep where the codes were found, once each, and planReady clears it', () => {
+    const where = [
+      { code: 'uncited', path: 'skills[1]' },
+      { code: 'uncited', path: 'skills[1]' },
+      { code: 'unsupported_number', path: 'coverNote.paragraphs[3]' },
+    ] as const;
+    const retry = planRetry(
+      generating({ attempt: 1 }),
+      ['unsupported_number', 'uncited'],
+      T1,
+      where,
+    );
+    expect(retry?.lastIssueAt).toEqual([
+      { code: 'uncited', path: 'skills[1]' },
+      { code: 'unsupported_number', path: 'coverNote.paragraphs[3]' },
+    ]);
+    const blocked = planBlocked(
+      generating({ attempt: 2 }),
+      'invalid_output',
+      T1,
+      ['uncited'],
+      where,
+    );
+    expect(blocked?.lastIssueAt).toHaveLength(2);
+    expect(planRetry(retry ?? generating(), [], T1)?.lastIssueAt).toBeUndefined();
+    expect(planReady(retry ?? generating(), 'job-1-v1', T1)?.lastIssueAt).toBeUndefined();
+  });
+
   it('planBlocked goes to chosen with the reason and keeps attempt, notes and versions', () => {
     const next = planBlocked(
       generating({ attempt: 2, notes: 'n', cvIds: ['job-1-v1'], currentCvId: 'job-1-v1' }),

@@ -13,6 +13,7 @@ import {
   type CvContent,
   type CvFact,
   type CvHeader,
+  type CvIssue,
   type CvIssueCode,
   type CvQuality,
   type CvScore,
@@ -111,7 +112,7 @@ export interface Shipped {
 }
 
 export type ComposeResult =
-  | { kind: 'invalid'; issues: CvIssueCode[] }
+  | { kind: 'invalid'; issues: CvIssueCode[]; where: CvIssue[] }
   /** The owner moved the application before the revision was counted. */
   | { kind: 'lost' }
   | {
@@ -131,7 +132,8 @@ interface Candidate {
   facts: readonly ExistingFact[];
 }
 
-type Prepared = { ok: true; candidate: Candidate } | { ok: false; issues: CvIssueCode[] };
+type Prepared =
+  { ok: true; candidate: Candidate } | { ok: false; issues: CvIssueCode[]; where: CvIssue[] };
 
 /** Scrub, validate, order, fit and score one model output. */
 async function prepare(
@@ -144,9 +146,9 @@ async function prepare(
   // Counts next: a sixth bullet on one entry loses that bullet, not the whole output.
   const scrubbed = scrubDashes(clampCvCounts(normaliseCvText(raw)));
   const verdict = validateCv(scrubbed.content, input.toId, validatorFacts(facts));
-  if (!verdict.ok) return { ok: false, issues: issueCodes(verdict.issues) };
+  if (!verdict.ok) return { ok: false, issues: issueCodes(verdict.issues), where: verdict.issues };
   const strict = CvContentSchema.safeParse(scrubbed.content);
-  if (!strict.success) return { ok: false, issues: ['too_long'] };
+  if (!strict.success) return { ok: false, issues: ['too_long'], where: [] };
 
   const { render } = deps;
   const dated = facts.map((fact) => ({ id: fact.id, dates: fact.content.dates }));
@@ -157,7 +159,7 @@ async function prepare(
   );
   try {
     const fit = await render.fitPage(input.header, ordered, render.makeDateOf(input.toId, dated));
-    if (!fit.ok) return { ok: false, issues: [fit.code] };
+    if (!fit.ok) return { ok: false, issues: [fit.code], where: [] };
     const score = scoreCv({
       content: fit.content,
       facts: validatorFacts(facts),
@@ -177,7 +179,8 @@ async function prepare(
       candidate: { fit, cited: ordered, score, dashesReplaced: scrubbed.replaced, facts },
     };
   } catch (error) {
-    if (error instanceof render.CvRenderError) return { ok: false, issues: [error.code] };
+    if (error instanceof render.CvRenderError)
+      return { ok: false, issues: [error.code], where: [] };
     throw error;
   }
 }
@@ -283,7 +286,7 @@ function revisionFailure(error: unknown): {
 
 export async function composeCv(deps: ComposeDeps, input: ComposeInput): Promise<ComposeResult> {
   const first = await prepare(deps, input, input.draft, input.facts);
-  if (!first.ok) return { kind: 'invalid', issues: first.issues };
+  if (!first.ok) return { kind: 'invalid', issues: first.issues, where: first.where };
   const { score } = first.candidate;
   const hard = hardCount(score);
   const result = await reviseAndShip(deps, input, first.candidate);
@@ -372,7 +375,7 @@ async function reviseAndShip(
         ),
       };
     }
-    return { kind: 'invalid', issues: again.issues };
+    return { kind: 'invalid', issues: again.issues, where: again.where };
   }
   if (!revisedOk) {
     // The revision parsed but does not validate: the codes say why, the draft ships.

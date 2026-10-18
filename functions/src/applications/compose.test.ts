@@ -268,7 +268,11 @@ describe('composeCv: before the loop', () => {
     const bad = withBullet(goodCv(), 'Saved 99% of costs for clients.');
     const p = probe();
     const result = await composeCv(p.deps, input(bad));
-    expect(result).toEqual({ kind: 'invalid', issues: ['unsupported_number'] });
+    expect(result).toEqual({
+      kind: 'invalid',
+      issues: ['unsupported_number'],
+      where: [{ path: 'experience[0].bullets[0]', code: 'unsupported_number' }],
+    });
     expect(p.counted).toBe(0);
     expect(p.revisions).toEqual([]);
   });
@@ -290,7 +294,11 @@ describe('composeCv: before the loop', () => {
     const long = goodCv();
     at(at(long.experience, 0).bullets, 0).text = `Led onboarding. ${'x'.repeat(230)}`;
     const result = await composeCv(probe().deps, input(long));
-    expect(result).toEqual({ kind: 'invalid', issues: ['too_long'] });
+    expect(result).toEqual({
+      kind: 'invalid',
+      issues: ['too_long'],
+      where: [{ path: 'experience[0].bullets[0]', code: 'too_long' }],
+    });
   });
 
   it('turns a fit that cannot fit, and a renderer refusal, into issue codes', async () => {
@@ -301,6 +309,7 @@ describe('composeCv: before the loop', () => {
     expect(await composeCv(probe(undefined, { render: tooLong }).deps, input(goodCv()))).toEqual({
       kind: 'invalid',
       issues: ['too_long'],
+      where: [],
     });
     const refusing: ComposeRenderer = {
       ...renderer,
@@ -309,6 +318,7 @@ describe('composeCv: before the loop', () => {
     expect(await composeCv(probe(undefined, { render: refusing }).deps, input(goodCv()))).toEqual({
       kind: 'invalid',
       issues: ['unsupported_char'],
+      where: [],
     });
   });
 
