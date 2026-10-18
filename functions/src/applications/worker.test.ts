@@ -1038,7 +1038,7 @@ describe('runCvWorker: the revision', () => {
     add(h, 'job-1');
     await h.run();
     const quality = h.store.cvDocs.get('job-1-v1')?.quality;
-    expect(quality?.rubric).toBe('rubric-v1');
+    expect(quality?.rubric).toBe('rubric-v2');
     expect(quality?.layout.bodySize).toBeGreaterThan(0);
     expect(quality?.layout.fill).toBeGreaterThan(0);
     expect(quality?.total).toBeGreaterThan(0);

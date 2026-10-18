@@ -206,7 +206,7 @@ describe('criterion 4: tailoring', () => {
       requirement('D', { factIds: ['fact-intern'] }), // must, cited
       requirement('E', { factIds: ['fact-old'] }), // archived: not coverable
     ];
-    expect(score({ requirements: reqs }).criteria.tailoring).toBe(2);
+    expect(score({ requirements: reqs }).criteria.tailoring).toBe(1);
 
     const missed = [
       requirement('A', { factIds: ['fact-clients'] }),
@@ -223,7 +223,7 @@ describe('criterion 4: tailoring', () => {
     ];
     // A is cited, B (articles) is no longer cited, C is not: 2 of 5 weighted points.
     const result = score({ content: { ...cv, summary: null }, requirements: missed });
-    expect(result.criteria.tailoring).toBeCloseTo((2 * (2 / 5)) / 0.8, 1);
+    expect(result.criteria.tailoring).toBeCloseTo((1 * (2 / 5)) / 0.8, 1);
   });
 
   it('leaves out logistics and requirements the profile cannot cover', () => {
@@ -231,8 +231,8 @@ describe('criterion 4: tailoring', () => {
       requirement('Right to work', { type: 'logistics', factIds: ['fact-clients'] }),
       requirement('Rust', { factIds: [] }),
     ];
-    expect(score({ requirements: reqs }).criteria.tailoring).toBe(2);
-    expect(score({ requirements: [] }).criteria.tailoring).toBe(2);
+    expect(score({ requirements: reqs }).criteria.tailoring).toBe(1);
+    expect(score({ requirements: [] }).criteria.tailoring).toBe(1);
   });
 
   it('counts must as 2 and nice as 1', () => {
@@ -247,7 +247,7 @@ describe('criterion 4: tailoring', () => {
     cv.experience = [{ ...at(cv.experience, 0), bullets: [at(at(cv.experience, 0).bullets, 0)] }];
     // Covered: A (2) and C (1) of 5 points; the CV cites no articles or Python.
     const result = score({ content: { ...cv, summary: null }, requirements: reqs });
-    expect(result.criteria.tailoring).toBeCloseTo((2 * (3 / 5)) / 0.8, 1);
+    expect(result.criteria.tailoring).toBeCloseTo((1 * (3 / 5)) / 0.8, 1);
   });
 });
 
@@ -345,5 +345,72 @@ describe('criterion 6: structure and note', () => {
     cv.coverNote = note(190, 'I am applying to Northwind');
     expect(structure(cv, 'Northwind Ltd')).toBe(1);
     expect(structure(cv, 'North')).toBe(0.75);
+  });
+});
+
+describe('criterion 7: the cover note (rubric v2)', () => {
+  const noteScore = (cv: CvContent) => score({ content: cv }).criteria.note;
+  /** A note of distinct sentences, so no trigram is shared with the bullets. */
+  const specific = (opener: string, words: number): CvContent['coverNote'] => {
+    const extra = Array.from(
+      { length: Math.round(words / 6) },
+      (_, i) => `Item${String(i)} gave quarterly review number${String(i)} sharper focus.`,
+    ).join(' ');
+    return {
+      paragraphs: [
+        { text: `${opener} Northwind Analytics.`, factRefs: [a('fact-clients')] },
+        { text: extra, factRefs: [a('fact-ttl')] },
+      ],
+    };
+  };
+
+  it('is full for a 180 to 250 word note with its own opener and its own words', () => {
+    const cv = goodCv();
+    cv.coverNote = specific('Your team at', 200);
+    expect(noteScore(cv)).toBe(1);
+  });
+
+  it('loses 0.5 for a stock opener, 0.25 for the length, 0.25 for repeating the bullets', () => {
+    const stock = goodCv();
+    stock.coverNote = specific('I am applying to', 200);
+    expect(noteScore(stock)).toBe(0.5);
+    const short = goodCv();
+    short.coverNote = specific('Your team at', 60);
+    expect(noteScore(short)).toBe(0.75);
+    const copied = goodCv();
+    const bullets = at(copied.experience, 0)
+      .bullets.map((b) => b.text)
+      .join(' ');
+    copied.coverNote = {
+      paragraphs: [
+        { text: 'Your team at Northwind Analytics.', factRefs: [a('fact-clients')] },
+        {
+          text: `${bullets} ${bullets} ${bullets} ${bullets} ${bullets}`,
+          factRefs: [a('fact-ttl')],
+        },
+      ],
+    };
+    expect(noteScore(copied)).toBeLessThanOrEqual(0.75);
+  });
+
+  it('scores a templated note that repeats the bullets 0.75 below a specific one', () => {
+    const generic = goodCv();
+    const bullets = at(generic.experience, 0)
+      .bullets.map((b) => b.text)
+      .join(' ');
+    const body = Array.from({ length: 10 }, () => bullets)
+      .join(' ')
+      .split(' ')
+      .slice(0, 195)
+      .join(' ');
+    generic.coverNote = {
+      paragraphs: [
+        { text: 'I am applying to Northwind Analytics.', factRefs: [a('fact-clients')] },
+        { text: `${body}.`, factRefs: [a('fact-ttl')] },
+      ],
+    };
+    const specificCv = goodCv();
+    specificCv.coverNote = specific('Your team at', 200);
+    expect(noteScore(specificCv) - noteScore(generic)).toBeCloseTo(0.75, 2);
   });
 });

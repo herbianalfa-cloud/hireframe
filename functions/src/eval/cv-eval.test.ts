@@ -155,7 +155,7 @@ describe('evaluateCvCase', () => {
     expect(result.textsMatch).toBe(true);
     expect(result.emDash).toBe(false);
     expect(result.markerLeaked).toBe(false);
-    expect(result.quality?.rubric).toBe('rubric-v1');
+    expect(result.quality?.rubric).toBe('rubric-v2');
     expect(result.judge).toEqual(JUDGE);
     expect(result.judgeCostPence).toBeGreaterThan(0);
     expect(result.cvTokens.input).toBeGreaterThan(0);

@@ -13,13 +13,13 @@ import type { JobRequirement } from './funnel.js';
 import { foldText, LEGAL_SUFFIXES } from './normalise.js';
 
 /**
- * The CV quality score (CV quality plan §3, rubric v1): pure and deterministic, so it costs
+ * The CV quality score (CV quality plan §3, rubric v2): pure and deterministic, so it costs
  * nothing, replays, and injected text can't argue with it. It reads the content, the facts it
  * cites, the job's requirements and the layout metrics `fitPage` measured. Findings hold codes
  * and paths, never text.
  */
 
-export const CV_RUBRIC_VERSION = 'rubric-v1';
+export const CV_RUBRIC_VERSION = 'rubric-v2';
 /** A CV scores "good enough" at this total with no hard finding. */
 export const CV_SCORE_TARGET = 8;
 /** A hard finding caps the total here, below the target. */
@@ -30,9 +30,10 @@ export const CV_WEIGHTS: Readonly<Record<CvCriterion, number>> = {
   fill: 2,
   writing: 2.5,
   numbers: 1,
-  tailoring: 2,
+  tailoring: 1,
   craft: 1.5,
   structure: 1,
+  note: 1,
 };
 
 /** What `fitPage` measured (functions/src/cv/render/fit.ts `FitResult`). */
@@ -69,7 +70,7 @@ export interface CvScore {
   gatePassed: boolean;
 }
 
-// ---- Thresholds (rubric v1) ----
+// ---- Thresholds (rubric v2) ----
 
 /** The empty band at which the fill criterion starts to lose points, and the band that loses all. */
 export const FILL_FULL_BAND = 0.03;
@@ -84,6 +85,11 @@ const BULLET_MAX_LINES = 2;
 const SUMMARY_MAX_CHARS = 270; // about three lines at 10 pt
 const SKILLS = { min: 6, max: 14 } as const;
 const NOTE_WORDS = { min: 150, max: 250 } as const;
+/** The note criterion's own band is the prompt's: 180 to 250 words. */
+const NOTE_PROMPT_WORDS = { min: 180, max: 250 } as const;
+const NOTE_STOCK_OPENER = /^\s*(?:i am (?:applying|writing)|i would like to apply)\b/i;
+/** The most of the note's word trigrams the bullets may already hold. */
+const NOTE_MAX_OVERLAP = 0.3;
 
 const clamp = (value: number, low: number, high: number): number =>
   Math.min(high, Math.max(low, value));
@@ -282,6 +288,35 @@ function structureScore(content: Content, company: string, findings: readonly Fi
   return score;
 }
 
+// ---- 7. The cover note (rubric v2) ----
+
+function trigrams(text: string): Set<string> {
+  const words = foldText(text).split(' ').filter((word) => word !== '');
+  const out = new Set<string>();
+  for (let i = 0; i + 2 < words.length; i += 1) out.add(words.slice(i, i + 3).join(' '));
+  return out;
+}
+
+/** 0.25 for the prompt's length, 0.5 for no stock opener, 0.25 for not repeating the bullets. */
+function noteScore(content: Content, bullets: readonly Bullet[]): number {
+  const paragraphs = content.coverNote.paragraphs.map((paragraph) => paragraph.text);
+  const note = paragraphs.join(' ');
+  const words = wordCount(note);
+  if (words === 0) return 0;
+  let score = 0;
+  if (words >= NOTE_PROMPT_WORDS.min && words <= NOTE_PROMPT_WORDS.max) {
+    score += CV_WEIGHTS.note * 0.25;
+  }
+  if (!NOTE_STOCK_OPENER.test(paragraphs[0] ?? '')) score += CV_WEIGHTS.note * 0.5;
+  const mine = trigrams(note);
+  const theirs = trigrams(bullets.map((bullet) => bullet.text).join(' . '));
+  const shared = [...mine].filter((gram) => theirs.has(gram)).length;
+  if (mine.size === 0 || shared / mine.size <= NOTE_MAX_OVERLAP) {
+    score += CV_WEIGHTS.note * 0.25;
+  }
+  return score;
+}
+
 // ---- Total ----
 
 export function scoreCv(input: CvScoreInput): CvScore {
@@ -306,6 +341,7 @@ export function scoreCv(input: CvScoreInput): CvScore {
     tailoring: tailoringScore(input.requirements, activeIds, citedIds(content, aliases)),
     craft: craftScore(bullets, layout.bulletLines),
     structure: structureScore(content, input.company, findings),
+    note: noteScore(content, bullets),
   };
   const criteria = Object.fromEntries(
     CV_CRITERIA.map((name) => [name, round2(raw[name])]),
