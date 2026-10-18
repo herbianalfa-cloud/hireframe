@@ -1859,6 +1859,24 @@ describe('education order and dates', () => {
     ]);
   });
 
+  it('puts an undated experience entry after the dated ones (a start-only one stays Present)', () => {
+    const entryOf = (role: string, factRef: string) => ({
+      heading: { role, org: 'Org', factRef },
+      bullets: [{ text: 'Did a thing.', factRefs: [factRef] }],
+    });
+    const content = {
+      ...validCv(),
+      experience: [entryOf('undated', 'F4'), entryOf('ended', 'F1'), entryOf('present', 'F5')],
+    };
+    const roles = orderEntries(
+      content,
+      keyOf,
+      hasEnd,
+      (ref) => dated.get(ref)?.start !== undefined || dated.get(ref)?.end !== undefined,
+    ).experience.map((e) => e.heading.role);
+    expect(roles).toEqual(['present', 'ended', 'undated']);
+  });
+
   it('keeps the model order among equal end dates', () => {
     expect(order([line('b', 'F1'), line('a', 'F1')])).toEqual(['b', 'a']);
   });

@@ -973,7 +973,9 @@ export function factEndKey(dates: FactContent['dates'] | undefined): string {
  * `content` with experience, projects and education ordered by the heading fact each entry cites
  * (`endKeyOf(factRef)`, e.g. through `factEndKey`). Ties keep the model's order, so the model's
  * relevance order survives among equal dates. Bullets are the model's. Does not mutate.
- *   - Experience and projects: newest first; no end date counts as Present.
+ *   - Experience and projects: newest first; a start with no end counts as Present; entries with
+ *     no dates at all follow the dated ones, in the model's order. `hasDatesOf` says which (all
+ *     have dates when omitted).
  *   - Education: lines with an end date first, newest first; lines with no end date or only a
  *     start date after them, in the model's order. `hasEndOf` says which (all do when omitted).
  */
@@ -981,6 +983,7 @@ export function orderEntries<T extends CvContent | TrimmedCvContent>(
   content: T,
   endKeyOf: (factRef: string) => string,
   hasEndOf: (factRef: string) => boolean = () => true,
+  hasDatesOf: (factRef: string) => boolean = () => true,
 ): T {
   const newestFirst = <E>(
     list: readonly E[],
@@ -997,8 +1000,16 @@ export function orderEntries<T extends CvContent | TrimmedCvContent>(
       .map(({ item }) => item);
   return {
     ...content,
-    experience: newestFirst(content.experience, (entry) => entry.heading.factRef),
-    projects: newestFirst(content.projects, (entry) => entry.heading.factRef),
+    experience: newestFirst(
+      content.experience,
+      (entry) => entry.heading.factRef,
+      (entry) => hasDatesOf(entry.heading.factRef),
+    ),
+    projects: newestFirst(
+      content.projects,
+      (entry) => entry.heading.factRef,
+      (entry) => hasDatesOf(entry.heading.factRef),
+    ),
     education: newestFirst(
       content.education,
       (line) => line.factRef,

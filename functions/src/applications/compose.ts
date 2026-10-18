@@ -169,6 +169,11 @@ async function prepare(
     strict.data,
     render.makeEndKeyOf(input.toId, dated),
     render.makeHasEndOf(input.toId, dated),
+    (ref) => {
+      const id = input.toId.get(ref);
+      const dates = dated.find((fact) => fact.id === id)?.dates;
+      return dates?.start !== undefined || dates?.end !== undefined;
+    },
   );
   try {
     const fit = await render.fitPage(input.header, ordered, render.makeDateOf(input.toId, dated));
