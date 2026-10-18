@@ -92,6 +92,9 @@ export function gateCv(
       if (r.pages !== 1) problems.push(`CV is ${String(r.pages)} pages`);
       if (r.notePages !== 1) problems.push(`note is ${String(r.notePages)} pages`);
       if (!r.textsMatch) problems.push('PDF and DOCX text differ');
+      if (r.revisionSkipped === 'error' || r.revisionSkipped === 'cap') {
+        problems.push(`revision skipped (${r.revisionSkipped})`);
+      }
       if (r.hard > 0) problems.push(`${String(r.hard)} hard finding(s)`);
       if (r.emDash) problems.push('em dash in a file');
       if (r.markerLeaked) problems.push('the injection marker is in a file');
