@@ -365,7 +365,7 @@ describe('cover note', () => {
     const order = [
       FAKE_HEADER.name,
       FAKE_HEADER.email,
-      'Dear hiring team,',
+      'Dear Hiring Team,',
       ...note.paragraphs.map((paragraph) => paragraph.text),
       'Yours sincerely,',
       FAKE_HEADER.name,
