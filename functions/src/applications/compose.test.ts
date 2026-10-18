@@ -390,13 +390,15 @@ describe('composeCv: whether to revise', () => {
 
   it('does not count an unused fact with no alias towards the two it needs', async () => {
     const p = probe();
+    const [base] = existing();
+    if (!base) throw new Error('no facts');
     const facts = [
       ...archive('fact-ttl', 'fact-articles'),
       {
-        ...(existing()[0] as ExistingFact),
+        ...base,
         id: 'fact-added-later',
         status: 'active' as const,
-        content: { ...(existing()[0] as ExistingFact).content, type: 'achievement' as const },
+        content: { ...base.content, type: 'achievement' as const },
       },
     ];
     const { shipped } = composed(await composeCv(p.deps, input(thinCv(), { facts })));

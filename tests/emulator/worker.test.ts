@@ -267,7 +267,7 @@ describe('the CV worker on the emulator', () => {
     }
     expect(doc.factIds.length).toBeGreaterThan(0);
     // The quality score is stored with the layout the CV was fitted at.
-    expect(doc.quality).toMatchObject({ rubric: 'rubric-v1', dashesReplaced: 0 });
+    expect(doc.quality).toMatchObject({ rubric: 'rubric-v2', dashesReplaced: 0 });
     expect(doc.quality?.layout.fill).toBeGreaterThan(0);
 
     const events = (await db.collection(COLLECTIONS.events).get()).docs.map((d) =>
