@@ -72,6 +72,11 @@ describe('CV worker budgets (M7, ADR-053)', () => {
     ).toBeGreaterThan(workerMs);
   });
 
+  it('the eval judge is Sonnet 5.5 at low effort and fits the worker timeout', () => {
+    expect(MODELS.cvJudge).toMatchObject({ id: 'claude-sonnet-5-5', effort: 'low' });
+    expect(MODELS.cvJudge.budgetMs + LLM.callableMarginMs).toBeLessThanOrEqual(workerMs);
+  });
+
   it('a revision is a generateCvs call with the limits of a write', () => {
     expect(PURPOSE_CALLABLE.cvRevise).toBe('generateCvs');
     expect(MODELS.cvRevise).toEqual(MODELS.cvWrite);
