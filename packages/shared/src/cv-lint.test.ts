@@ -179,6 +179,70 @@ describe('inflated_claim (hard)', () => {
   });
 });
 
+describe('inflated_claim ignores the job title and denied uses', () => {
+  const codesWith = (text: string, jobTitle?: string, fact?: string): string[] =>
+    lintCv(withBullet(text, fact), CV_FACTS, CV_ALIASES, { jobTitle })
+      .filter((finding) => finding.path === BULLET)
+      .map((finding) => finding.code);
+
+  it("ignores a word inside the job's title phrase", () => {
+    const text = 'Applying for the Product Manager role with SQL.';
+    expect(codesWith(text)).toContain('inflated_claim');
+    expect(codesWith(text, 'Product Manager')).not.toContain('inflated_claim');
+    expect(codesWith(text, 'Associate Product Manager')).not.toContain('inflated_claim');
+    expect(codesWith(text, 'Product Manager (Graduate Scheme)')).not.toContain('inflated_claim');
+    expect(codesWith(text, 'Graduate Scheme, Product Manager - London')).not.toContain(
+      'inflated_claim',
+    );
+    expect(codesWith('Applying for the product MANAGER role.', 'Product Manager')).toEqual([]);
+  });
+
+  it('still flags the word outside the title phrase', () => {
+    expect(codesWith('Managed a team of 4 analysts.', 'Product Manager')).toContain(
+      'inflated_claim',
+    );
+    // The title is in the text, and so is a claim beyond it.
+    expect(codesWith('Product Manager role: managed a team of 4.', 'Product Manager')).toContain(
+      'inflated_claim',
+    );
+    // A different title does not excuse the word.
+    expect(codesWith('Applying for the Product Manager role.', 'Data Analyst')).toContain(
+      'inflated_claim',
+    );
+    // Whole words only: a title of "Lead" does not excuse "led".
+    expect(codesWith('Led the rewrite.', 'Lead')).toContain('inflated_claim');
+  });
+
+  it.each([
+    'I have not managed a team.',
+    'Never led a project on my own.',
+    'Did not oversee any budget.',
+    "I haven't managed people.",
+    'Worked without managing anyone.',
+    'No leadership experience yet.',
+    'Was not the leader of the team.',
+  ])('allows a denied use: %s', (text) => {
+    expect(codesWith(text)).not.toContain('inflated_claim');
+  });
+
+  it.each([
+    'Managed a team of 4 analysts.',
+    'I managed a team, not just a project.',
+    'Led a team and never missed a deadline.',
+    'Not only wrote the guides but led the rewrite.',
+  ])('still flags a claim: %s', (text) => {
+    expect(codesWith(text)).toContain('inflated_claim');
+  });
+
+  it('flags a denied use next to a real one in the same text', () => {
+    expect(codesWith('Never led a team, but managed a rota.')).toContain('inflated_claim');
+  });
+
+  it('keeps the fact-owned word allowed whatever the title', () => {
+    expect(codesWith('Led onboarding for 12 clients.', 'Data Analyst', 'fact-clients')).toEqual([]);
+  });
+});
+
 describe('soft findings', () => {
   it.each([
     ['intensifier', 'Successfully wrote 25 help-centre articles.'],
