@@ -80,6 +80,10 @@ export const FILL_ZERO_BAND = 0.25;
 const HEADING_WRAP_COST = 0.25;
 const HARD_COST = 1;
 const SOFT_COST = 0.25;
+/** What one finding takes off the total (a heading wrap costs the same as a soft one). */
+export function findingCost(finding: Pick<Finding, 'severity'>): number {
+  return finding.severity === 'hard' ? HARD_COST : SOFT_COST;
+}
 /** Coverage of the coverable requirements that earns full tailoring marks. */
 const COVERAGE_FULL = 0.8;
 const BULLET_WORDS = { min: 8, max: 28 } as const;

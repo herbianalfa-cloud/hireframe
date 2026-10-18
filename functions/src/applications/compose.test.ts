@@ -380,6 +380,44 @@ describe('composeCv: whether to revise', () => {
     expect(p.counted).toBe(0);
   });
 
+  it('skips a draft whose soft findings and unused facts cannot reach the target (L2)', async () => {
+    const p = probe();
+    const facts = archive('fact-ttl', 'fact-articles', 'fact-olist');
+    const draft = withBullet(thinCv(), 'Successfully ran onboarding for 12 clients!');
+    const { shipped } = composed(await composeCv(p.deps, input(draft, { facts })));
+    expect(shipped.quality.findings.map((finding) => finding.code).sort()).toEqual([
+      'exclamation',
+      'intensifier',
+    ]);
+    // Clearing both is worth 0.5 and there is nothing to fill with: 8 is out of reach.
+    expect(shipped.quality.total + 0.5).toBeLessThan(8);
+    expect(shipped.quality).toMatchObject({ revised: false, revisionSkipped: 'not_fixable' });
+    expect(p.counted).toBe(0);
+    expect(p.revisions).toEqual([]);
+  });
+
+  it('still revises soft findings that could just reach the target', async () => {
+    const draft = withBullet(goodCv(), 'Successfully ran onboarding for 12 clients.');
+    const probed = composed(
+      await composeCv(probe().deps, input(draft, { attempt: 3, scoreTarget: 10 })),
+    );
+    const total = probed.shipped.quality.total;
+    // The one soft finding costs 0.25, so a target of total + 0.25 is exactly reachable.
+    const reach = probe(() => goodCv());
+    const reachable = composed(
+      await composeCv(reach.deps, input(draft, { scoreTarget: total + 0.25 })),
+    );
+    expect(reachable.shipped.quality.revisionSkipped).not.toBe('not_fixable');
+    expect(reach.counted).toBe(1);
+    // A target above that is out of reach, so no revision is paid for.
+    const out = probe(() => goodCv());
+    const unreachable = composed(
+      await composeCv(out.deps, input(draft, { scoreTarget: total + 0.26 })),
+    );
+    expect(unreachable.shipped.quality.revisionSkipped).toBe('not_fixable');
+    expect(out.counted).toBe(0);
+  });
+
   it('does not revise an underfilled draft with one unused fact', async () => {
     const p = probe();
     const facts = archive('fact-ttl', 'fact-articles');
