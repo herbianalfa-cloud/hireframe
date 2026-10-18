@@ -615,7 +615,8 @@ function cites(content: CvContent): Cite[] {
     out.push({
       path,
       texts: [{ path, value: entry.line, max: CV_LIMITS.educationLine }],
-      refs: entry.factRef === '' ? [] : [entry.factRef, ...(achievement === '' ? [] : [achievement])],
+      refs:
+        entry.factRef === '' ? [] : [entry.factRef, ...(achievement === '' ? [] : [achievement])],
       // The line's own fact first, then at most one achievement for the classification.
       typesByRef: [EDUCATION_FACT_TYPES, EDUCATION_ACHIEVEMENT_FACT_TYPES],
       words: 'fact',
