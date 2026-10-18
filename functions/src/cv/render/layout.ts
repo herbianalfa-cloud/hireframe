@@ -302,7 +302,7 @@ export function cvBlocks(header: CvHeader, content: TrimmedCvContent, dateOf: Da
 export function noteBlocks(header: CvHeader, note: TrimmedCvContent['coverNote']): Block[] {
   const blocks: Block[] = [
     ...headerBlocks(header),
-    block('note', 'Dear hiring team,'),
+    block('note', 'Dear Hiring Team,'),
     ...note.paragraphs.map((paragraph) => block('note', paragraph.text)),
     block('note', 'Yours sincerely,'),
     block('note', header.name),
