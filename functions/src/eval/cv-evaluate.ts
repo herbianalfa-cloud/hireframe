@@ -263,7 +263,15 @@ export async function evaluateCvCase(
   }
   if (composed?.kind !== 'composed') {
     return {
-      result: finish({ firstWriteValid, shipped: false, failure: 'invalid', costPence: spent }, 0),
+      result: finish(
+        {
+          firstWriteValid,
+          shipped: false,
+          failure: `invalid (${(issues ?? []).join(', ')})`,
+          costPence: spent,
+        },
+        0,
+      ),
     };
   }
 
