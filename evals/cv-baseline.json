@@ -1,5 +1,7 @@
 {
-  "mean": 9.77,
+  "mean": 8.91,
   "cases": 8,
+  "rubric": "rubric-v2",
+  "promptVersion": "cv-2026-10-18c",
   "updatedAt": "2026-10-18"
 }

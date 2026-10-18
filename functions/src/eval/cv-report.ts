@@ -15,6 +15,9 @@ export const CvBaselineSchema = z.object({
   /** Mean final score of the full-profile cases. */
   mean: z.number().min(0).max(10),
   cases: z.int().min(1),
+  /** The rubric and CV prompt the mean was measured under; a baseline without them is stale. */
+  rubric: z.string().exactOptional(),
+  promptVersion: z.string().exactOptional(),
   updatedAt: z.string(),
 });
 export type CvBaseline = z.infer<typeof CvBaselineSchema>;
@@ -76,10 +79,22 @@ export interface CvGateResult {
  * "every case" checks and is left out of the means. The thin profile has no score or revision
  * rule: it passes by shipping a valid one-page CV within the call limit (it is not a full case).
  */
+export interface CvBaselineContext {
+  rubric: string;
+  promptVersion: string;
+  /** `--update-baseline` was given, so a baseline from another rubric or prompt is replaced. */
+  updating?: boolean;
+}
+
+/** Whether the baseline was measured under this rubric and prompt (L5 of the CV quality review). */
+export const baselineMatches = (baseline: CvBaseline, context: CvBaselineContext): boolean =>
+  baseline.rubric === context.rubric && baseline.promptVersion === context.promptVersion;
+
 export function gateCv(
   results: readonly CvCaseResult[],
   expectedCases: number,
   baseline: CvBaseline | null,
+  context?: CvBaselineContext,
 ): CvGateResult {
   const reasons: string[] = [];
   if (results.length !== expectedCases) {
@@ -113,12 +128,36 @@ export function gateCv(
   if (summary.fullMean < CV_MEAN_GATE) {
     reasons.push(`Mean ${num(summary.fullMean)} is below ${String(CV_MEAN_GATE)}.`);
   }
-  if (baseline && summary.fullMean < baseline.mean - CV_BASELINE_SLACK - 1e-9) {
+  const comparable = baseline !== null && (!context || baselineMatches(baseline, context));
+  if (baseline && context && !comparable && context.updating !== true) {
+    reasons.push(
+      `The baseline was set under ${baseline.rubric ?? 'an unknown rubric'} and ${baseline.promptVersion ?? 'an unknown prompt'}, not ${context.rubric} and ${context.promptVersion}: rerun with --update-baseline.`,
+    );
+  }
+  if (comparable && summary.fullMean < baseline.mean - CV_BASELINE_SLACK - 1e-9) {
     reasons.push(
       `Mean ${num(summary.fullMean)} is more than ${String(CV_BASELINE_SLACK)} under the baseline ${num(baseline.mean)}.`,
     );
   }
   return { ok: reasons.length === 0, reasons };
+}
+
+/**
+ * Whether `--update-baseline` may store this mean. Under the same rubric and prompt a lower mean
+ * cannot be stored (each update would otherwise lower the floor by up to the slack).
+ */
+export function canStoreBaseline(
+  mean: number,
+  baseline: CvBaseline | null,
+  context: CvBaselineContext,
+): { ok: true } | { ok: false; reason: string } {
+  if (baseline && baselineMatches(baseline, context) && mean < baseline.mean - 1e-9) {
+    return {
+      ok: false,
+      reason: `Mean ${num(mean)} is below the stored ${num(baseline.mean)} under the same rubric and prompt; a baseline only moves up unless the rubric or prompt changed.`,
+    };
+  }
+  return { ok: true };
 }
 
 const num = (value: number): string => value.toFixed(2);

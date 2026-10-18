@@ -1,6 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { CV_RUBRIC_VERSION } from '@hireframe/shared';
+
+import { CV_PROMPT_VERSION } from '../applications/prompt.js';
 import { DEFAULT_FX_USD_TO_GBP } from '../config.js';
 import type { LlmCallDeps } from '../llm/call.js';
 import { anthropicTransport } from '../llm/transport.js';
@@ -9,11 +12,13 @@ import { EVAL_NOW, parseGolden } from './cases.js';
 import { parseCvCases } from './cv-cases.js';
 import { evaluateCvCase, type CvCaseResult } from './cv-evaluate.js';
 import {
+  canStoreBaseline,
   CvBaselineSchema,
   formatCvReport,
   gateCv,
   summariseCv,
   type CvBaseline,
+  type CvBaselineContext,
 } from './cv-report.js';
 import {
   formatRecordings,
@@ -97,7 +102,13 @@ export async function runCvSuite(args: readonly string[], live: boolean): Promis
       `cv eval: ${String(recordings.size - replay.used.size)} of ${String(recordings.size)} recordings unused (a prompt or case change left them behind; re-record to drop them).`,
     );
   }
-  const verdict = gateCv(results, cases.length, baseline);
+  const rubric = results.find((r) => r.quality)?.quality?.rubric ?? CV_RUBRIC_VERSION;
+  const context: CvBaselineContext = {
+    rubric,
+    promptVersion: CV_PROMPT_VERSION,
+    updating: args.includes('--update-baseline'),
+  };
+  const verdict = gateCv(results, cases.length, baseline, context);
   if (!verdict.ok) {
     console.error(`\ncv eval: FAILED\n- ${verdict.reasons.join('\n- ')}`);
     process.exitCode = 1;
@@ -105,9 +116,18 @@ export async function runCvSuite(args: readonly string[], live: boolean): Promis
   }
   console.log('\ncv eval: passed');
   if (args.includes('--update-baseline')) {
+    const mean = Number(summariseCv(results).fullMean.toFixed(2));
+    const allowed = canStoreBaseline(mean, baseline, context);
+    if (!allowed.ok) {
+      console.error(`cv eval: baseline not updated. ${allowed.reason}`);
+      process.exitCode = 1;
+      return;
+    }
     const next: CvBaseline = {
-      mean: Number(summariseCv(results).fullMean.toFixed(2)),
+      mean,
       cases: cases.length,
+      rubric: context.rubric,
+      promptVersion: context.promptVersion,
       updatedAt: new Date().toISOString().slice(0, 10),
     };
     writeFileSync(CV_FILES.baseline, `${JSON.stringify(next, null, 2)}\n`);

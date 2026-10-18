@@ -11,7 +11,14 @@ import { EVAL_NOW, parseGolden } from './cases.js';
 import { selectSuites } from './cli.js';
 import { cvCaseFacts, cvCaseJob, INJECTION_MARKER, parseCvCases } from './cv-cases.js';
 import { evaluateCvCase, type CvCaseResult } from './cv-evaluate.js';
-import { CV_MEAN_GATE, formatCvReport, gateCv, summariseCv, type CvBaseline } from './cv-report.js';
+import {
+  canStoreBaseline,
+  CV_MEAN_GATE,
+  formatCvReport,
+  gateCv,
+  summariseCv,
+  type CvBaseline,
+} from './cv-report.js';
 import { RecordingMissingError, replayTransport } from './recordings.js';
 import { memoryUsage } from './runtime.js';
 
@@ -340,8 +347,16 @@ describe('gateCv', () => {
     ['an em dash', { emDash: true }, /em dash/],
     ['the injection marker', { markerLeaked: true }, /injection marker/],
     ['a fourth model call', { writeCalls: 2, reviseCalls: 2 }, /4 model calls/],
-    ['a revision skipped on an error', { revisionSkipped: 'error' as const }, /revision skipped \(error\)/],
-    ['a revision skipped on the cap', { revisionSkipped: 'cap' as const }, /revision skipped \(cap\)/],
+    [
+      'a revision skipped on an error',
+      { revisionSkipped: 'error' as const },
+      /revision skipped \(error\)/,
+    ],
+    [
+      'a revision skipped on the cap',
+      { revisionSkipped: 'cap' as const },
+      /revision skipped \(cap\)/,
+    ],
     ['a CV that did not ship', { shipped: false, failure: 'invalid' }, /no CV shipped/],
   ])('fails %s', (_name, over, message) => {
     const run = goodRun();
@@ -385,6 +400,44 @@ describe('gateCv', () => {
       judge: { graduate: 1, plain: 1, tailored: 1, note: 1 },
     }));
     expect(gateCv(run, 8, null).ok).toBe(true);
+  });
+});
+
+describe('the baseline across a rubric change (L5)', () => {
+  const old: CvBaseline = {
+    mean: 9.77,
+    cases: 8,
+    rubric: 'rubric-v1',
+    promptVersion: 'p1',
+    updatedAt: '2026-10-18',
+  };
+  const now = { rubric: 'rubric-v2', promptVersion: 'p1' };
+  const lowerRun = () => [
+    ...['c01', 'c02', 'c03', 'c04', 'c05', 'c06', 'c07'].map((id) => result(id, 8.9)),
+    result('c08', 7, { profile: 'thin', tags: ['thin'] }),
+  ];
+
+  it('ignores the old mean and asks for an update', () => {
+    const verdict = gateCv(lowerRun(), 8, old, now);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reasons.join()).toMatch(/--update-baseline/);
+    expect(verdict.reasons.join()).not.toMatch(/under the baseline/);
+    expect(gateCv(lowerRun(), 8, old, { ...now, updating: true }).ok).toBe(true);
+  });
+
+  it('treats a baseline with no rubric as stale, and a matching one as comparable', () => {
+    const bare: CvBaseline = { mean: 9.77, cases: 8, updatedAt: '2026-10-18' };
+    expect(gateCv(lowerRun(), 8, bare, now).reasons.join()).toMatch(/--update-baseline/);
+    const same: CvBaseline = { ...old, rubric: 'rubric-v2' };
+    expect(gateCv(lowerRun(), 8, same, now).reasons.join()).toMatch(/under the baseline/);
+  });
+
+  it('stores a lower mean only when the rubric or prompt changed', () => {
+    const same: CvBaseline = { ...old, rubric: 'rubric-v2' };
+    expect(canStoreBaseline(8.9, same, now).ok).toBe(false);
+    expect(canStoreBaseline(9.8, same, now).ok).toBe(true);
+    expect(canStoreBaseline(8.9, old, now).ok).toBe(true);
+    expect(canStoreBaseline(8.9, null, now).ok).toBe(true);
   });
 });
 
