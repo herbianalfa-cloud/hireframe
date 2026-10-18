@@ -7,6 +7,7 @@ import {
   type CvIssue,
   type CvIssueCode,
   type CvQuality,
+  type RevisionSkipped,
   type TrimmedCvContent,
 } from '@hireframe/shared';
 import { getDocumentProxy } from 'unpdf';
@@ -19,6 +20,7 @@ import { FAKE_HEADER } from '../cv/render/fixtures.js';
 import { extractText } from '../cv/extract.js';
 import { llmCall, type LlmCallDeps } from '../llm/call.js';
 import { LlmOutputError } from '../llm/errors.js';
+import { RecordingMissingError } from './recordings.js';
 import type { LlmRequest, LlmResponse } from '../llm/transport.js';
 import type { GoldenCase } from './cases.js';
 import { cvCaseFacts, cvCaseJob, INJECTION_MARKER, type CvCase } from './cv-cases.js';
@@ -54,6 +56,8 @@ export interface CvCaseResult {
   /** Skills removed before validating, over every write: uncited, or citing a non-skill fact. */
   skillsDropped: number;
   quality?: CvQuality;
+  /** Why the loop did not revise or keep a revision, from the shipped quality. */
+  revisionSkipped?: RevisionSkipped;
   /** The first draft's hard and soft finding counts (the final's are `hard` and `soft`). */
   draftHard?: number;
   draftSoft?: number;
@@ -216,6 +220,9 @@ export async function evaluateCvCase(
   let where: readonly CvIssue[] | undefined;
   let firstWriteValid = false;
   let composed: ComposeResult | null = null;
+  // `composeCv` turns a failed revision into a skip and ships the draft. A missing recording is
+  // not a skip: it is kept here and rethrown once `composeCv` returns, so the CLI says "stale".
+  let staleRevision: RecordingMissingError | null = null;
   try {
     for (let attempt = 1; attempt <= limits.maxWrites; attempt += 1) {
       counted = attempt;
@@ -236,15 +243,20 @@ export async function evaluateCvCase(
             return Promise.resolve(true);
           },
           revise: async (user) => {
-            const revised = await llmCall(deps, {
-              purpose: 'cvRevise',
-              system,
-              user,
-              schema: CvContentShapeSchema,
-              maxSends: 1,
-            });
-            spent += revised.costPence;
-            return revised;
+            try {
+              const revised = await llmCall(deps, {
+                purpose: 'cvRevise',
+                system,
+                user,
+                schema: CvContentShapeSchema,
+                maxSends: 1,
+              });
+              spent += revised.costPence;
+              return revised;
+            } catch (error) {
+              if (error instanceof RecordingMissingError) staleRevision = error;
+              throw error;
+            }
           },
           beforeDeadline: () => true,
         },
@@ -262,6 +274,7 @@ export async function evaluateCvCase(
           writeCostPence: written.costPence,
         },
       );
+      if (staleRevision) throw staleRevision;
       writeIssues.push(composed.kind === 'invalid' ? [...composed.issues] : []);
       if (composed.kind === 'invalid') skillsDropped += composed.skillsDropped;
       else if (composed.kind === 'composed') skillsDropped += composed.draft.skillsDropped;
@@ -331,6 +344,7 @@ export async function evaluateCvCase(
       firstWriteValid,
       shipped: true,
       quality,
+      ...(quality.revisionSkipped ? { revisionSkipped: quality.revisionSkipped } : {}),
       draftHard: composed.draft.hard,
       draftSoft: composed.draft.soft,
       coverage: quality.criteria.tailoring / 2,

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { CV_CRITERIA, type CvQuality } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_FX_USD_TO_GBP } from '../config.js';
+import { APPLICATIONS, DEFAULT_FX_USD_TO_GBP } from '../config.js';
 import { fakeTransport } from '../llm/fake-transport.js';
 import type { LlmCallDeps } from '../llm/call.js';
 import type { LlmRequest, LlmTransport } from '../llm/transport.js';
@@ -218,6 +218,35 @@ describe('evaluateCvCase', () => {
   });
 });
 
+describe('a revision with no recording', () => {
+  const first = cases[0];
+  if (!first) throw new Error('no cases');
+
+  it('rejects with RecordingMissingError instead of shipping the draft as a skip', async () => {
+    // Every answer but the revision's is the fake model's, as a replay map missing only cvRevise.
+    const fake = transport();
+    const replay: LlmTransport = {
+      countTokens: (request) => fake.countTokens(request),
+      send: (request) =>
+        request.purpose === 'cvRevise'
+          ? Promise.reject(new RecordingMissingError('no recording for cvRevise'))
+          : fake.send(request),
+    };
+    // A target no draft reaches, so the first draft asks for a revision.
+    const config = APPLICATIONS as { scoreTarget: number };
+    const was = config.scoreTarget;
+    config.scoreTarget = 10.5;
+    try {
+      await expect(evaluateCvCase(first, golden, deps(replay))).rejects.toBeInstanceOf(
+        RecordingMissingError,
+      );
+      expect(fake.purposes).not.toContain('cvJudge');
+    } finally {
+      config.scoreTarget = was;
+    }
+  });
+});
+
 const quality = (total: number, over: Partial<CvQuality> = {}): CvQuality => ({
   rubric: 'rubric-v1',
   total,
@@ -311,6 +340,8 @@ describe('gateCv', () => {
     ['an em dash', { emDash: true }, /em dash/],
     ['the injection marker', { markerLeaked: true }, /injection marker/],
     ['a fourth model call', { writeCalls: 2, reviseCalls: 2 }, /4 model calls/],
+    ['a revision skipped on an error', { revisionSkipped: 'error' }, /revision skipped \(error\)/],
+    ['a revision skipped on the cap', { revisionSkipped: 'cap' }, /revision skipped \(cap\)/],
     ['a CV that did not ship', { shipped: false, failure: 'invalid' }, /no CV shipped/],
   ])('fails %s', (_name, over, message) => {
     const run = goodRun();
