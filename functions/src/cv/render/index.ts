@@ -6,6 +6,7 @@ export {
   SECTION_ORDER,
   makeDateOf,
   makeEndKeyOf,
+  makeHasEndOf,
   type DateOf,
   type DatedFact,
   type LayoutSpec,

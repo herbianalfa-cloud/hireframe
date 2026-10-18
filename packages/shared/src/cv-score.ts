@@ -53,6 +53,8 @@ export interface CvScoreInput {
   /** The job's S3 requirements, with fact IDs resolved. */
   requirements: readonly JobRequirement[];
   company: string;
+  /** The job's title: its own words are not an inflated claim by the candidate. */
+  jobTitle?: string | undefined;
   layout: CvLayoutMetrics;
   /** Defaults to `CV_SCORE_TARGET`. */
   target?: number | undefined;
@@ -109,7 +111,10 @@ function citedIds(content: Content, aliases: ReadonlyMap<string, string>): Set<s
     refs.push(entry.heading.factRef);
     for (const bullet of entry.bullets) refs.push(...bullet.factRefs);
   }
-  for (const line of content.education) refs.push(line.factRef);
+  for (const line of content.education) {
+    refs.push(line.factRef);
+    if (line.achievementRef !== undefined) refs.push(line.achievementRef);
+  }
   for (const skill of content.skills) refs.push(...skill.factRefs);
   for (const paragraph of content.coverNote.paragraphs) refs.push(...paragraph.factRefs);
   const ids = new Set<string>();
@@ -288,7 +293,7 @@ export function scoreCv(input: CvScoreInput): CvScore {
   };
   const activeIds = new Set(facts.filter((fact) => fact.status === 'active').map((f) => f.id));
 
-  const findings = lintCv(content, facts, aliases);
+  const findings = lintCv(content, facts, aliases, { jobTitle: input.jobTitle });
   for (let i = 0; i < layout.headingWraps; i += 1) {
     findings.push(makeFinding('heading_wraps', 'headings'));
   }

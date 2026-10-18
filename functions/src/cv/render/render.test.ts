@@ -182,6 +182,28 @@ describe('renderCvPdf', () => {
   });
 });
 
+describe('a project with no organisation, in both files', () => {
+  const cv = applyTrim(validCv(), 0);
+  const project = cv.projects[0];
+  if (project === undefined) throw new Error('no project');
+  const content = {
+    ...cv,
+    projects: [{ ...project, heading: { ...project.heading, org: '' } }],
+  };
+
+  it('prints the role alone: no trailing comma in the PDF or the DOCX', async () => {
+    const pdf = await extractText(
+      (await renderCvPdf(FAKE_HEADER, content, fakeDateOf)).bytes,
+      'pdf',
+    );
+    const docx = await extractText(await renderCvDocx(FAKE_HEADER, content, fakeDateOf), 'docx');
+    for (const text of [pdf, docx]) {
+      expect(squash(text)).toContain('Analysis project');
+      expect(text).not.toMatch(/Analysis project,/);
+    }
+  });
+});
+
 describe('renderCvDocx', () => {
   const content = applyTrim(validCv(), 0);
 
