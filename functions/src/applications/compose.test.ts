@@ -564,6 +564,18 @@ describe('composeCv: choosing between the candidates', () => {
 });
 
 describe('composeCv: when the revision call fails', () => {
+  it('is invalid when the draft cites a fact archived while the call ran', async () => {
+    const archived = existing((f) =>
+      f.id === 'fact-clients' ? { status: 'archived' as const } : {},
+    );
+    const draft = withContrast(goodCv());
+    const state = probe(() => new LlmOutputError('invalid_json', 2), { factsAfter: archived });
+    const result = await composeCv(state.deps, input(draft));
+    expect(result.kind).toBe('invalid');
+    expect(result.kind === 'invalid' && result.issues).toContain('unknown_fact');
+    expect(state.facts).toBe(1);
+  });
+
   const run = (error: Error) => composeCv(probe(() => error).deps, input(withContrast(goodCv())));
 
   it('a monthly cap ships the draft and ends the run', async () => {
