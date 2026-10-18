@@ -213,6 +213,17 @@ describe('inflated_claim ignores the job title and denied uses', () => {
     expect(codesWith('Led the rewrite.', 'Lead')).toContain('inflated_claim');
   });
 
+  it('exempts only the exact title word, with no stemming', () => {
+    const title = 'Associate Product Manager';
+    expect(codesWith('Applying for the Manager role.', title)).not.toContain('inflated_claim');
+    expect(codesWith('Applying for the MANAGER role.', title)).not.toContain('inflated_claim');
+    expect(codesWith('Managed a team of 4 analysts.', title)).toContain('inflated_claim');
+    expect(codesWith('Led the team through the rewrite.', title)).toContain('inflated_claim');
+    // Other forms of the title's word are claims, not the title.
+    expect(codesWith('Took on management of the rota.', title)).toContain('inflated_claim');
+    expect(codesWith('Managing the rota.', title)).toContain('inflated_claim');
+  });
+
   it.each([
     'I have not managed a team.',
     'Never led a project on my own.',
