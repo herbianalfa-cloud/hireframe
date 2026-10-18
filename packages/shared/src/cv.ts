@@ -788,22 +788,116 @@ export function citedFactIds(content: CvContent, aliases: ReadonlyMap<string, st
   return [...ids].sort();
 }
 
+// ---- Entry order ----
+
+/**
+ * A sort key for when a fact ended, from its dates: `2024-05`, a bare year as its December, and
+ * `present` (or no end date at all) after every real month. Plain strings compare in order.
+ */
+export function factEndKey(dates: FactContent['dates'] | undefined): string {
+  const end = dates?.end;
+  if (end === undefined || end === 'present') return '9999-12';
+  const [year = '', month = '12'] = end.split('-');
+  return `${year}-${month}`;
+}
+
+/**
+ * `content` with experience, projects and education newest first, by the end date of the heading
+ * fact each entry cites (`endKeyOf(factRef)`, e.g. through `factEndKey`). Ties keep the model's
+ * order, so the model's relevance order survives among equal dates. Bullets are the model's.
+ * Does not mutate.
+ */
+export function orderEntries<T extends CvContent | TrimmedCvContent>(
+  content: T,
+  endKeyOf: (factRef: string) => string,
+): T {
+  const newestFirst = <E>(list: readonly E[], refOf: (item: E) => string): E[] =>
+    list
+      .map((item, index) => ({ item, index, key: endKeyOf(refOf(item)) }))
+      .sort((x, y) => (x.key === y.key ? x.index - y.index : x.key < y.key ? 1 : -1))
+      .map(({ item }) => item);
+  return {
+    ...content,
+    experience: newestFirst(content.experience, (entry) => entry.heading.factRef),
+    projects: newestFirst(content.projects, (entry) => entry.heading.factRef),
+    education: newestFirst(content.education, (line) => line.factRef),
+  };
+}
+
+// ---- Dashes ----
+
+/** Keys whose strings are citations, not prose. */
+const CITATION_KEYS: ReadonlySet<string> = new Set(['factRef', 'factRefs']);
+
+/** An em or en dash, with the whitespace around it. */
+const DASH = /(\s*)([\u2013\u2014])(\s*)/g;
+
+function scrubText(text: string, count: () => void): string {
+  const stop = /[.,;:!?]/;
+  return text.replace(
+    DASH,
+    (match, before: string, _dash: string, after: string, offset: number) => {
+      count();
+      const prev = text[offset - 1] ?? '';
+      const next = text[offset + match.length] ?? '';
+      // At an edge there is nothing to join; next to punctuation the dash adds nothing.
+      if (offset === 0 || next === '' || stop.test(next)) return '';
+      // Between words with no space on either side: a hyphen.
+      if (before === '' && after === '') return '-';
+      return stop.test(prev) ? ' ' : ', ';
+    },
+  );
+}
+
+/**
+ * `content` with every em and en dash taken out of the prose: a spaced dash becomes a comma, an
+ * unspaced one between words a hyphen, and a dash beside punctuation or at an edge is dropped
+ * so no doubled punctuation is left.
+ * Citations are left alone. Figures and the parts of a skill label are unchanged (`validateCv`
+ * splits labels on a spaced dash and on a comma alike). `replaced` counts the dashes. Run it
+ * after `normaliseCvText` and before `validateCv`, so what is validated is what ships. Dates
+ * that code writes from a fact keep their en dash: they never pass through here. Does not mutate.
+ */
+export function scrubDashes<T extends CvContent | TrimmedCvContent>(
+  content: T,
+): { content: T; replaced: number } {
+  let replaced = 0;
+  const count = () => {
+    replaced += 1;
+  };
+  const walk = (value: unknown, key?: string): unknown => {
+    if (typeof value === 'string') {
+      return key !== undefined && CITATION_KEYS.has(key) ? value : scrubText(value, count);
+    }
+    if (Array.isArray(value)) return value.map((item) => walk(item, key));
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([k, item]) => [k, walk(item, k)]));
+    }
+    return value;
+  };
+  return { content: walk(content) as T, replaced };
+}
+
 // ---- One-page trim ----
 
 export type TrimStep =
-  | { kind: 'bullet'; section: 'experience'; entry: number; index: number }
+  | { kind: 'bullet'; section: 'experience' | 'projects'; entry: number; index: number }
   | { kind: 'project'; index: number }
   | { kind: 'skill'; index: number }
   | { kind: 'summary' };
 
 const KEPT_SKILLS = 10;
+/** The bullets a trim leaves on an experience entry and on a project. */
+const KEPT_EXPERIENCE_BULLETS = 2;
+const KEPT_PROJECT_BULLETS = 1;
 
 /**
- * The removals that make a long CV shorter, in the order they are tried. Deterministic, so the
- * same content always trims the same way:
- *   1. the last bullet of the experience entry with the most bullets (the later entry on a tie),
- *      repeated until each entry has one bullet left;
- *   2. then projects, last first;
+ * The removals that make a long CV shorter, in the order they are tried (v2, ADR-062).
+ * Deterministic, so the same content always trims the same way:
+ *   1. the last bullet of whichever entry, in Experience or Projects, has the most bullets (the
+ *      later one on a tie, and a project before an experience entry), until every experience
+ *      entry is down to 2 bullets and every project to 1;
+ *   2. then projects, last first (the oldest, as `orderEntries` puts newest first);
  *   3. then skills beyond the first 10, last first;
  *   4. then the summary.
  * Headings and education are never removed. Each step refers to the content as the steps before
@@ -811,16 +905,35 @@ const KEPT_SKILLS = 10;
  */
 export function trimOrder(content: CvContent): TrimStep[] {
   const steps: TrimStep[] = [];
-  const counts = content.experience.map((entry) => entry.bullets.length);
+  const entries = [
+    ...content.experience.map((entry, index) => ({
+      section: 'experience' as const,
+      entry: index,
+      count: entry.bullets.length,
+      keep: KEPT_EXPERIENCE_BULLETS,
+    })),
+    ...content.projects.map((entry, index) => ({
+      section: 'projects' as const,
+      entry: index,
+      count: entry.bullets.length,
+      keep: KEPT_PROJECT_BULLETS,
+    })),
+  ];
   for (;;) {
-    let longest = -1;
-    counts.forEach((count, entry) => {
-      if (count > 1 && (longest === -1 || count >= (counts[longest] ?? 0))) longest = entry;
+    let longest: (typeof entries)[number] | undefined;
+    for (const item of entries) {
+      if (item.count > item.keep && (longest === undefined || item.count >= longest.count)) {
+        longest = item;
+      }
+    }
+    if (longest === undefined) break;
+    longest.count -= 1;
+    steps.push({
+      kind: 'bullet',
+      section: longest.section,
+      entry: longest.entry,
+      index: longest.count,
     });
-    if (longest === -1) break;
-    const index = (counts[longest] ?? 1) - 1;
-    steps.push({ kind: 'bullet', section: 'experience', entry: longest, index });
-    counts[longest] = index;
   }
   for (let index = content.projects.length - 1; index >= 0; index -= 1) {
     steps.push({ kind: 'project', index });
@@ -835,18 +948,28 @@ export function trimOrder(content: CvContent): TrimStep[] {
 /** `content` with the first `count` steps of `trimOrder(content)` applied. Does not mutate. */
 export function applyTrim(content: CvContent, count: number): TrimmedCvContent {
   const steps = trimOrder(content).slice(0, Math.max(0, count));
-  const experience = content.experience.map((entry) => ({
-    ...entry,
-    bullets: [...entry.bullets],
-  }));
-  let projects = [...content.projects];
+  const clone = (list: CvContent['experience']) =>
+    list.map((entry) => ({ ...entry, bullets: [...entry.bullets] }));
+  const experience = clone(content.experience);
+  const bulletProjects = clone(content.projects);
   let skills = [...content.skills];
   let summary: CvContent['summary'] | null = content.summary;
+  let removedProjects = 0;
   for (const step of steps) {
-    if (step.kind === 'bullet') experience[step.entry]?.bullets.splice(step.index, 1);
-    else if (step.kind === 'project') projects = projects.filter((_, i) => i !== step.index);
-    else if (step.kind === 'skill') skills = skills.filter((_, i) => i !== step.index);
-    else summary = null;
+    if (step.kind === 'bullet') {
+      (step.section === 'experience' ? experience : bulletProjects)[step.entry]?.bullets.splice(
+        step.index,
+        1,
+      );
+    } else if (step.kind === 'project') {
+      removedProjects += 1;
+    } else if (step.kind === 'skill') {
+      skills = skills.filter((_, i) => i !== step.index);
+    } else {
+      summary = null;
+    }
   }
+  // Projects go last first, and the bullet steps all come before any project step.
+  const projects = bulletProjects.slice(0, bulletProjects.length - removedProjects);
   return { ...content, experience, projects, skills, summary };
 }
