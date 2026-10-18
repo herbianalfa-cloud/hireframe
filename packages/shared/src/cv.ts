@@ -1090,8 +1090,9 @@ function scrubText(text: string, count: () => void): string {
       const next = text[offset + match.length] ?? '';
       // At an edge there is nothing to join; next to punctuation the dash adds nothing.
       if (offset === 0 || next === '' || stop.test(next)) return '';
-      // Between words with no space on either side: a hyphen.
+      // Between words with no space on either side: a hyphen. So is a range between two figures.
       if (before === '' && after === '') return '-';
+      if (/\d/.test(prev) && /\d/.test(next)) return '-';
       return stop.test(prev) ? ' ' : ', ';
     },
   );
