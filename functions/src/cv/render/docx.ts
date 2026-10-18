@@ -19,6 +19,8 @@ import {
   BULLET_INDENT,
   CONTENT_WIDTH,
   PAGE,
+  RULE_SIZE,
+  RULE_SPACE,
   cvBlocks,
   noteBlocks,
   resolveStyles,
@@ -107,7 +109,14 @@ function paragraph(item: Block, styles: Styles): Paragraph {
   return new Paragraph({
     ...base,
     ...(item.kind === 'section'
-      ? { border: { bottom: { style: BorderStyle.SINGLE, size: 4, space: 1, color: BLACK } } }
+      ? { border: {
+            bottom: {
+              style: BorderStyle.SINGLE,
+              size: RULE_SIZE * 8,
+              space: RULE_SPACE,
+              color: BLACK,
+            },
+          } }
       : {}),
     children: runs,
   });
