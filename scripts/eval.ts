@@ -4,6 +4,8 @@
  *   npm run eval                          replay evals/recordings.jsonl (CI; no API key)
  *   LIVE=1 npm run eval                   call the API and refresh the recordings (local only)
  *   npm run eval -- --update-baseline     also store the agreement as the new floor
+ *   npm run eval -- --suite funnel|cv     run one suite (both run without it)
+ *   LIVE=1 npm run eval -- --suite cv     re-record only the CV suite (evals/cv-recordings.jsonl)
  */
 import { mkdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
