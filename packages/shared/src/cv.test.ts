@@ -1637,8 +1637,8 @@ describe('an education line citing a classification', () => {
   const HONOURS: CvFact = {
     id: 'fact-honours',
     type: 'achievement',
-    text: 'Graduated with First Class Honours in the BSc',
-    evidence: 'First Class Honours, BSc',
+    text: 'Graduated with First Class Honours',
+    evidence: 'First Class Honours',
     status: 'active',
   };
   const facts = [...CV_FACTS, DEGREE, HONOURS];
@@ -1709,24 +1709,46 @@ describe('an education line citing a classification', () => {
     ).toContainEqual({ path: 'education[0]', code: 'unsupported_text' });
   });
 
-  it('with two education facts, needs a shared degree token or year', () => {
-    const OTHER: CvFact = {
-      ...HONOURS,
-      id: 'fact-other',
-      text: 'Graduated with First Class Honours',
-      evidence: 'First Class Honours',
-    };
-    const verdictOther = validateCv(
-      line((e) => {
-        e.line = 'BSc Business Information Systems, First Class Honours';
-        e.achievementRef = 'F12';
-      }),
-      new Map([...aliases, ['F12', 'fact-other']]),
-      [...facts, OTHER],
-    );
-    expect(issuesOfVerdict(verdictOther)).toContainEqual({
-      path: 'education[0]',
-      code: 'wrong_fact_type',
+  describe('the degree-token rule', () => {
+    const fact = (id: string, type: CvFact['type'], text: string): CvFact => ({
+      id,
+      type,
+      text,
+      evidence: text,
+      status: 'active',
+    });
+    const MSC_DEGREE = fact('fact-msc-degree', 'education', 'MSc Data Science, Example University');
+    const CERTS = [
+      fact('fact-cert-a', 'education', 'Google Data Analytics Certificate'),
+      fact('fact-cert-b', 'education', 'Scrum Fundamentals Certificate'),
+    ];
+    const run = (extra: CvFact[], achievement: CvFact, factRef: string, text: string) =>
+      validateCv(
+        edited((cv) => {
+          cv.education = [{ line: text, factRef, achievementRef: 'F20' }];
+        }),
+        new Map([...aliases, ['F20', achievement.id], ['F21', MSC_DEGREE.id]]),
+        [...facts, ...extra, achievement],
+      );
+
+    it('(a) passes a BSc, two certificates and an honours achievement naming no degree', () => {
+      expect(
+        run(CERTS, HONOURS, 'F10', 'BSc Business Information Systems, First Class Honours'),
+      ).toEqual({ ok: true });
+    });
+
+    it('(b) refuses an achievement that names neither of two degrees and shares no year', () => {
+      const other = fact('fact-other', 'achievement', 'Graduated with Merit');
+      expect(
+        issuesOfVerdict(run([MSC_DEGREE], other, 'F10', 'BSc Business Information Systems, Merit')),
+      ).toContainEqual({ path: 'education[0]', code: 'wrong_fact_type' });
+    });
+
+    it('(c) passes "MSc with Distinction" on the MSc line', () => {
+      const distinction = fact('fact-dist', 'achievement', 'MSc with Distinction');
+      expect(run([MSC_DEGREE], distinction, 'F21', 'MSc Data Science, Distinction')).toEqual({
+        ok: true,
+      });
     });
   });
 
