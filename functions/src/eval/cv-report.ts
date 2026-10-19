@@ -82,13 +82,19 @@ export interface CvGateResult {
 export interface CvBaselineContext {
   rubric: string;
   promptVersion: string;
-  /** `--update-baseline` was given, so a baseline from another rubric or prompt is replaced. */
+  /** `--update-baseline` was given, so a baseline from another rubric is replaced. */
   updating?: boolean;
+  /** `--accept-lower` was given, so a lower mean under the same rubric may be stored. */
+  acceptLower?: boolean;
 }
 
-/** Whether the baseline was measured under this rubric and prompt (L5 of the CV quality review). */
+/**
+ * Whether the baseline was measured under this rubric (L5, M-new-2 of the CV quality reviews). A
+ * score from the same rubric is comparable across prompts; only a rubric change alters the scale.
+ * `promptVersion` stays in the file as a record.
+ */
 export const baselineMatches = (baseline: CvBaseline, context: CvBaselineContext): boolean =>
-  baseline.rubric === context.rubric && baseline.promptVersion === context.promptVersion;
+  baseline.rubric === context.rubric;
 
 export function gateCv(
   results: readonly CvCaseResult[],
@@ -131,7 +137,7 @@ export function gateCv(
   const comparable = baseline !== null && (!context || baselineMatches(baseline, context));
   if (baseline && context && !comparable && context.updating !== true) {
     reasons.push(
-      `The baseline was set under ${baseline.rubric ?? 'an unknown rubric'} and ${baseline.promptVersion ?? 'an unknown prompt'}, not ${context.rubric} and ${context.promptVersion}: rerun with --update-baseline.`,
+      `The baseline was set under ${baseline.rubric ?? 'an unknown rubric'}, not ${context.rubric}: rerun with --update-baseline.`,
     );
   }
   if (comparable && summary.fullMean < baseline.mean - CV_BASELINE_SLACK - 1e-9) {
@@ -143,18 +149,24 @@ export function gateCv(
 }
 
 /**
- * Whether `--update-baseline` may store this mean. Under the same rubric and prompt a lower mean
- * cannot be stored (each update would otherwise lower the floor by up to the slack).
+ * Whether `--update-baseline` may store this mean. Under the same rubric (whatever the prompt) a
+ * mean below the stored one is stored only with `--accept-lower`, so an update never lowers the
+ * floor by accident. A rubric change skips the comparison.
  */
 export function canStoreBaseline(
   mean: number,
   baseline: CvBaseline | null,
   context: CvBaselineContext,
 ): { ok: true } | { ok: false; reason: string } {
-  if (baseline && baselineMatches(baseline, context) && mean < baseline.mean - 1e-9) {
+  if (
+    baseline &&
+    baselineMatches(baseline, context) &&
+    mean < baseline.mean - 1e-9 &&
+    context.acceptLower !== true
+  ) {
     return {
       ok: false,
-      reason: `Mean ${num(mean)} is below the stored ${num(baseline.mean)} under the same rubric and prompt; a baseline only moves up unless the rubric or prompt changed.`,
+      reason: `Mean ${num(mean)} is below the stored ${num(baseline.mean)} under the same rubric; rerun with --update-baseline --accept-lower to store the lower mean.`,
     };
   }
   return { ok: true };

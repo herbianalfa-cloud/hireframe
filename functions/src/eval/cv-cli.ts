@@ -107,6 +107,7 @@ export async function runCvSuite(args: readonly string[], live: boolean): Promis
     rubric,
     promptVersion: CV_PROMPT_VERSION,
     updating: args.includes('--update-baseline'),
+    acceptLower: args.includes('--accept-lower'),
   };
   const verdict = gateCv(results, cases.length, baseline, context);
   if (!verdict.ok) {
@@ -131,6 +132,11 @@ export async function runCvSuite(args: readonly string[], live: boolean): Promis
       updatedAt: new Date().toISOString().slice(0, 10),
     };
     writeFileSync(CV_FILES.baseline, `${JSON.stringify(next, null, 2)}\n`);
+    if (baseline && next.mean < baseline.mean) {
+      console.log(
+        `cv eval: lower mean accepted: stored ${baseline.mean.toFixed(2)}, new ${next.mean.toFixed(2)}`,
+      );
+    }
     console.log(`cv eval: baseline set to ${next.mean.toFixed(2)}`);
   }
 }
