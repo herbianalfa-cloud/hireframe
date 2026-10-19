@@ -152,6 +152,7 @@ export function CvPreview({
     if (stored) saveBlob(stored.blob, stored.fileName);
   };
   const step = ZOOM_STEPS.indexOf(zoom);
+  const textId = `cv-preview-text-${cvId}`;
   const zoomable = loaded.status === 'ready' && pageCount > 0;
 
   return (
@@ -284,13 +285,14 @@ export function CvPreview({
                       }}
                       role="img"
                       aria-label={`CV page ${String(index + 1)} of ${String(loaded.pages)}`}
+                      aria-describedby={textId}
                       className="max-w-none border bg-white shadow-sm"
                     />
                   ))}
                 </div>
                 <details className="mt-4 text-sm">
                   <summary className="min-h-11 cursor-pointer py-2">Text of the CV</summary>
-                  <div className="mt-1 space-y-1 text-muted-foreground">
+                  <div id={textId} className="mt-1 space-y-1 text-muted-foreground">
                     {loaded.lines.map((line, index) => (
                       <p key={index}>{line}</p>
                     ))}
