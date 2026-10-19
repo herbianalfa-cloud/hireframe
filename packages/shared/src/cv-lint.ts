@@ -51,8 +51,10 @@ const CONTRAST: readonly RegExp[] = [
   // "less X, more Y", but not "less than 2 weeks, more than halving it": a comparison of figures.
   new RegExp(String.raw`\bless\b(?:(?!\bthan\b)[^.;!?,]){1,40},\s*more\b`, 'i'),
   // "isn't X, it's Y" with any subject: "Good onboarding isn't paperwork, it's trust."
+  // X is short and Y is a noun phrase: "The report was not due until May; it was finished in
+  // April." is a plain sequence of events (L-new-2 of the CV quality re-review).
   new RegExp(
-    String.raw`\b(?:isn't|wasn't|aren't|weren't|is not|was not|are not|were not)\b${GAP}[,;.]\s*(?:it's|it is|it was|that's|that is|that was|this is|they're|they are|they were)\b`,
+    String.raw`\b(?:isn't|wasn't|aren't|weren't|is not|was not|are not|were not)\s+(?:[\w'-]+\s+){0,3}[\w'-]+\s*[,;.]\s*(?:(?:it's|it is|that's|that is|this is|they're|they are)\b|(?:it|that|they) (?:was|were)\b(?!\s+(?:[\w'-]+(?:ed|en)|built|rebuilt|made|done|sent|set|run|kept|held|left|lost|found|won|put|begun|shipped)\b))`,
     'i',
   ),
   // "not for X but for Y": "Built the dashboard not for show but for weekly decisions."
@@ -141,7 +143,7 @@ const INFLATED: readonly RegExp[] = [
 const OPENING_CLAIMS: readonly { open: RegExp; own: RegExp }[] = [
   {
     open: /^\s*leads?\b(?!\s+(?:time|times|paragraph|paragraphs|generation|gen|source|sources|sheet|magnet|capture|qualification|scoring)\b)/i,
-    own: /\b(?:lead|leads|led|leading|leadership|leader)\b/i,
+    own: /\b(?:lead|leads|led)\b/i,
   },
   { open: /^\s*manages?\b/i, own: /\bmanag(?:e|es|ed|ing|er|ement)\b/i },
   { open: /^\s*oversees\b/i, own: /\bovers(?:aw|ee|ees|eeing|een)\b/i },
@@ -156,21 +158,17 @@ const WEAK_OPENER =
 /** "I" is capital only; "me", "my" and "myself" in any case ("My onboarding work"). */
 const FIRST_PERSON_I = /\b(?:I|I'm|I've|I'd|I'll)\b/g;
 const FIRST_PERSON_ME = /\b(?:me|my|myself)\b/i;
-/** Words that can open a sentence before a real "I" ("Then I ran"); "Phase I" is a numeral. */
-const BEFORE_REAL_I =
-  /^(?:then|later|now|today|when|while|after|before|since|so|and|but|here|there|next|first|once|yes|as|if|because|although|though|where|whenever|whilst|until|thus|hence|also|still|soon|often|always|never)$/i;
+/** Nouns that take a Roman numeral: "Phase I", "Key Stage I". */
+const NUMERAL_NOUN =
+  /^(?:phase|part|stage|level|tier|grade|year|step|round|module|unit|book|volume|chapter)$/i;
 
-/** Whether the text says "I": not the Roman numeral after a capitalised word ("Phase I"). */
+/** Whether the text says "I": not the Roman numeral after a numeral noun ("Phase I") or before a capital ("Part I Overview"). */
 function saysI(value: string): boolean {
   for (const match of value.matchAll(FIRST_PERSON_I)) {
-    const before = /([\p{L}][\p{L}'-]*)\s+$/u.exec(value.slice(0, match.index))?.[1];
-    if (
-      before !== undefined &&
-      /^\p{Lu}/u.test(before) &&
-      !BEFORE_REAL_I.test(before) &&
-      match[0] === 'I'
-    ) {
-      continue;
+    if (match[0] === 'I') {
+      const before = /([\p{L}][\p{L}'-]*)\s+$/u.exec(value.slice(0, match.index))?.[1];
+      if (before !== undefined && NUMERAL_NOUN.test(before)) continue;
+      if (/^\s+[\p{Lu}\d]/u.test(value.slice(match.index + 1))) continue;
     }
     return true;
   }
@@ -272,7 +270,8 @@ const NOT_A_CLAIM_AFTER: readonly RegExp[] = [
   /^expert (?:interviews?|reviews?)\b/i,
 ];
 /** "a leading retailer": the adjective before a noun, but not "a leading role". */
-const LEADING_NOUN = /\ba leading (?!(?:role|position|part|team|voice|figure)\b)[a-z]+/i;
+const LEADING_NOUN =
+  /\ba leading (?!(?:role|position|part|team|voice|figure|contributor|analyst|member|expert|player|specialist)\b)[a-z]+/i;
 
 function notAClaim(value: string, index: number): boolean {
   const from = value.slice(index);
