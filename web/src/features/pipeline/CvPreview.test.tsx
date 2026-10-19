@@ -92,6 +92,9 @@ describe('the preview dialog', () => {
     release(file);
     const page = await screen.findByRole('img', { name: 'CV page 1 of 1' });
     expect(page.tagName).toBe('CANVAS');
+    // The canvas is described by the text version, which is real text.
+    const described = page.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(described)?.textContent).toContain('Data Analyst');
     expect(screen.queryByText(/pages\. A CV should fit on one/)).toBeNull();
     expect(screen.getByText('Data Analyst')).toBeDefined();
     expect(screen.getByLabelText('CV preview pages').tabIndex).toBe(0);
