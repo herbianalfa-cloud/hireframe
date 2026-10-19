@@ -15,7 +15,7 @@ import { gzipSync } from 'node:zlib';
 import { READ_WARNING } from '../web/src/services/read-warning.ts';
 
 // `CHECK_BUNDLE_DIST` points the check at another folder (the script's own tests use it).
-const DIST = process.env['CHECK_BUNDLE_DIST'] ?? 'web/dist';
+const DIST = process.env.CHECK_BUNDLE_DIST ?? 'web/dist';
 const MAX_CHUNK_BYTES = 500 * 1000;
 const MAX_INITIAL_GZIP_BYTES = 300 * 1000;
 // The pdf.js worker (legacy build, pinned) was 1,321 kB minified when measured; the cap leaves
