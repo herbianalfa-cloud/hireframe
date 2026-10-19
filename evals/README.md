@@ -63,9 +63,9 @@ Each case runs through `composeCv`, the worker's real path (write, retry once if
 | `npm run eval` | Replays both suites, with no API key and no cost. This is what CI and `npm run check` run. |
 | `npm run eval -- --suite cv` | Replays only the CV suite (`--suite funnel` only the funnel). |
 | `LIVE=1 npm run eval -- --suite cv` | Calls the API through `llm.call()` (own cap 200p, about 28p in practice) and rewrites only `cv-recordings.jsonl`. Local only. Ask the owner first. |
-| `npm run eval -- --suite cv --update-baseline` | Once the gate passes, stores the mean in `cv-baseline.json` as the new floor (9.77 now). |
+| `npm run eval -- --suite cv --update-baseline` | Once the gate passes, stores the mean in `cv-baseline.json` as the new floor (9.66 now, rubric v2). A rubric change needs it. A lower mean under the same rubric (a prompt change, say) is stored only with `--accept-lower`, which prints both means. |
 
-**Gates (replay):** recordings fresh; every case ships a valid one-page PDF whose DOCX text equals the PDF text in order; no hard lint finding in any final; no em dash; the injection marker absent; at least 6 of the 7 full-profile cases score 8.0 or more, with a mean of 8.3 or more and not below the baseline minus 0.2; every case uses at most 3 CV calls. The thin case only has to ship a valid one-page CV within 3 calls.
+**Gates (replay):** recordings fresh; every case ships a valid one-page PDF whose DOCX text equals the PDF text in order; no hard lint finding in any final; no em dash; the injection marker absent; at least 6 of the 7 full-profile cases score 8.0 or more, with a mean of 8.3 or more and not below the baseline minus 0.2 (the baseline is compared whenever the rubric matches, whatever the prompt); every case uses at most 3 CV calls. The thin case only has to ship a valid one-page CV within 3 calls.
 
 **The judge is report only.** `cvJudge` scores four subjective items (sounds like a graduate, plain and specific, tailored, cover note specific) and prints them beside the code score. It never fails the gate, and a failed judge call leaves its column empty.
 
