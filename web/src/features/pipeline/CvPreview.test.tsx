@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { saveBlob } from '@/lib/download';
 import { downloadCvFile } from '@/services/applications';
+import { PREVIEW_MAX_BYTES } from '@/services/cv-preview';
 import { TimeoutError } from '@/services/resilience';
 
 import { ApplicationCard } from './ApplicationCard';
@@ -119,6 +120,82 @@ describe('the preview dialog', () => {
     show();
     await user.click(previewButton());
     expect(await screen.findByText('This PDF has no pages. Regenerate the CV.')).toBeDefined();
+    // Nothing to draw: no zoom, and no Download or Try again in the body (Regenerate is the fix).
+    for (const name of ['Zoom out', 'Zoom in']) {
+      expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
+    }
+    const body = within(screen.getByLabelText('CV preview pages'));
+    expect(body.queryByRole('button')).toBeNull();
+  });
+
+  it('puts the page-count note in a status, not an alert, and names the scroll area', async () => {
+    const user = userEvent.setup();
+    pdf.openPdf.mockResolvedValue(document_(2));
+    show();
+    await user.click(previewButton());
+    const note = await screen.findByText(/This PDF has 2 pages/);
+    expect(note.getAttribute('role')).toBe('status');
+    expect(screen.getByRole('region', { name: 'CV preview pages' })).toBeDefined();
+  });
+
+  it('cancels the draw in progress when the zoom changes, and when the card unmounts', async () => {
+    const user = userEvent.setup();
+    const cancels = [vi.fn(), vi.fn(), vi.fn()];
+    for (const cancel of cancels) {
+      pdf.renderPage.mockReturnValueOnce({ promise: new Promise(() => undefined), cancel });
+    }
+    const { unmount } = show();
+    await user.click(previewButton());
+    await screen.findByRole('img');
+    await waitFor(() => {
+      expect(pdf.renderPage).toHaveBeenCalledTimes(1);
+    });
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(cancels[0]).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(pdf.renderPage).toHaveBeenCalledTimes(2);
+    });
+    unmount();
+    expect(cancels[1]).toHaveBeenCalledOnce();
+    expect(pdf.closePdf).toHaveBeenCalledOnce();
+  });
+
+  it('closes the document and the worker when the dialog closes during the open', async () => {
+    const user = userEvent.setup();
+    let release: (doc: ReturnType<typeof document_>) => void = () => undefined;
+    pdf.openPdf.mockReturnValue(new Promise((resolve) => (release = resolve)));
+    show();
+    await user.click(previewButton());
+    await waitFor(() => {
+      expect(pdf.openPdf).toHaveBeenCalledOnce();
+    });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    const late = document_(1);
+    release(late);
+    await waitFor(() => {
+      expect(pdf.closePdf).toHaveBeenCalledExactlyOnceWith(late);
+    });
+    expect(pdf.pageText).not.toHaveBeenCalled();
+  });
+
+  it('closes the document when the card unmounts during the open', async () => {
+    const user = userEvent.setup();
+    let release: (doc: ReturnType<typeof document_>) => void = () => undefined;
+    pdf.openPdf.mockReturnValue(new Promise((resolve) => (release = resolve)));
+    const { unmount } = show();
+    await user.click(previewButton());
+    await waitFor(() => {
+      expect(pdf.openPdf).toHaveBeenCalledOnce();
+    });
+    unmount();
+    const late = document_(1);
+    release(late);
+    await waitFor(() => {
+      expect(pdf.closePdf).toHaveBeenCalledExactlyOnceWith(late);
+    });
   });
 
   it('draws at the zoom chosen and holds the limits', async () => {
@@ -225,6 +302,40 @@ describe('failures', () => {
     );
   });
 
+  it('offers Download PDF for a file over the size cap, without opening it', async () => {
+    const user = userEvent.setup();
+    const big = { ...file, blob: new Blob([new Uint8Array(PREVIEW_MAX_BYTES + 1)]) };
+    vi.mocked(downloadCvFile).mockResolvedValue(big);
+    show();
+    await user.click(previewButton());
+    expect((await screen.findByRole('alert')).textContent).toMatch(
+      /too large.*Download it instead/,
+    );
+    expect(pdf.openPdf).not.toHaveBeenCalled();
+    const body = within(screen.getByLabelText('CV preview pages'));
+    await user.click(body.getByRole('button', { name: 'Download PDF' }));
+    expect(saveBlob).toHaveBeenCalledExactlyOnceWith(big.blob, big.fileName);
+  });
+
+  it('Try again after a draw error closes the old document and opens it again', async () => {
+    const user = userEvent.setup();
+    const first = document_(1);
+    const second = document_(1);
+    pdf.openPdf.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    pdf.renderPage.mockImplementationOnce(() => ({
+      promise: Promise.reject(new Error('canvas')),
+      cancel: vi.fn(),
+    }));
+    show();
+    await user.click(previewButton());
+    await screen.findByRole('alert');
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByRole('img');
+    expect(pdf.closePdf).toHaveBeenCalledWith(first);
+    expect(pdf.openPdf).toHaveBeenCalledTimes(2);
+    expect(downloadCvFile).toHaveBeenCalledTimes(1);
+  });
+
   // The fallback for anything the viewer does: the import, the open or the draw throws, and the
   // owner can still save the file. No browser sniffing is involved.
   it.each([
@@ -236,6 +347,11 @@ describe('failures', () => {
     [
       'the PDF will not open',
       () => pdf.openPdf.mockRejectedValue(new Error('Invalid PDF')),
+      /couldn't be shown here/,
+    ],
+    [
+      'the open passes its deadline',
+      () => pdf.openPdf.mockRejectedValue(new TimeoutError('pdf open timed out after 15000 ms')),
       /couldn't be shown here/,
     ],
     [

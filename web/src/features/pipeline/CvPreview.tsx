@@ -1,4 +1,4 @@
-import { Download, Eye, Loader2, Minus, Plus } from 'lucide-react';
+import { Download, Eye, Minus, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -82,8 +82,12 @@ export function CvPreview({
     void (async () => {
       try {
         const opened = await openCvPreview(stored.blob);
+        if (!isLive()) {
+          // The dialog closed during the open: the cleanup ran before there was a document.
+          void closePdf(opened);
+          return;
+        }
         held.doc = opened;
-        if (!isLive()) return;
         const pages = Math.min(opened.numPages, PREVIEW_MAX_PAGES);
         const lines: string[] = [];
         for (let page = 1; page <= pages; page += 1) {
@@ -148,6 +152,7 @@ export function CvPreview({
     if (stored) saveBlob(stored.blob, stored.fileName);
   };
   const step = ZOOM_STEPS.indexOf(zoom);
+  const zoomable = loaded.status === 'ready' && pageCount > 0;
 
   return (
     <>
@@ -186,7 +191,7 @@ export function CvPreview({
               variant="secondary"
               size="icon"
               aria-label="Zoom out"
-              disabled={loaded.status !== 'ready' || step <= 0}
+              disabled={!zoomable || step <= 0}
               onClick={() => {
                 setZoom(ZOOM_STEPS[Math.max(0, step - 1)] ?? 100);
               }}
@@ -195,7 +200,7 @@ export function CvPreview({
             </Button>
             <Button
               variant="secondary"
-              disabled={loaded.status !== 'ready' || zoom === 100}
+              disabled={!zoomable || zoom === 100}
               onClick={() => {
                 setZoom(100);
               }}
@@ -206,7 +211,7 @@ export function CvPreview({
               variant="secondary"
               size="icon"
               aria-label="Zoom in"
-              disabled={loaded.status !== 'ready' || step >= ZOOM_STEPS.length - 1}
+              disabled={!zoomable || step >= ZOOM_STEPS.length - 1}
               onClick={() => {
                 setZoom(ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, step + 1)] ?? 100);
               }}
@@ -223,6 +228,7 @@ export function CvPreview({
           </div>
           <div
             ref={scrollRef}
+            role="region"
             tabIndex={0}
             aria-label="CV preview pages"
             className="mt-3 min-h-0 flex-1 overflow-auto rounded-md border bg-background p-4"
@@ -265,7 +271,7 @@ export function CvPreview({
             {loaded.status === 'ready' && loaded.pages > 0 ? (
               <div>
                 {loaded.pages > 1 ? (
-                  <p role="alert" className="mb-3 text-sm text-verdict-near-miss">
+                  <p role="status" className="mb-3 text-sm text-verdict-near-miss">
                     This PDF has {String(loaded.pages)} pages. A CV should fit on one.
                   </p>
                 ) : null}
@@ -293,9 +299,6 @@ export function CvPreview({
               </div>
             ) : null}
           </div>
-          {loaded.status === 'loading' ? (
-            <Loader2 aria-hidden="true" className="sr-only animate-spin" />
-          ) : null}
         </DialogContent>
       </Dialog>
     </>
