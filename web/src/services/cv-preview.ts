@@ -91,11 +91,6 @@ export function previewErrorMessage(error: unknown): string {
   }
 }
 
-/** True when the PDF itself was read, so the owner can still save it. */
-export function hasFile(error: unknown): boolean {
-  return atStep('fetch', error).step !== 'fetch';
-}
-
 /** One structured line: scalars only, never any CV text. */
 export function logPreviewError(error: unknown): void {
   const failure = atStep('fetch', error);
