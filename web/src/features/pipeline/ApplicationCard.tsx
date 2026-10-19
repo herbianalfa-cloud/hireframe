@@ -1,4 +1,12 @@
-import type { Application, CvFileFormat, CvFileKind, Question } from '@hireframe/shared';
+import {
+  CV_SCORE_TARGET,
+  FINDING_INFO,
+  type Application,
+  type CvFileFormat,
+  type CvFileKind,
+  type CvQuality,
+  type Question,
+} from '@hireframe/shared';
 import {
   CircleCheck,
   CircleMinus,
@@ -22,6 +30,7 @@ import {
   applicationErrorMessage,
   downloadCvFile,
   downloadErrorMessage,
+  loadReadyScores,
   regenerateApplication,
   retryApplication,
   skipAllQuestions,
@@ -29,6 +38,7 @@ import {
   withdrawApplication,
   type ApplicationView,
   type PipelineStage,
+  type ReadyScores,
 } from '@/services/applications';
 
 import { useAction, type ActionState } from './hooks';
@@ -260,6 +270,45 @@ const FILES: readonly { kind: CvFileKind; format: CvFileFormat; label: string; n
   },
 ];
 
+const oneDecimal = (value: number): string => String(Number(value.toFixed(1)));
+
+/** At most two distinct findings, hard ones first, in the owner's words (`cv-findings.ts`). */
+function belowTargetWords(quality: CvQuality): string[] {
+  const codes = [...new Set(quality.findings.map((finding) => finding.code))];
+  const rank = (code: (typeof codes)[number]) => (FINDING_INFO[code].severity === 'hard' ? 0 : 1);
+  return codes
+    .sort((a, b) => rank(a) - rank(b))
+    .slice(0, 2)
+    .map((code) => FINDING_INFO[code].label);
+}
+
+/**
+ * "Quality 8.6/10 · Luck 7/10". Luck is the job's, so a job without one shows the quality alone;
+ * a version written before scoring has no quality and shows nothing new. Below the target (a
+ * total under it or a hard finding) it says what is wrong and what can help.
+ */
+function QualityLine({ scores }: { scores: ReadyScores | undefined }) {
+  const quality = scores?.quality;
+  if (!scores || !quality) return null;
+  const hard = quality.findings.some((finding) => FINDING_INFO[finding.code].severity === 'hard');
+  const below = quality.total < CV_SCORE_TARGET || hard;
+  const words = below ? belowTargetWords(quality) : [];
+  return (
+    <div className="mt-2">
+      <p className="text-sm font-medium">
+        Quality {oneDecimal(quality.total)}/10
+        {scores.luck === null ? '' : ` · Luck ${oneDecimal(scores.luck)}/10`}
+      </p>
+      {below ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Below target{words.length > 0 ? `: ${words.join('; ')}` : ''}. Regenerate with notes, or
+          add facts on Profile.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function Ready({
   application,
   headerName,
@@ -286,6 +335,23 @@ function Ready({
     }
   }, [regenerating]);
   const cvId = application.currentCvId;
+  // Keyed by the version, so a new version never shows the last one's score while it loads.
+  const [loaded, setLoaded] = useState<{ cvId: string; scores: ReadyScores }>();
+  useEffect(() => {
+    if (!cvId) return;
+    let current = true;
+    // The line is an extra: a read that fails leaves it out and the downloads still work.
+    loadReadyScores(application.jobId, cvId).then(
+      (scores) => {
+        if (current) setLoaded({ cvId, scores });
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [application.jobId, cvId]);
+  const scores = loaded && loaded.cvId === cvId ? loaded.scores : undefined;
 
   async function download(file: (typeof FILES)[number]) {
     if (!cvId) return;
@@ -317,6 +383,7 @@ function Ready({
               ? ` This is version ${String(application.cvIds.length)}.`
               : ''}
           </p>
+          <QualityLine scores={scores} />
           <ul className="mt-2 flex flex-wrap gap-2" aria-label="Downloads">
             {FILES.map((file) => (
               <li key={file.label}>

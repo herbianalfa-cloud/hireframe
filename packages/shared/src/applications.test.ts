@@ -114,6 +114,16 @@ function application(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe('APPLICATION_LIMITS', () => {
+  it('allows two writes and one revision, three calls in all', () => {
+    expect(APPLICATION_LIMITS.maxWrites).toBe(2);
+    expect(APPLICATION_LIMITS.maxRevisions).toBe(1);
+    expect(APPLICATION_LIMITS.maxAttempts).toBe(
+      APPLICATION_LIMITS.maxWrites + APPLICATION_LIMITS.maxRevisions,
+    );
+  });
+});
+
 describe('ApplicationSchema', () => {
   it('accepts an application in every stage', () => {
     for (const stage of APPLICATION_STAGES) {
@@ -143,8 +153,23 @@ describe('ApplicationSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('keeps the code-and-path pairs of the last invalid output, and parses a doc without them', () => {
+    const at = [{ code: 'uncited', path: 'skills[2]' }];
+    expect(ApplicationSchema.safeParse(application({ lastIssueAt: at })).success).toBe(true);
+    expect(ApplicationSchema.safeParse(application({})).success).toBe(true);
+    // A path is structure only: text with spaces or punctuation is refused.
+    const bad = [{ code: 'uncited', path: 'Led a team of 4!' }];
+    expect(ApplicationSchema.safeParse(application({ lastIssueAt: bad })).success).toBe(false);
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      code: 'uncited',
+      path: `skills[${String(i)}]`,
+    }));
+    expect(ApplicationSchema.safeParse(application({ lastIssueAt: many })).success).toBe(false);
+  });
+
   it('bounds attempts, questions, notes and the blocked code', () => {
-    expect(ApplicationSchema.safeParse(application({ attempt: 3 })).success).toBe(false);
+    expect(ApplicationSchema.safeParse(application({ attempt: 3 })).success).toBe(true);
+    expect(ApplicationSchema.safeParse(application({ attempt: 4 })).success).toBe(false);
     expect(ApplicationSchema.safeParse(application({ notes: 'x'.repeat(501) })).success).toBe(
       false,
     );

@@ -60,14 +60,20 @@ export type CvIssueCode = (typeof CV_ISSUE_CODES)[number];
 export const APPLICATION_LIMITS = {
   /** Questions asked about one job. */
   maxQuestions: 5,
-  /** Model calls one job may cost (the worker counts an attempt before it calls). */
-  maxAttempts: 2,
+  /** Writes one job may cost: the first draft and one retry after an invalid output. */
+  maxWrites: 2,
+  /** Revision calls one job may cost. */
+  maxRevisions: 1,
+  /** Model calls one job may cost, writes and revision together (counted before each call). */
+  maxAttempts: 3,
   requirement: FUNNEL_LIMITS.requirementText,
   notes: 500,
   /** Answer text sent to the `application` callable. */
   answer: 2_000,
   /** CV versions kept per application. */
   cvIds: 50,
+  /** Code-and-path pairs kept from the last invalid output. */
+  issueAt: 24,
 } as const;
 
 export const QuestionAnswerSchema = z.discriminatedUnion('kind', [
@@ -116,6 +122,19 @@ export const ApplicationSchema = z
     attempt: z.int().min(0).max(APPLICATION_LIMITS.maxAttempts),
     /** Issue codes from the last invalid output, appended to the next call's prompt. */
     lastIssues: z.array(z.enum(CV_ISSUE_CODES)).max(CV_ISSUE_CODES.length).exactOptional(),
+    /** Where those codes were found (paths only, never the text), so the retry can say where. */
+    lastIssueAt: z
+      .array(
+        z.strictObject({
+          code: z.enum(CV_ISSUE_CODES),
+          path: z
+            .string()
+            .max(120)
+            .regex(/^[A-Za-z0-9_.[\]]+$/),
+        }),
+      )
+      .max(APPLICATION_LIMITS.issueAt)
+      .exactOptional(),
     notes: z.string().trim().min(1).max(APPLICATION_LIMITS.notes).exactOptional(),
     cvIds: z.array(z.string().min(1)).max(APPLICATION_LIMITS.cvIds),
     currentCvId: z.string().min(1).exactOptional(),

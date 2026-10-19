@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { CV_ISSUE_CODES, type CvIssueCode } from './applications.js';
 import {
   applyTrim,
+  clampCvCounts,
+  dropUnsupportedSkills,
   CV_LIMITS,
   CvContentSchema,
   CvContentShapeSchema,
@@ -11,12 +13,16 @@ import {
   cvId,
   citedFactIds,
   figuresIn,
+  formatEducationDates,
   formatFactDates,
   hasContactDetails,
   isPrintable,
   isWinAnsi,
   normaliseCvText,
   issueCodes,
+  factEndKey,
+  orderEntries,
+  scrubDashes,
   trimOrder,
   validateCv,
   type CvContent,
@@ -909,10 +915,10 @@ describe('trimOrder', () => {
   it('then projects, skills over 10 and the summary, and never a heading or education', () => {
     const steps = trimOrder(fullCv());
     const kinds = steps.map((step) => step.kind);
-    // 5+5+4+2 bullets down to one each: 16 - 4 = 12 bullet steps.
-    expect(kinds.filter((k) => k === 'bullet')).toHaveLength(12);
+    // Experience 5,5,4,2 down to 2 each (8 steps), and the 2-bullet project down to 1 (1 step).
+    expect(kinds.filter((k) => k === 'bullet')).toHaveLength(9);
     expect(kinds).toEqual([
-      ...Array<string>(12).fill('bullet'),
+      ...Array<string>(9).fill('bullet'),
       'project',
       'project',
       'project',
@@ -927,11 +933,52 @@ describe('trimOrder', () => {
     ]);
   });
 
-  it('leaves every experience entry one bullet and the education alone after all steps', () => {
+  it('takes bullets from Experience and Projects alike, the project first on a tie', () => {
+    const content = fullCv();
+    content.experience = [at(content.experience, 3)]; // 2 bullets: at its floor
+    const bullets = (n: number) =>
+      Array.from({ length: n }, () => ({ text: 'x', factRefs: [aliasOf('fact-clients')] }));
+    const project = at(content.projects, 0);
+    content.projects = [
+      { ...project, bullets: bullets(3) },
+      { ...project, bullets: bullets(3) },
+    ];
+    expect(trimOrder(content).slice(0, 4)).toEqual([
+      { kind: 'bullet', section: 'projects', entry: 1, index: 2 },
+      { kind: 'bullet', section: 'projects', entry: 0, index: 2 },
+      { kind: 'bullet', section: 'projects', entry: 1, index: 1 },
+      { kind: 'bullet', section: 'projects', entry: 0, index: 1 },
+    ]);
+  });
+
+  it('keeps 2 bullets on every experience entry and 1 on every project until they are removed whole', () => {
+    const content = fullCv();
+    const lastBullet = trimOrder(content).findLastIndex((step) => step.kind === 'bullet');
+    const trimmed = applyTrim(content, lastBullet + 1);
+    expect(trimmed.experience.map((e) => e.bullets.length)).toEqual([2, 2, 2, 2]);
+    expect(trimmed.projects.map((e) => e.bullets.length)).toEqual([1, 1, 1]);
+  });
+
+  it('removes projects oldest (last) first, keeping the newer ones', () => {
+    const content = fullCv();
+    const project = at(content.projects, 0);
+    content.projects = ['A', 'B', 'C'].map((role) => ({
+      ...project,
+      heading: { ...project.heading, role },
+    }));
+    const firstProject = trimOrder(content).findIndex((step) => step.kind === 'project');
+    expect(applyTrim(content, firstProject + 1).projects.map((p) => p.heading.role)).toEqual([
+      'A',
+      'B',
+    ]);
+    expect(applyTrim(content, firstProject + 2).projects.map((p) => p.heading.role)).toEqual(['A']);
+  });
+
+  it('leaves every experience entry two bullets and the education alone after all steps', () => {
     const content = fullCv();
     const all = trimOrder(content).length;
     const trimmed = applyTrim(content, all);
-    expect(trimmed.experience.map((e) => e.bullets.length)).toEqual([1, 1, 1, 1]);
+    expect(trimmed.experience.map((e) => e.bullets.length)).toEqual([2, 2, 2, 2]);
     expect(trimmed.experience.map((e) => e.heading)).toEqual(
       content.experience.map((e) => e.heading),
     );
@@ -939,6 +986,15 @@ describe('trimOrder', () => {
     expect(trimmed.projects).toEqual([]);
     expect(trimmed.skills).toHaveLength(10);
     expect(trimmed.summary).toBeNull();
+  });
+
+  it('never cuts an experience entry below 2 bullets, and an entry with fewer is left alone', () => {
+    const content = fullCv();
+    const one = at(content.experience, 0);
+    content.experience = [{ ...one, bullets: one.bullets.slice(0, 1) }];
+    expect(
+      trimOrder(content).some((step) => step.kind === 'bullet' && step.section === 'experience'),
+    ).toBe(false);
   });
 
   it('applies the first n steps only, and 0 changes nothing', () => {
@@ -949,10 +1005,9 @@ describe('trimOrder', () => {
     expect(one.summary).toEqual(content.summary);
   });
 
-  it('in a small CV removes two bullets, the project and the summary, and no more', () => {
+  it('in a small CV removes one bullet, the project and the summary, and no more', () => {
     expect(trimOrder(validCv())).toEqual([
       { kind: 'bullet', section: 'experience', entry: 0, index: 2 },
-      { kind: 'bullet', section: 'experience', entry: 0, index: 1 },
       { kind: 'project', index: 0 },
       { kind: 'summary' },
     ]);
@@ -1027,6 +1082,54 @@ describe('schemas', () => {
     };
     expect(CvDocSchema.safeParse(doc).success).toBe(true);
     expect(CvDocSchema.safeParse({ ...doc, tokens: 5 }).success).toBe(false);
+  });
+
+  describe('quality', () => {
+    const quality = {
+      rubric: 'rubric-v1',
+      total: 8.6,
+      criteria: { fill: 2, writing: 2.25, numbers: 1, tailoring: 1.6, craft: 1.5, structure: 0.25 },
+      findings: [{ code: 'intensifier', path: 'experience[0].bullets[1]' }],
+      revised: true,
+      draftTotal: 7.2,
+      dashesReplaced: 2,
+      layout: { bodySize: 10.5, fill: 0.97 },
+    };
+    const doc = {
+      jobId: 'job-1',
+      applicationVersion: 1,
+      content: { ...validCv(), summary: null },
+      aliases: Object.fromEntries(CV_ALIASES),
+      factIds: [],
+      storagePaths: { cvPdf: 'a', cvDocx: 'b', notePdf: 'c', noteDocx: 'd' },
+      trimmed: 0,
+      model: 'claude-sonnet-5-5',
+      costPence: 4.3,
+      createdAt: new Date(),
+      schemaVersion: 1,
+    };
+
+    it('parses with a quality, and an old doc without one still parses', () => {
+      expect(CvDocSchema.safeParse(doc).success).toBe(true);
+      expect(CvDocSchema.safeParse({ ...doc, quality }).success).toBe(true);
+      for (const revisionSkipped of ['not_fixable', 'output', 'invalid']) {
+        expect(
+          CvDocSchema.safeParse({ ...doc, quality: { ...quality, revisionSkipped } }).success,
+        ).toBe(true);
+      }
+    });
+
+    it('refuses a finding with text, an unknown code, 21 findings or a score over 10', () => {
+      const bad = (override: object) =>
+        CvDocSchema.safeParse({ ...doc, quality: { ...quality, ...override } }).success;
+      expect(bad({ findings: [{ code: 'cliche', path: 'summary', text: 'x' }] })).toBe(false);
+      expect(bad({ findings: [{ code: 'other', path: 'summary' }] })).toBe(false);
+      expect(
+        bad({ findings: Array.from({ length: 21 }, () => ({ code: 'cliche', path: 'summary' })) }),
+      ).toBe(false);
+      expect(bad({ total: 10.5 })).toBe(false);
+      expect(bad({ revisionSkipped: 'because' })).toBe(false);
+    });
   });
 });
 
@@ -1367,5 +1470,654 @@ describe('rules no other test pins', () => {
     const facts = factsWith('fact-ttl', 'Cut client time-to-live by 10 per cent');
     const left = issuesOf(bullet('Cut client time-to-live by ten per cent.'), facts);
     expect(left.filter((issue) => issue.path === 'experience[0].bullets[1]')).toEqual([]);
+  });
+});
+
+describe('factEndKey and orderEntries', () => {
+  it('keys a month, a bare year as its December, and present or no end date after everything', () => {
+    expect(factEndKey({ start: '2023-10', end: '2024-05' })).toBe('2024-05');
+    expect(factEndKey({ end: '2024' })).toBe('2024-12');
+    expect(factEndKey({ start: '2024-01', end: 'present' })).toBe('9999-12');
+    expect(factEndKey({ start: '2024-01' })).toBe('9999-12');
+    expect(factEndKey({})).toBe('9999-12');
+    expect(factEndKey(undefined)).toBe('9999-12');
+    expect(factEndKey({ end: '2024-05' }) < factEndKey({ end: '2024' })).toBe(true);
+  });
+
+  const ends: Record<string, string> = { F1: '2022-06', F2: '2024-05', F3: '9999-12', F4: '2024' };
+  const endKeyOf = (ref: string) => ends[ref] ?? '9999-12';
+  const entry = (role: string, factRef: string) => ({
+    heading: { role, org: 'Org', factRef },
+    bullets: [],
+  });
+
+  it('sorts experience, projects and education newest first, ties in the model order', () => {
+    const content = {
+      ...validCv(),
+      experience: [entry('old', 'F1'), entry('current', 'F3'), entry('mid', 'F2')],
+      projects: [entry('p-old', 'F1'), entry('p-new', 'F2')],
+      education: [
+        { line: 'older', factRef: 'F1' },
+        { line: 'newer', factRef: 'F2' },
+      ],
+    };
+    const ordered = orderEntries(content, endKeyOf);
+    expect(ordered.experience.map((e) => e.heading.role)).toEqual(['current', 'mid', 'old']);
+    expect(ordered.projects.map((e) => e.heading.role)).toEqual(['p-new', 'p-old']);
+    expect(ordered.education.map((e) => e.line)).toEqual(['newer', 'older']);
+
+    const tied = {
+      ...content,
+      experience: [entry('b', 'F2'), entry('a', 'F2'), entry('c', 'F2')],
+    };
+    expect(orderEntries(tied, endKeyOf).experience.map((e) => e.heading.role)).toEqual([
+      'b',
+      'a',
+      'c',
+    ]);
+  });
+
+  it('does not mutate its input or touch the bullets, summary and skills', () => {
+    const content = { ...validCv(), experience: [entry('x', 'F1'), entry('y', 'F2')] };
+    const before = structuredClone(content);
+    const ordered = orderEntries(content, endKeyOf);
+    expect(content).toEqual(before);
+    expect(ordered.summary).toEqual(content.summary);
+    expect(ordered.skills).toEqual(content.skills);
+    expect(ordered.coverNote).toEqual(content.coverNote);
+  });
+});
+
+describe('scrubDashes', () => {
+  const scrub = (text: string) =>
+    scrubDashes({ ...validCv(), summary: { text, factRefs: ['F1'] } });
+  const text = (value: string) => scrub(value).content.summary.text;
+
+  it('writes a spaced dash between two figures as a hyphen, so a range stays a range', () => {
+    expect(text('Trained teams of 10 \u2013 15 people')).toBe('Trained teams of 10-15 people');
+  });
+
+  it('keeps a range of years, and does not join a year and a count into a date (N-new-4)', () => {
+    expect(text('Worked 2021 \u2013 2023 on onboarding')).toBe('Worked 2021-2023 on onboarding');
+    expect(text('Joined in 2023 \u2013 12 clients onboarded')).toBe(
+      'Joined in 2023, 12 clients onboarded',
+    );
+    expect(text('Cut 15 \u2013 10 steps')).toBe('Cut 15, 10 steps');
+  });
+
+  it('turns a spaced em or en dash into a comma and an unspaced one into a hyphen', () => {
+    expect(text('Built dashboards \u2014 and trained users')).toBe(
+      'Built dashboards, and trained users',
+    );
+    expect(text('Built dashboards \u2013 and trained users')).toBe(
+      'Built dashboards, and trained users',
+    );
+    expect(text('data\u2014driven and 2019\u20132021')).toBe('data-driven and 2019-2021');
+  });
+
+  it('leaves no doubled punctuation and no dash at an edge', () => {
+    expect(text('Done. \u2014 Then more')).toBe('Done. Then more');
+    expect(text('One \u2014, two')).toBe('One, two');
+    expect(text('Two \u2014. Three')).toBe('Two. Three');
+    expect(text('\u2014 starts here')).toBe('starts here');
+    expect(text('ends here \u2014')).toBe('ends here');
+  });
+
+  it('counts what it replaced and reports 0 when there is nothing', () => {
+    expect(scrub('a \u2014 b \u2013 c d\u2014e').replaced).toBe(3);
+    const clean = scrub('Nothing to see, here.');
+    expect(clean.replaced).toBe(0);
+    expect(clean.content).toEqual({
+      ...validCv(),
+      summary: { text: 'Nothing to see, here.', factRefs: ['F1'] },
+    });
+  });
+
+  it('leaves text without a dash byte for byte, including "e.g.," and hyphens', () => {
+    expect(text('Used SQL, e.g., joins - and time-to-live: 30%.')).toBe(
+      'Used SQL, e.g., joins - and time-to-live: 30%.',
+    );
+  });
+
+  it('does not mutate its input, and leaves citations alone', () => {
+    const content = validCv();
+    const before = structuredClone(content);
+    const { content: out } = scrubDashes(content);
+    expect(content).toEqual(before);
+    expect(out.summary.factRefs).toEqual(content.summary.factRefs);
+  });
+
+  it('keeps figures, skill label parts and headings valid: validateCv still passes', () => {
+    const content = validCv();
+    content.summary.text =
+      'Customer-facing analyst \u2014 cut client time-to-live by 30% \u2013 and wrote clear documentation.';
+    content.skills = [
+      { label: 'SQL \u2014 Python', factRefs: [aliasOf('fact-sql'), aliasOf('fact-python')] },
+    ];
+    expect(check(content).ok).toBe(true);
+    const { content: scrubbed, replaced } = scrubDashes(content);
+    expect(replaced).toBe(3);
+    expect(scrubbed.summary.text).toBe(
+      'Customer-facing analyst, cut client time-to-live by 30%, and wrote clear documentation.',
+    );
+    expect(scrubbed.skills[0]?.label).toBe('SQL, Python');
+    expect(check(scrubbed)).toEqual({ ok: true });
+    expect(figuresIn(scrubbed.summary.text)).toEqual(figuresIn(content.summary.text));
+  });
+
+  it('works on trimmed content (a null summary) too', () => {
+    const trimmed = applyTrim(validCv(), trimOrder(validCv()).length);
+    expect(scrubDashes(trimmed).content).toEqual(trimmed);
+  });
+});
+
+describe('a project with no organisation', () => {
+  const noOrg = (section: 'projects' | 'experience') =>
+    edited((cv) => {
+      at(cv[section], 0).heading.org = '';
+    });
+
+  it('is allowed in the strict and the loose schema, and by validateCv', () => {
+    const cv = noOrg('projects');
+    expect(CvContentSchema.safeParse(cv).success).toBe(true);
+    expect(CvContentShapeSchema.safeParse(cv).success).toBe(true);
+    expect(check(cv)).toEqual({ ok: true });
+  });
+
+  it('is still refused on an experience entry, as too_long on the org', () => {
+    const cv = noOrg('experience');
+    expect(CvContentSchema.safeParse(cv).success).toBe(false);
+    expect(issuesOf(cv)).toEqual([{ path: 'experience[0].heading.org', code: 'too_long' }]);
+  });
+
+  it('still needs a real role word from the fact, and a project org of whitespace is allowed', () => {
+    const cv = edited((c) => {
+      at(c.projects, 0).heading = { role: 'Rocket', org: '  ', factRef: aliasOf('fact-olist') };
+    });
+    expect(issuesOf(cv)).toEqual([{ path: 'projects[0].heading.role', code: 'unsupported_text' }]);
+  });
+});
+
+describe('an education line citing a classification', () => {
+  const DEGREE: CvFact = {
+    id: 'fact-degree',
+    type: 'education',
+    text: 'BSc Business Information Systems, Example University',
+    evidence: 'BSc Business Information Systems, Example University',
+    status: 'active',
+  };
+  const HONOURS: CvFact = {
+    id: 'fact-honours',
+    type: 'achievement',
+    text: 'Graduated with First Class Honours',
+    evidence: 'First Class Honours',
+    status: 'active',
+  };
+  const facts = [...CV_FACTS, DEGREE, HONOURS];
+  const aliases = new Map([...CV_ALIASES, ['F10', 'fact-degree'], ['F11', 'fact-honours']]);
+  const line = (edit: (entry: CvContent['education'][number]) => void): CvContent =>
+    edited((cv) => {
+      cv.education = [{ line: 'BSc Business Information Systems', factRef: 'F10' }];
+      edit(at(cv.education, 0));
+    });
+  const verdict = (content: CvContent) => validateCv(content, aliases, facts);
+  const issuesOfVerdict = (result: ReturnType<typeof verdict>): CvIssue[] =>
+    result.ok ? [] : result.issues;
+
+  it('may cite one education fact plus one achievement, and the word check uses both', () => {
+    const both = line((e) => {
+      e.line = 'BSc Business Information Systems, First Class Honours';
+      e.achievementRef = 'F11';
+    });
+    expect(verdict(both)).toEqual({ ok: true });
+    expect(CvContentSchema.safeParse(both).success).toBe(true);
+    expect(citedFactIds(both, aliases)).toEqual(
+      expect.arrayContaining(['fact-degree', 'fact-honours']),
+    );
+  });
+
+  it("refuses an unrelated award and its figure, and another degree's classification", () => {
+    const MSC: CvFact = {
+      id: 'fact-msc',
+      type: 'achievement',
+      text: 'Awarded a Distinction for the MSc dissertation',
+      evidence: 'Distinction, MSc dissertation',
+      status: 'active',
+    };
+    const PRIZE: CvFact = {
+      id: 'fact-prize',
+      type: 'achievement',
+      text: 'Won first prize at a 60-person hackathon with a fraud-detection model',
+      evidence: 'first prize, 60-person hackathon',
+      status: 'active',
+    };
+    const BA: CvFact = {
+      id: 'fact-ba',
+      type: 'education',
+      text: 'BSc Economics, Example University',
+      evidence: 'BSc Economics, Example University',
+      status: 'active',
+    };
+    const many = [...facts, MSC, PRIZE, BA];
+    const manyAliases = new Map([
+      ...aliases,
+      ['F12', 'fact-msc'],
+      ['F13', 'fact-prize'],
+      ['F14', 'fact-ba'],
+    ]);
+    const check = (text: string, ref: string) =>
+      validateCv(
+        edited((cv) => {
+          cv.education = [{ line: text, factRef: 'F14', achievementRef: ref }];
+        }),
+        manyAliases,
+        many,
+      );
+    expect(check('BSc Economics, Example University, Distinction', 'F12')).toMatchObject({
+      ok: false,
+    });
+    expect(
+      issuesOfVerdict(check('BSc Economics, first prize, 60-person hackathon', 'F13')),
+    ).toContainEqual({ path: 'education[0]', code: 'unsupported_text' });
+  });
+
+  describe('the degree-token rule', () => {
+    const fact = (id: string, type: CvFact['type'], text: string): CvFact => ({
+      id,
+      type,
+      text,
+      evidence: text,
+      status: 'active',
+    });
+    const MSC_DEGREE = fact('fact-msc-degree', 'education', 'MSc Data Science, Example University');
+    const CERTS = [
+      fact('fact-cert-a', 'education', 'Google Data Analytics Certificate'),
+      fact('fact-cert-b', 'education', 'Scrum Fundamentals Certificate'),
+    ];
+    const run = (extra: CvFact[], achievement: CvFact, factRef: string, text: string) =>
+      validateCv(
+        edited((cv) => {
+          cv.education = [{ line: text, factRef, achievementRef: 'F20' }];
+        }),
+        new Map([...aliases, ['F20', achievement.id], ['F21', MSC_DEGREE.id]]),
+        [...facts, ...extra, achievement],
+      );
+
+    it('(a) passes a BSc, two certificates and an honours achievement naming no degree', () => {
+      expect(
+        run(CERTS, HONOURS, 'F10', 'BSc Business Information Systems, First Class Honours'),
+      ).toEqual({ ok: true });
+    });
+
+    it('(b) refuses an achievement that names neither of two degrees and shares no year', () => {
+      const other = fact('fact-other', 'achievement', 'Graduated with Merit');
+      expect(
+        issuesOfVerdict(run([MSC_DEGREE], other, 'F10', 'BSc Business Information Systems, Merit')),
+      ).toContainEqual({ path: 'education[0]', code: 'wrong_fact_type' });
+    });
+
+    it('(c) passes "MSc with Distinction" on the MSc line', () => {
+      const distinction = fact('fact-dist', 'achievement', 'MSc with Distinction');
+      expect(run([MSC_DEGREE], distinction, 'F21', 'MSc Data Science, Distinction')).toEqual({
+        ok: true,
+      });
+    });
+  });
+
+  describe('phrase-based classification (Fix C)', () => {
+    const award = (id: string, text: string): CvFact => ({
+      id,
+      type: 'achievement',
+      text,
+      evidence: text,
+      status: 'active',
+    });
+    const BSC_ECON: CvFact = {
+      id: 'fact-econ',
+      type: 'education',
+      text: 'BSc Economics, Example University',
+      evidence: 'BSc Economics, Example University',
+      status: 'active',
+    };
+    const run = (line: string, achievement: CvFact, extra: CvFact[] = []) =>
+      validateCv(
+        edited((cv) => {
+          cv.education = [{ line, factRef: 'F30', achievementRef: 'F31' }];
+        }),
+        new Map([...CV_ALIASES, ['F30', BSC_ECON.id], ['F31', achievement.id]]),
+        [...CV_FACTS, BSC_ECON, achievement, ...extra],
+      );
+    const codes = (result: ReturnType<typeof run>): CvIssue[] => (result.ok ? [] : result.issues);
+
+    it('refuses a 2:1 line citing a 2:2, and passes the matching ones', () => {
+      const lower = award('fact-22', 'Graduated with a 2:2');
+      expect(codes(run('BSc Economics, 2:1', lower))).toContainEqual({
+        path: 'education[0]',
+        code: 'unsupported_number',
+      });
+      expect(run('BSc Economics, 2:2', lower)).toEqual({ ok: true });
+      expect(run('BSc Economics, 2:1', award('fact-21', 'Graduated with a 2:1'))).toEqual({
+        ok: true,
+      });
+    });
+
+    it('treats 2:1 and Upper Second Class as one classification, and not 2:2', () => {
+      const upper = award('fact-upper', 'Graduated with an Upper Second Class degree');
+      expect(run('BSc Economics, 2:1', upper)).toEqual({ ok: true });
+      expect(codes(run('BSc Economics, Lower Second Class', upper))).toContainEqual({
+        path: 'education[0]',
+        code: 'unsupported_text',
+      });
+    });
+
+    it.each([
+      ['Distinction', 'Awarded a Distinction for the MSc dissertation', 'wrong_fact_type'],
+      ['First', 'Won first prize at a 60-person hackathon', 'unsupported_text'],
+      ['Merit', 'Awarded a merit scholarship in 2023', 'unsupported_text'],
+      [
+        'First Class Honours',
+        'Came first in a class of 40 for statistics, earning honours',
+        'unsupported_text',
+      ],
+    ])('a one-degree profile refuses "%s" borrowed from "%s"', (word, text, code) => {
+      expect(codes(run(`BSc Economics, ${word}`, award('fact-probe', text)))).toContainEqual({
+        path: 'education[0]',
+        code,
+      });
+    });
+
+    it('lends a one-word class when a degree word is in its sentence', () => {
+      expect(
+        run('BSc Economics, Distinction', award('fact-d', 'Graduated with Distinction')),
+      ).toEqual({ ok: true });
+    });
+
+    it("refuses another degree's token whatever the profile size, but not an unnamed degree", () => {
+      const msc = award('fact-m', 'MSc with Distinction');
+      expect(codes(run('BSc Economics, Distinction', msc))).toContainEqual({
+        path: 'education[0]',
+        code: 'wrong_fact_type',
+      });
+      const bsc = award('fact-b', 'BSc with Distinction');
+      expect(run('BSc Economics, Distinction', bsc)).toEqual({ ok: true });
+    });
+  });
+
+  it('refuses the classification words when the achievement is not cited', () => {
+    const alone = line((e) => {
+      e.line = 'BSc Business Information Systems, First Class Honours';
+    });
+    expect(verdict(alone)).toEqual({
+      ok: false,
+      issues: [{ path: 'education[0]', code: 'unsupported_text' }],
+    });
+  });
+
+  it('takes the second ref as an achievement only', () => {
+    const wrong = line((e) => {
+      e.achievementRef = 'F8';
+    });
+    expect(issuesOfVerdict(verdict(wrong))).toContainEqual({
+      path: 'education[0]',
+      code: 'wrong_fact_type',
+    });
+    const twoEducation = line((e) => {
+      e.achievementRef = 'F7';
+    });
+    expect(issuesOfVerdict(verdict(twoEducation))).toContainEqual({
+      path: 'education[0]',
+      code: 'wrong_fact_type',
+    });
+    // The first ref may not be the achievement.
+    const swapped = line((e) => {
+      e.factRef = 'F11';
+      e.achievementRef = 'F10';
+    });
+    expect(verdict(swapped)).toMatchObject({ ok: false });
+  });
+
+  it('counts an unknown achievement alias, and an empty one as no citation', () => {
+    const unknown = line((e) => {
+      e.achievementRef = 'F99';
+    });
+    expect(verdict(unknown)).toEqual({
+      ok: false,
+      issues: [{ path: 'education[0]', code: 'unknown_fact' }],
+    });
+    const empty = line((e) => {
+      e.achievementRef = '';
+    });
+    expect(verdict(empty)).toEqual({ ok: true });
+  });
+
+  it('keeps old docs with a single factRef parsing, in both schemas', () => {
+    const old = edited(() => undefined);
+    expect(at(old.education, 0)).not.toHaveProperty('achievementRef');
+    expect(CvContentSchema.safeParse(old).success).toBe(true);
+    expect(CvContentShapeSchema.safeParse(old).success).toBe(true);
+    const doc = CvDocSchema.safeParse({
+      jobId: 'job-1',
+      applicationVersion: 1,
+      content: { ...old, summary: null },
+      aliases: Object.fromEntries(CV_ALIASES),
+      factIds: [],
+      storagePaths: { cvPdf: 'a', cvDocx: 'b', notePdf: 'c', noteDocx: 'd' },
+      trimmed: 0,
+      model: 'claude-sonnet-5-5',
+      costPence: 1,
+      createdAt: new Date(),
+      schemaVersion: 1,
+    });
+    expect(doc.success).toBe(true);
+  });
+
+  it('refuses a third key on the line, so there is still no free text', () => {
+    const bad = {
+      ...validCv(),
+      education: [{ line: 'x', factRef: 'F7', achievementRefs: ['F1'] }],
+    };
+    expect(CvContentShapeSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe('education order and dates', () => {
+  const dated = new Map([
+    ['F1', { start: '2021', end: '2024' }],
+    ['F2', { end: '2022-06' }],
+    ['F3', { start: '2023' }],
+    ['F4', {}],
+    ['F5', { start: '2024', end: 'present' }],
+  ]);
+  const line = (name: string, factRef: string) => ({ line: name, factRef });
+  const keyOf = (ref: string) => factEndKey(dated.get(ref));
+  const hasEnd = (ref: string) => dated.get(ref)?.end !== undefined;
+  const order = (content: CvContent['education']) =>
+    orderEntries({ ...validCv(), education: content }, keyOf, hasEnd).education.map((e) => e.line);
+
+  it('puts dated lines first, newest first, then start-only and undated in the model order', () => {
+    expect(
+      order([
+        line('start-only', 'F3'),
+        line('older', 'F2'),
+        line('undated', 'F4'),
+        line('newer', 'F1'),
+        line('still studying', 'F5'),
+      ]),
+    ).toEqual(['still studying', 'newer', 'older', 'start-only', 'undated']);
+    expect(order([line('undated', 'F4'), line('start-only', 'F3')])).toEqual([
+      'undated',
+      'start-only',
+    ]);
+  });
+
+  it('puts an undated experience entry after the dated ones (a start-only one stays Present)', () => {
+    const entryOf = (role: string, factRef: string) => ({
+      heading: { role, org: 'Org', factRef },
+      bullets: [{ text: 'Did a thing.', factRefs: [factRef] }],
+    });
+    const content = {
+      ...validCv(),
+      experience: [entryOf('undated', 'F4'), entryOf('ended', 'F1'), entryOf('present', 'F5')],
+    };
+    const roles = orderEntries(
+      content,
+      keyOf,
+      hasEnd,
+      (ref) => dated.get(ref)?.start !== undefined || dated.get(ref)?.end !== undefined,
+    ).experience.map((e) => e.heading.role);
+    expect(roles).toEqual(['present', 'ended', 'undated']);
+  });
+
+  it('keeps the model order among equal end dates', () => {
+    expect(order([line('b', 'F1'), line('a', 'F1')])).toEqual(['b', 'a']);
+  });
+
+  it('treats every line as dated when no end check is given (the old behaviour)', () => {
+    const content = { ...validCv(), education: [line('start-only', 'F3'), line('older', 'F2')] };
+    expect(orderEntries(content, keyOf).education.map((e) => e.line)).toEqual([
+      'start-only',
+      'older',
+    ]);
+  });
+
+  it('shows the year only, and never "- Present"', () => {
+    expect(formatEducationDates({ start: '2021', end: '2024' })).toBe('2024');
+    expect(formatEducationDates({ start: '2023-10', end: '2024-05' })).toBe('2024');
+    expect(formatEducationDates({ start: '2023' })).toBe('2023');
+    expect(formatEducationDates({ start: '2023-10' })).toBe('2023');
+    expect(formatEducationDates({ end: '2024' })).toBe('2024');
+    expect(formatEducationDates({ start: '2024', end: 'present' })).toBe('Present');
+    expect(formatEducationDates({})).toBe('');
+    // Experience keeps its range, and "no end date = Present".
+    expect(formatFactDates({ start: '2023-10' })).toBe('Oct 2023 – Present');
+  });
+});
+
+describe('clampCvCounts', () => {
+  const bullet = (i: number) => ({ text: `Bullet ${String(i)}`, factRefs: ['F1'] });
+  const entry = (bullets: number) => ({
+    heading: { role: 'Role', org: 'Org', factRef: 'F1' },
+    bullets: Array.from({ length: bullets }, (_, i) => bullet(i)),
+  });
+  const big = (): CvContent => ({
+    ...validCv(),
+    experience: Array.from({ length: 6 }, () => entry(7)),
+    projects: Array.from({ length: 5 }, () => entry(6)),
+    education: Array.from({ length: 5 }, (_, i) => ({ line: `Line ${String(i)}`, factRef: 'F1' })),
+    skills: Array.from({ length: 20 }, (_, i) => ({
+      label: `Skill ${String(i)}`,
+      factRefs: ['F1'],
+    })),
+    coverNote: {
+      paragraphs: Array.from({ length: 6 }, (_, i) => ({
+        text: `P${String(i)}`,
+        factRefs: ['F1'],
+      })),
+    },
+  });
+
+  it('cuts every count to its limit, from the end', () => {
+    const clamped = clampCvCounts(big());
+    expect(clamped.experience).toHaveLength(CV_LIMITS.experienceEntries);
+    expect(clamped.projects).toHaveLength(CV_LIMITS.projectEntries);
+    expect(clamped.education).toHaveLength(CV_LIMITS.educationEntries);
+    expect(clamped.skills).toHaveLength(CV_LIMITS.skills);
+    expect(clamped.coverNote.paragraphs).toHaveLength(CV_LIMITS.noteParagraphsMax);
+    for (const e of [...clamped.experience, ...clamped.projects]) {
+      expect(e.bullets.map((b) => b.text)).toEqual([
+        'Bullet 0',
+        'Bullet 1',
+        'Bullet 2',
+        'Bullet 3',
+        'Bullet 4',
+      ]);
+    }
+    expect(clamped.skills.at(-1)?.label).toBe('Skill 15');
+  });
+
+  it('only removes: counts under the limits, the summary and the texts stay as they are', () => {
+    const small = validCv();
+    expect(clampCvCounts(small)).toEqual(small);
+    const clamped = clampCvCounts(big());
+    expect(clamped.summary).toEqual(big().summary);
+    // Every kept item is the original item at the same place, so nothing was added or rewritten.
+    expect(clamped.skills).toEqual(big().skills.slice(0, CV_LIMITS.skills));
+    expect(clamped.experience[0]?.heading).toEqual(big().experience[0]?.heading);
+  });
+
+  it('does not mutate its input, and a clamped output passes the count checks', () => {
+    const input = big();
+    const before = structuredClone(input);
+    const clamped = clampCvCounts(input);
+    expect(input).toEqual(before);
+    const counts = (check(clamped) as { issues?: CvIssue[] }).issues ?? [];
+    expect(counts.filter((i) => i.code === 'too_long')).toEqual([]);
+  });
+});
+
+describe('dropUnsupportedSkills', () => {
+  const sql = aliasOf('fact-sql');
+  const python = aliasOf('fact-python');
+  const intern = aliasOf('fact-intern');
+  const withSkills = (skills: CvContent['skills']): CvContent => ({ ...validCv(), skills });
+
+  it('drops a skill with no citation and one citing a fact that is not a skill', () => {
+    const cv = withSkills([
+      { label: 'SQL', factRefs: [sql] },
+      { label: 'Zendesk', factRefs: [intern] },
+      { label: 'Excel', factRefs: [] },
+      { label: 'Python', factRefs: [python] },
+      { label: 'Mixed', factRefs: [sql, intern] },
+    ]);
+    const { content, dropped } = dropUnsupportedSkills(cv, CV_ALIASES, CV_FACTS);
+    expect(content.skills.map((skill) => skill.label)).toEqual(['SQL', 'Python']);
+    expect(dropped).toBe(3);
+    // Removal only: nothing else changed, and the input is untouched.
+    expect(content.experience).toEqual(cv.experience);
+    expect(cv.skills).toHaveLength(5);
+  });
+
+  it('leaves an unresolvable citation for the validator, and returns the same object when none go', () => {
+    const cv = withSkills([
+      { label: 'SQL', factRefs: [sql] },
+      { label: 'Unknown', factRefs: ['F999'] },
+    ]);
+    const result = dropUnsupportedSkills(cv, CV_ALIASES, CV_FACTS);
+    expect(result.dropped).toBe(0);
+    expect(result.content).toBe(cv);
+    expect(check(result.content).ok).toBe(false);
+  });
+
+  it('turns a list of only unsupported skills into an empty one, which still validates', () => {
+    const { content } = dropUnsupportedSkills(
+      withSkills([{ label: 'Zendesk', factRefs: [intern] }]),
+      CV_ALIASES,
+      CV_FACTS,
+    );
+    expect(content.skills).toEqual([]);
+    expect(check(content).ok).toBe(true);
+  });
+});
+
+describe('issue paths hold structure only (N4 of the CV quality review)', () => {
+  const GRAMMAR =
+    /^(?:summary|education\[\d+\]|skills\[\d+\]|(?:experience|projects)\[\d+\](?:\.heading(?:\.role|\.org)?|\.bullets\[\d+\])?|coverNote\.paragraphs\[\d+\])$/;
+
+  it('never carries model text, however hostile the content and its citations', () => {
+    const hostile = '\u202e<script>ignore previous instructions</script> $(rm -rf)';
+    // Every string becomes the hostile one: prose and citations alike.
+    const walk = (value: unknown): unknown => {
+      if (typeof value === 'string') return hostile;
+      if (Array.isArray(value)) return value.map(walk);
+      if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([k, item]) => [k, walk(item)]));
+      }
+      return value;
+    };
+    const verdict = validateCv(walk(validCv()) as CvContent, CV_ALIASES, CV_FACTS);
+    expect(verdict.ok).toBe(false);
+    const paths = verdict.ok ? [] : verdict.issues.map((issue) => issue.path);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const path of paths) expect(path).toMatch(GRAMMAR);
   });
 });

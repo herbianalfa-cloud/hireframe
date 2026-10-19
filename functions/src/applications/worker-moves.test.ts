@@ -1,4 +1,4 @@
-import type { Application } from '@hireframe/shared';
+import { APPLICATION_LIMITS, type Application } from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -36,16 +36,52 @@ describe('the worker moves', () => {
   });
 
   it('planAttempt refuses past the maximum and off generating', () => {
-    expect(planAttempt(generating({ attempt: 2 }), T1)).toBeNull();
+    // The count allows two writes plus a revision (3).
+    expect(planAttempt(generating({ attempt: 2 }), T1)).toMatchObject({ attempt: 3 });
+    expect(planAttempt(generating({ attempt: APPLICATION_LIMITS.maxAttempts }), T1)).toBeNull();
     expect(planAttempt(generating({ stage: 'ready' }), T1)).toBeNull();
   });
 
-  it('planRetry keeps the attempt and records the codes; it refuses with none left', () => {
+  it('planRetry keeps the attempt and records the codes; it refuses once the writes are spent', () => {
     const next = planRetry(generating({ attempt: 1 }), ['too_long'], T1);
     expect(next).toMatchObject({ stage: 'generating', attempt: 1, lastIssues: ['too_long'] });
-    expect(planRetry(generating({ attempt: 2 }), ['too_long'], T1)).toBeNull();
+    // A retry is a write: it stops at maxWrites, a call before the attempt count does.
+    expect(
+      planRetry(generating({ attempt: APPLICATION_LIMITS.maxWrites }), ['too_long'], T1),
+    ).toBeNull();
+    expect(
+      planRetry(generating({ attempt: APPLICATION_LIMITS.maxAttempts }), ['too_long'], T1),
+    ).toBeNull();
     const cleared = planRetry(generating({ attempt: 1, lastIssues: ['uncited'] }), [], T1);
     expect(cleared?.lastIssues).toBeUndefined();
+  });
+
+  it('planRetry and planBlocked keep where the codes were found, once each, and planReady clears it', () => {
+    const where = [
+      { code: 'uncited', path: 'skills[1]' },
+      { code: 'uncited', path: 'skills[1]' },
+      { code: 'unsupported_number', path: 'coverNote.paragraphs[3]' },
+    ] as const;
+    const retry = planRetry(
+      generating({ attempt: 1 }),
+      ['unsupported_number', 'uncited'],
+      T1,
+      where,
+    );
+    expect(retry?.lastIssueAt).toEqual([
+      { code: 'uncited', path: 'skills[1]' },
+      { code: 'unsupported_number', path: 'coverNote.paragraphs[3]' },
+    ]);
+    const blocked = planBlocked(
+      generating({ attempt: 2 }),
+      'invalid_output',
+      T1,
+      ['uncited'],
+      where,
+    );
+    expect(blocked?.lastIssueAt).toHaveLength(2);
+    expect(planRetry(retry ?? generating(), [], T1)?.lastIssueAt).toBeUndefined();
+    expect(planReady(retry ?? generating(), 'job-1-v1', T1)?.lastIssueAt).toBeUndefined();
   });
 
   it('planBlocked goes to chosen with the reason and keeps attempt, notes and versions', () => {
@@ -90,10 +126,12 @@ describe('the worker moves', () => {
       headerExists: true,
       now: T1,
     };
-    const spent = generating({ attempt: 2 });
+    const spent = generating({ attempt: APPLICATION_LIMITS.maxAttempts });
     expect(planAttempt(spent, T1)).toBeNull();
     // The worker's own moves keep the counter...
-    expect(planBlocked(spent, 'attempts_exhausted', T1)?.attempt).toBe(2);
+    expect(planBlocked(spent, 'attempts_exhausted', T1)?.attempt).toBe(
+      APPLICATION_LIMITS.maxAttempts,
+    );
     // ...and the owner's moves from the places it ends up put it back.
     const blocked = planBlocked(spent, 'attempts_exhausted', T1);
     expect(blocked && planStart('job-1', blocked, known, 'retry')?.attempt).toBe(0);

@@ -103,7 +103,7 @@ export function wide(length: number, seed = 0): string {
  * The widest content the limits allow: every count at its ceiling and every text at its
  * maximum length in capital W and M. Not valid for `validateCv` (the words are not facts'); a
  * test fixture for the worst case of the fit. Headings and education are never trimmed, so this
- * does not fit one page even when fully trimmed: `fitOnePage` reports `too_long` (ADR-054).
+ * does not fit one page even when fully trimmed: `fitPage` reports `too_long` (ADR-054).
  */
 export function wideCv(): CvContent {
   const a = aliasOf('fact-clients');

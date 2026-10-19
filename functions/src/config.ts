@@ -1,5 +1,6 @@
 import {
   APPLICATION_LIMITS,
+  CV_SCORE_TARGET,
   FUNCTIONS_REGION,
   INGEST_WIRE,
   type CallableName,
@@ -38,6 +39,8 @@ export type LlmPurpose =
   | 'alertParse'
   | 'pasteParse'
   | 'cvWrite'
+  | 'cvRevise'
+  | 'cvJudge'
   | 'answerFact';
 
 export interface ModelConfig {
@@ -94,6 +97,28 @@ export const MODELS: Readonly<Record<LlmPurpose, ModelConfig>> = {
     timeoutMs: 150_000,
     budgetMs: 300_000,
   },
+  /**
+   * The one revision of a below-target draft (CV quality plan §3): same model, limits and budget
+   * as `cvWrite`, so a call started at the start deadline settles the same way.
+   */
+  cvRevise: {
+    id: 'claude-sonnet-5-5',
+    effort: 'medium',
+    maxTokens: 8_000,
+    timeoutMs: 150_000,
+    budgetMs: 300_000,
+  },
+  /**
+   * The CV eval's report-only judge (CV quality plan §4). Called only by `npm run eval`, never by
+   * a function; the callable below is the nearest budget it is checked against.
+   */
+  cvJudge: {
+    id: 'claude-sonnet-5-5',
+    effort: 'low',
+    maxTokens: 1_500,
+    timeoutMs: 40_000,
+    budgetMs: 60_000,
+  },
   /** An application answer turned into facts, with the `addFact` prompt (M7). */
   answerFact: { id: 'claude-haiku-4-5', maxTokens: 4_000, timeoutMs: 45_000, budgetMs: 90_000 },
 };
@@ -107,6 +132,9 @@ export const PURPOSE_CALLABLE = {
   alertParse: 'ingestEmailJobs',
   pasteParse: 'lookup',
   cvWrite: 'generateCvs',
+  cvRevise: 'generateCvs',
+  /** Eval only: no function calls it. */
+  cvJudge: 'generateCvs',
   answerFact: 'application',
 } as const satisfies Record<LlmPurpose, CallableName>;
 
@@ -554,8 +582,10 @@ export const APPLICATIONS = {
   /** Daily spend on CV writing and answers; `config/app.applications.dailyCapPence` overrides it. */
   dailyCapPence: 60,
   maxQuestions: APPLICATION_LIMITS.maxQuestions,
-  /** Model calls one job may cost, kills included: the worker counts an attempt before it calls. */
-  maxAttempts: APPLICATION_LIMITS.maxAttempts,
+  // The attempt limits (writes, revisions, calls in all) are `APPLICATION_LIMITS` in shared:
+  // the worker, the stage machine and the schema read them from there, not from a copy here.
+  /** A CV scores "good enough" at this total with no hard finding (`scoreCv`). */
+  scoreTarget: CV_SCORE_TARGET,
   workerMaxPerRun: 10,
   /**
    * Applications read per run before the oldest `workerMaxPerRun` are taken (the query has no
