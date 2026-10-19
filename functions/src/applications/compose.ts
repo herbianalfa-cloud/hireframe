@@ -115,7 +115,14 @@ export interface Shipped {
 }
 
 export type ComposeResult =
-  | { kind: 'invalid'; issues: CvIssueCode[]; where: CvIssue[]; skillsDropped: number }
+  | {
+      kind: 'invalid';
+      issues: CvIssueCode[];
+      where: CvIssue[];
+      skillsDropped: number;
+      /** Set when the revision's failure ends the run, although the draft no longer validates. */
+      stop?: 'cap' | 'error';
+    }
   /** The owner moved the application before the revision was counted. */
   | { kind: 'lost' }
   | {
@@ -396,7 +403,13 @@ async function reviseAndShip(
   } catch (error) {
     const failure = revisionFailure(error);
     // The call can take minutes: the draft is checked again against the facts as they are now.
-    const fresh = await deps.facts();
+    let fresh: readonly ExistingFact[];
+    try {
+      fresh = await deps.facts();
+    } catch (factsError) {
+      // A cap or an outage still ends the run; a facts failure must not hide it.
+      throw failure.stop ? error : factsError;
+    }
     const again = await prepare(deps, input, input.draft, fresh);
     if (!again.ok) {
       return {
@@ -404,6 +417,7 @@ async function reviseAndShip(
         issues: again.issues,
         where: again.where,
         skillsDropped: again.skillsDropped,
+        ...(failure.stop ? { stop: failure.stop } : {}),
       };
     }
     return {

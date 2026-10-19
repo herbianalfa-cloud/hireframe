@@ -373,8 +373,11 @@ async function generateOne(
       },
     );
     if (composed.kind === 'lost') return 'lost';
-    if (composed.kind === 'invalid')
-      return await invalid(deps, counted, composed.issues, composed.where);
+    if (composed.kind === 'invalid') {
+      const outcome = await invalid(deps, counted, composed.issues, composed.where);
+      if (composed.stop) throw new StopRun(composed.stop, outcome);
+      return outcome;
+    }
     const { shipped } = composed;
     const { fit } = shipped;
 
