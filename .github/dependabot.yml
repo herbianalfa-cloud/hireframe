@@ -11,6 +11,9 @@ updates:
       # typescript-eslint supports TypeScript < 6.1 only (ADR-008).
       - dependency-name: typescript
         update-types: [version-update:semver-major]
+      # pdf.js is pinned exactly and bumped by hand: the worker hash, the fonts folder and the
+      # chunk sizes move with it (ADR-065 says how).
+      - dependency-name: pdfjs-dist
       # Types track the Node 22 runtime (.nvmrc, Cloud Functions).
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
