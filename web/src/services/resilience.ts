@@ -1,23 +1,11 @@
+import { TimeoutError, withTimeout } from '@/lib/timeout';
+
 import { errorCode, logError } from './log';
 
 /** CLAUDE.md: every external call has a timeout and at most 3 attempts with exponential backoff. */
 export const MAX_ATTEMPTS = 3;
 
-export class TimeoutError extends Error {
-  override name = 'TimeoutError';
-}
-
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new TimeoutError(`${label} timed out after ${String(ms)} ms`));
-    }, ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    clearTimeout(timer);
-  });
-}
+export { TimeoutError, withTimeout };
 
 interface RetryOptions {
   label: string;

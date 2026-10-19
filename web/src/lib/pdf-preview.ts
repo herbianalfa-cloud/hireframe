@@ -2,11 +2,11 @@ import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import type * as Pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
-import { TimeoutError, withTimeout } from '@/services/resilience';
+import { TimeoutError, withTimeout } from './timeout';
 
 /**
- * A thin adapter over pdf.js for the CV preview (ADR-065). The legacy build is the one that
- * runs on the documented floor (Chrome 125+, Safari 18+). It is imported on first use, so the
+ * A thin adapter over pdf.js for the CV preview (ADR-065). The legacy build is used because
+ * the default one needs newer JS than the app targets; it is tested on Chrome 125+ and Safari 18+. It is imported on first use, so the
  * initial JS never contains it (`check:bundle` fails if it does). The worker and the standard
  * fonts are same-origin assets; no feature detection or user-agent sniffing: if the import, the
  * open or the render throws, the caller shows its fallback.
@@ -40,10 +40,11 @@ export function loadViewer(): Promise<Viewer> {
 }
 
 /**
- * Opens a PDF held in memory. pdf.js 6 has no eval path left (CVE-2024-4367 was the font one;
- * `pdf-preview.test.ts` checks the pinned worker for it), the fonts come from our own
- * `standard_fonts` folder (fetched one file at a time, only when the PDF names that font) and
- * the page does no scripting or XFA. Rejects with a `TimeoutError` after `limitMs`.
+ * Opens a PDF held in memory. No PDF-driven code generation: eval is off by the pinned version
+ * (6.4.299 has no `isEvalSupported`; CVE-2024-4367 was the font eval, and `pdf-preview.test.ts`
+ * scans the shipped worker for the patterns) and WASM is off by option (`useWasm: false`). The
+ * fonts come from our own `standard_fonts` folder (one file at a time, only when the PDF names
+ * that font) and there is no scripting or XFA. Rejects with a `TimeoutError` after `limitMs`.
  */
 export async function openPdf(bytes: Uint8Array, limitMs: number): Promise<PDFDocumentProxy> {
   const pdfjs = await loadViewer();
@@ -52,6 +53,8 @@ export async function openPdf(bytes: Uint8Array, limitMs: number): Promise<PDFDo
     useSystemFonts: false,
     enableXfa: false,
     standardFontDataUrl: fontBaseUrl(pdfjs.version),
+    // No WASM: a PDF's Type 4 functions would otherwise be compiled to WebAssembly at run time.
+    useWasm: false,
   });
   try {
     return await withTimeout(task.promise, limitMs, 'pdf open');
@@ -86,11 +89,12 @@ export function renderPage(
       const ratio = Math.min(globalThis.devicePixelRatio || 1, MAX_PIXEL_RATIO);
       const scale = Math.min((cssWidth * ratio) / natural, MAX_BITMAP_WIDTH / natural);
       const viewport = page.getViewport({ scale });
+      // A cancelled run must not touch the canvas: resizing clears it, and a newer run may own it.
+      if (cancelled) return;
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
       canvas.style.width = `${String(cssWidth)}px`;
       canvas.style.aspectRatio = `${String(viewport.width)} / ${String(viewport.height)}`;
-      if (cancelled) return;
       const task = page.render({ canvas, viewport });
       cancelTask = () => {
         task.cancel();
@@ -101,7 +105,11 @@ export function renderPage(
     }
   };
   const promise = withTimeout(run(), limitMs, 'pdf render').catch((error: unknown) => {
-    if (error instanceof TimeoutError) cancelTask?.();
+    if (error instanceof TimeoutError) {
+      // Also stops a run still waiting for its page, which has no task to cancel yet.
+      cancelled = true;
+      cancelTask?.();
+    }
     throw error;
   });
   return {
