@@ -233,7 +233,11 @@ function requirementLine(
   toAlias: ReadonlyMap<string, string> | undefined,
 ): string {
   // A requirement can't carry its own "(facts: ...)" mapping (L8): only the code-made one is printed.
-  const text = requirement.text.replace(/\s+/g, ' ').replace(/\(\s*facts\s*:[^)]*\)?/gi, '');
+  const text = requirement.text
+    .replace(/\s+/g, ' ')
+    .replace(/\(\s*facts\s*:[^)]*\)?/gi, '')
+    // Any bracket, or none: "[facts: F9]", "facts: F9", "(fact: F9)", full-width brackets (N-new-2).
+    .replace(/[([\uff08\u3010]?\s*\bfacts?\s*:\s*F\d+(?:\s*,\s*F\d+)*\s*[)\]\uff09\u3011]?/gi, '');
   const aliases = [...new Set(requirement.factIds.flatMap((id) => toAlias?.get(id) ?? []))].sort(
     (a, b) => Number(a.slice(1)) - Number(b.slice(1)),
   );
