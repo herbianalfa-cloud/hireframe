@@ -1,5 +1,6 @@
 import {
   APPLICATION_LIMITS,
+  CV_WEIGHTS,
   CvContentShapeSchema,
   FINDING_INFO,
   factAliases,
@@ -348,7 +349,7 @@ export async function evaluateCvCase(
       ...(quality.revisionSkipped ? { revisionSkipped: quality.revisionSkipped } : {}),
       draftHard: composed.draft.hard,
       draftSoft: composed.draft.soft,
-      coverage: quality.criteria.tailoring / 2,
+      coverage: quality.criteria.tailoring / CV_WEIGHTS.tailoring,
       hard,
       soft: quality.findings.length - hard,
       pages: await pageCount(fit.bytes),
