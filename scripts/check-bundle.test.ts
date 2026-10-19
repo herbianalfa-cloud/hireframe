@@ -50,9 +50,8 @@ afterEach(() => {
 });
 
 function without(fixture: Fixture, path: string): Fixture {
-  const files = { ...fixture.files };
-  delete files[path];
-  return { ...fixture, files };
+  const files = Object.entries(fixture.files).filter(([name]) => name !== path);
+  return { ...fixture, files: Object.fromEntries(files) };
 }
 
 describe('check-bundle', () => {
