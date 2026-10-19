@@ -76,6 +76,7 @@ Out (later waves): see `ROADMAP.md`.
 - For a chosen job: one-page tailored CV + short cover note, built only from profile facts, ATS-safe .docx + PDF, stored with version and linked to the job. The owner starts it with **Start application**; it moves through Chosen (only while blocked), **Needs your input**, Generating, **Ready to send** and Applied, and each job moves on its own. Contact details come from a CV header the owner sets on Profile, never from the model.
 - **Needs your input:** up to five questions from the job's requirements that the profile doesn't fully meet (in code, no model call). Each can be answered (the answer becomes a versioned profile fact that shows where it came from) or skipped, and **Skip all** skips the rest. An answer that can't become a verified fact is refused, not guessed.
 - AC: validator rejects any bullet without a `factId`; output fits one page; user can regenerate with notes; an answered question appears on Profile as a fact with its source.
+- AC: the owner can preview the stored CV PDF on the Ready card (phone and laptop; the stated floor is Chrome 125+ and Safari 18+, ADR-065) before downloading it: owner-only, read from Storage with the 30 s limit, no model call and no re-render; the preview shows the page count, so a CV over one page is visible; where the viewer can't run, the owner gets a message and Download PDF.
 
 ### R11 Cost control
 - Monthly spend cap (default £15) and per-run cap. Live meter on dashboard.
