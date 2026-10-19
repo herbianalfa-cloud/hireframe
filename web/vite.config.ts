@@ -43,11 +43,13 @@ const pdfjsVersion = (
   JSON.parse(readFileSync(join(pdfjsRoot, 'package.json'), 'utf8')) as { version: string }
 ).version;
 const fontsRoot = join(pdfjsRoot, 'standard_fonts');
-const fontsPrefix = `/assets/pdfjs-${pdfjsVersion}/standard_fonts/`;
+// Relative to the output folder and, in dev, to `base` (Vite strips `base` before plugin
+// middleware runs), so it holds for any `base`. `fontBaseUrl` in `lib/pdf-preview.ts` adds it.
+const fontsDir = `assets/pdfjs-${pdfjsVersion}/standard_fonts/`;
 const pdfjsFonts: Plugin = {
   name: 'hireframe-pdfjs-fonts',
   configureServer(server) {
-    server.middlewares.use(fontsPrefix, (request, response, next) => {
+    server.middlewares.use(`/${fontsDir}`, (request, response, next) => {
       const name = (request.url ?? '').slice(1).split('?')[0] ?? '';
       if (!readdirSync(fontsRoot).includes(name)) {
         next();
@@ -61,7 +63,7 @@ const pdfjsFonts: Plugin = {
     for (const name of readdirSync(fontsRoot)) {
       this.emitFile({
         type: 'asset',
-        fileName: `${fontsPrefix.slice(1)}${name}`,
+        fileName: `${fontsDir}${name}`,
         source: readFileSync(join(fontsRoot, name)),
       });
     }

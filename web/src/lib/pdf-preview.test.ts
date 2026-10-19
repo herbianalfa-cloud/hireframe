@@ -51,7 +51,7 @@ describe('loadViewer / openPdf', () => {
     expect(mock.options.workerSrc).toBe('/assets/pdf.worker.min-abc.mjs');
   });
 
-  it('opens with our own fonts, no system fonts and no XFA', async () => {
+  it('opens with our own fonts, no system fonts, no XFA and no WASM', async () => {
     mock.getDocument.mockReturnValue({
       promise: Promise.resolve({ numPages: 1 }),
       destroy: mock.destroy,
@@ -63,6 +63,7 @@ describe('loadViewer / openPdf', () => {
         data: bytes,
         useSystemFonts: false,
         enableXfa: false,
+        useWasm: false,
         standardFontDataUrl: fontBaseUrl('9.9.9'),
       }),
     );
@@ -90,10 +91,46 @@ describe('loadViewer / openPdf', () => {
     await expect(openPdf(new Uint8Array(), 1000)).rejects.toThrow('Invalid PDF structure');
     expect(mock.destroy).toHaveBeenCalledOnce();
   });
+});
 
-  it('pins a pdf.js whose worker has no eval path', () => {
-    const worker = readFileSync('node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', 'utf8');
-    expect(worker).not.toMatch(/new Function\(|[^\w.]eval\(/);
+// What ships is `pdf.worker.min.mjs` (the `?url` import), so that is the file scanned.
+describe('the pinned pdf.js worker', () => {
+  const dir = 'node_modules/pdfjs-dist';
+  const worker = readFileSync(`${dir}/legacy/build/pdf.worker.min.mjs`, 'utf8');
+
+  it('is exactly the reviewed version (a bump is deliberate: ADR-065)', () => {
+    const { version } = JSON.parse(readFileSync(`${dir}/package.json`, 'utf8')) as {
+      version: string;
+    };
+    expect(version).toBe('6.4.299');
+    const wanted = JSON.parse(readFileSync('web/package.json', 'utf8')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(wanted.dependencies['pdfjs-dist']).toBe('6.4.299');
+  });
+
+  it('has no way to run text from a PDF as code (eval is off by version)', () => {
+    // `Function(`, with or without `new`, `eval(` in any spelling, `(0, eval)` and `["eval"]`.
+    const dynamicCode =
+      /(?<![\w$.])Function\s*\(|\.Function\s*\(|\beval\s*\(|\(\s*0\s*,\s*eval\s*\)|\[\s*["'`]eval["'`]\s*\]|\[\s*["'`]Function["'`]\s*\]/g;
+    // The one allowed use is webpack's constant global lookup, which no PDF input reaches.
+    const shim = 'Function("return this")()';
+    const hits = [...worker.matchAll(dynamicCode)].filter(
+      (hit) => !worker.slice(hit.index, hit.index + shim.length).startsWith(shim),
+    );
+    expect(hits.map((hit) => worker.slice(hit.index - 30, hit.index + 50))).toEqual([]);
+    expect(worker).toContain(shim);
+  });
+
+  it('keeps WebAssembly to the two known compile sites, which the options leave unreachable', () => {
+    // The ICC/image decoders' glue needs a `wasmUrl` we never set; the PostScript function
+    // compiler is the one a PDF drives, and `useWasm: false` (tested above) turns it off.
+    // Streaming compile is never used.
+    expect(worker.match(/new WebAssembly\.Module\(/g)).toHaveLength(2);
+    expect(worker).not.toMatch(
+      /WebAssembly\s*\.\s*(compile|compileStreaming|instantiateStreaming)\b/,
+    );
+    expect(worker.match(/WebAssembly\s*\.\s*instantiate\b/g)).toHaveLength(1);
   });
 });
 
@@ -146,6 +183,41 @@ describe('renderPage', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await failed;
     expect(page.cancel).toHaveBeenCalledOnce();
+  });
+
+  it('a render cancelled before its page arrives never touches the canvas', async () => {
+    let arrive: (page: ReturnType<typeof fakePage>) => void = () => undefined;
+    const page = fakePage(595, 842, () => Promise.resolve());
+    const doc = {
+      getPage: () => new Promise((resolve) => (arrive = resolve)),
+    } as unknown as PDFDocumentProxy;
+    const canvas = document.createElement('canvas');
+    canvas.width = 11;
+    const render = renderPage(doc, 1, canvas, 600, 15_000);
+    render.cancel();
+    arrive(page);
+    await render.promise;
+    expect(canvas.width).toBe(11);
+    expect(page.render).not.toHaveBeenCalled();
+    expect(page.cleanup).toHaveBeenCalled();
+  });
+
+  it('a timeout while waiting for the page stops the run before it draws', async () => {
+    vi.useFakeTimers();
+    let arrive: (page: ReturnType<typeof fakePage>) => void = () => undefined;
+    const page = fakePage(595, 842, () => Promise.resolve());
+    const doc = {
+      getPage: () => new Promise((resolve) => (arrive = resolve)),
+    } as unknown as PDFDocumentProxy;
+    const canvas = document.createElement('canvas');
+    const render = renderPage(doc, 1, canvas, 600, 15_000);
+    const failed = expect(render.promise).rejects.toBeInstanceOf(TimeoutError);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await failed;
+    arrive(page);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(page.render).not.toHaveBeenCalled();
+    expect(canvas.width).toBe(300);
   });
 
   it('cancel() stops a render in progress', async () => {
