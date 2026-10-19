@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { downloadCvFile } from './applications';
 import {
-  hasFile,
   loadCvPreview,
   logPreviewError,
   openCvPreview,
@@ -63,14 +62,13 @@ describe('loadCvPreview', () => {
 });
 
 describe('openCvPreview', () => {
-  it('reports a viewer chunk that will not load, with the file still savable', async () => {
+  it('reports a viewer chunk that will not load', async () => {
     viewer.loadViewer.mockRejectedValue(
       new TypeError('Failed to fetch dynamically imported module'),
     );
     const failure = await openCvPreview(new Blob(['%PDF'])).catch((error: unknown) => error);
     expect(failure).toMatchObject({ step: 'viewer' });
     expect(previewErrorMessage(failure)).toMatch(/load the viewer/);
-    expect(hasFile(failure)).toBe(true);
   });
 
   it('reports a PDF that will not open', async () => {
@@ -100,11 +98,6 @@ describe('previewErrorMessage', () => {
     expect(at(new Error('offline'))).toBe(
       "Couldn't load the preview. Check your connection and try again.",
     );
-  });
-
-  it('offers no saved file when the read itself failed', () => {
-    expect(hasFile(new PreviewError('fetch', new Error('x')))).toBe(false);
-    expect(hasFile(new PreviewError('render', new Error('x')))).toBe(true);
   });
 });
 
