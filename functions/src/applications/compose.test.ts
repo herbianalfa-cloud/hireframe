@@ -644,6 +644,22 @@ describe('composeCv: when the revision call fails', () => {
     expect(state.facts).toBe(1);
   });
 
+  it('keeps the stop when the revision hit a cap and the draft no longer validates (L-new-1)', async () => {
+    const archived = existing((f) =>
+      f.id === 'fact-clients' ? { status: 'archived' as const } : {},
+    );
+    const state = probe(() => new SpendCapExceededError(), { factsAfter: archived });
+    const result = await composeCv(state.deps, input(withContrast(goodCv())));
+    expect(result).toMatchObject({ kind: 'invalid', stop: 'cap' });
+  });
+
+  it('rethrows the cap error when the facts read fails after it (L-new-1)', async () => {
+    const cap = new SpendCapExceededError();
+    const state = probe(() => cap);
+    state.deps.facts = () => Promise.reject(new Error('firestore down'));
+    await expect(composeCv(state.deps, input(withContrast(goodCv())))).rejects.toBe(cap);
+  });
+
   const run = (error: Error) => composeCv(probe(() => error).deps, input(withContrast(goodCv())));
 
   it('a monthly cap ships the draft and ends the run', async () => {

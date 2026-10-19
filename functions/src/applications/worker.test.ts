@@ -1219,6 +1219,28 @@ describe('runCvWorker: the revision', () => {
     expect(get(h, 'job-1')).toMatchObject({ stage: 'chosen', blocked: { code: 'invalid_output' } });
   });
 
+  it('ends the run when a cap hits the revision and a cited fact was archived meanwhile (L-new-1)', async () => {
+    const over: { factList?: ExistingFact[] } = {};
+    const h = harness(over);
+    add(h, 'job-1', { stageAt: new Date(START - 2_000) });
+    add(h, 'job-2', { stageAt: new Date(START - 1_000) });
+    h.replies.push(
+      (input) => withContrast(fakeCvWrite(input.system)),
+      () => {
+        over.factList = facts().map((fact) =>
+          fact.id === 'fact-clients' ? { ...fact, status: 'archived' as const } : fact,
+        );
+        return new SpendCapExceededError();
+      },
+    );
+    const summary = await h.run();
+    expect(summary.stoppedBy).toBe('cap');
+    expect(h.store.cvDocs.size).toBe(0);
+    expect(h.files.size).toBe(0);
+    expect(get(h, 'job-1')).toMatchObject({ stage: 'chosen', blocked: { code: 'invalid_output' } });
+    expect(get(h, 'job-2')).toMatchObject({ stage: 'generating', attempt: 0 });
+  });
+
   it('keeps injected text in the draft inside <draft_cv>', async () => {
     const h = harness();
     add(h, 'job-1');
