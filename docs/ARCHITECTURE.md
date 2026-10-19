@@ -160,6 +160,7 @@ lookup add:  dedupe ─► create (lock, short) ─► S1 ─► S2 ─► ATS b
 
 ## Web app config and deploy
 - The web app reads its Firebase config from Hosting's `/__/firebase/init.json` at runtime; no Firebase config lives in the repo (ADR-012). App Check uses reCAPTCHA Enterprise; the public site key is a build-time variable.
+- **CV preview (ADR-065).** `CvPreview` (Pipeline, Ready card) reads the CV PDF through `services/cv-preview.ts` (the same `downloadCvFile` read as Download PDF) and draws it with pdf.js through `lib/pdf-preview.ts`. pdf.js (legacy build), its worker and its standard fonts load on first press and are never in the initial JS (`check:bundle`). No new function, rule or host.
 - Components never import Firebase; `web/src/services/` wraps auth, access checks, Firestore reads and writes (with timeout + retry), Storage uploads and callables. Callables that spend money are never retried by the client.
 - Deploy: `v*` tag → GitHub `production` environment approval → `check` + `test:rules` → build (including the functions bundle) → keyless Workload Identity Federation → `firebase deploy --only hosting,firestore,storage,functions` (ADR-014, ADR-017).
 

@@ -63,7 +63,7 @@ Run `node scripts/detect-ats.ts --recheck tmp/watchlist-review.csv` on the Worka
 - Dedupe: the same job with a town in one source and a postcode in another is not merged.
 - Video walkthrough of the system after Wave 1 is done.
 - S3 does not see a hydrated postedAt in the same pass.
-- CV preview in the app before download (small; first after M8).
+- Cover note preview in the app (the preview component takes a file kind, so this is small; ADR-065).
 - Evidence documents (reports, portfolio, internship report) parsed into cited facts like the CV upload; needs an Opus plan for cost and privacy.
 - The system asks for evidence or detail on a CV item; the owner answers with text or a document (same plan as evidence documents).
 - App Check replay from a transport-level resend (12 Oct, 49 s after a successful application call): the browser or the Google front end can resend a POST with a consumed token. Not fixable in the client. If it recurs, read the request logs for both deliveries.
