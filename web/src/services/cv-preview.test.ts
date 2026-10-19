@@ -43,17 +43,6 @@ describe('loadCvPreview', () => {
     expect(read).toHaveBeenCalledExactlyOnceWith({ ...request, kind: 'cv', format: 'pdf' });
   });
 
-  it('refuses a file over the size cap before anything parses it', async () => {
-    read.mockResolvedValue({
-      blob: { size: PREVIEW_MAX_BYTES + 1 } as Blob,
-      fileName: 'x.pdf',
-    });
-    const failure = await loadCvPreview(request).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(PreviewError);
-    expect(previewErrorMessage(failure)).toMatch(/too large.*Download it instead/);
-    expect(viewer.openPdf).not.toHaveBeenCalled();
-  });
-
   it('wraps a failed read with its step', async () => {
     read.mockRejectedValue(new TimeoutError('cv download timed out after 30000 ms'));
     const failure = await loadCvPreview(request).catch((error: unknown) => error);
@@ -62,6 +51,16 @@ describe('loadCvPreview', () => {
 });
 
 describe('openCvPreview', () => {
+  it('refuses a blob over the size cap before anything parses it', async () => {
+    const failure = await openCvPreview({ size: PREVIEW_MAX_BYTES + 1 } as Blob).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toMatchObject({ step: 'size' });
+    expect(previewErrorMessage(failure)).toMatch(/too large.*Download it instead/);
+    expect(viewer.loadViewer).not.toHaveBeenCalled();
+    expect(viewer.openPdf).not.toHaveBeenCalled();
+  });
+
   it('reports a viewer chunk that will not load', async () => {
     viewer.loadViewer.mockRejectedValue(
       new TypeError('Failed to fetch dynamically imported module'),

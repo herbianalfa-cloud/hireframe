@@ -1,6 +1,6 @@
 import { MAX_CV_BYTES } from '@hireframe/shared';
 
-import { closePdf, openPdf, loadViewer, type PDFDocumentProxy } from '@/lib/pdf-preview';
+import { openPdf, loadViewer, type PDFDocumentProxy } from '@/lib/pdf-preview';
 
 import { downloadCvFile, downloadErrorMessage, type CvFile } from './applications';
 import { errorCode, logError } from './log';
@@ -46,23 +46,24 @@ export async function loadCvPreview(request: {
   } catch (error) {
     throw new PreviewError('fetch', error);
   }
-  if (file.blob.size > PREVIEW_MAX_BYTES) throw new PreviewError('size', undefined);
   return file;
 }
 
-/** Loads pdf.js (once) and opens the blob. Pages beyond `PREVIEW_MAX_PAGES` are never drawn. */
+/**
+ * Loads pdf.js (once) and opens the blob. A blob over `PREVIEW_MAX_BYTES` is refused before
+ * anything parses it; the caller still holds the file, so it can be saved. Pages beyond
+ * `PREVIEW_MAX_PAGES` are never drawn.
+ */
 export async function openCvPreview(blob: Blob): Promise<PDFDocumentProxy> {
+  if (blob.size > PREVIEW_MAX_BYTES) throw new PreviewError('size', undefined);
   try {
     await loadViewer();
   } catch (error) {
     throw new PreviewError('viewer', error);
   }
-  let doc: PDFDocumentProxy | undefined;
   try {
-    doc = await openPdf(new Uint8Array(await blob.arrayBuffer()), PREVIEW_RENDER_LIMIT_MS);
-    return doc;
+    return await openPdf(new Uint8Array(await blob.arrayBuffer()), PREVIEW_RENDER_LIMIT_MS);
   } catch (error) {
-    if (doc) await closePdf(doc);
     throw new PreviewError('open', error);
   }
 }
