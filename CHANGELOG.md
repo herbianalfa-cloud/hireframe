@@ -6,7 +6,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
 ### Added
 - **CV preview on the Ready card** (ADR-065; plan `docs/plans/cv-preview-plan.md`).
   - **Preview CV:** a dialog (full screen on a phone, centred on a laptop) that draws the stored CV PDF with pdf.js, with zoom, a page count that flags a CV over one page, a text version and an in-dialog Download PDF that saves the blob already read. If the viewer fails to load, the PDF won't open or a page won't draw, it shows a message and Download PDF.
-  - **`pdfjs-dist@6.4.299`, legacy build,** loaded on first use with its worker and standard fonts as same-origin files. Documented floor for the preview: Chrome 125+, Safari 18+. No model call, function, rules, CORS or CSP change.
+  - **`pdfjs-dist@6.4.299`, legacy build,** loaded on first use with its worker and standard fonts as same-origin files. Stated floor for the preview: Chrome 125+, Safari 18+ (ours, not pdf.js's). Eval is off by version and WASM by option (`useWasm: false`); Dependabot leaves the pin to a deliberate bump. No model call, function, rules, CORS or CSP change.
   - **Code:** `web/src/lib/pdf-preview.ts`, `web/src/services/cv-preview.ts`, `web/src/features/pipeline/CvPreview.tsx`, a fonts plugin in `web/vite.config.ts`.
   - **`check:bundle`:** scans `.mjs`, names the pdf.js worker (cap 1,400 kB) and the fonts (caps), and fails if pdf.js is in any initial file.
   - **Docs:** ADR-065, PRD R10, ARCHITECTURE, SECURITY, RUNBOOK (step 89 and I7), ROADMAP, CLAUDE.md.
