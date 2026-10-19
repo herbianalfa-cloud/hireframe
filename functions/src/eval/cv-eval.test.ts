@@ -434,9 +434,26 @@ describe('the baseline across a rubric change (L5)', () => {
     expect(gateCv(lowerRun(), 8, same, now).reasons.join()).toMatch(/under the baseline/);
   });
 
-  it('stores a lower mean only when the rubric or prompt changed', () => {
+  it('keeps the slack rule across a prompt bump, even while updating', () => {
     const same: CvBaseline = { ...old, rubric: 'rubric-v2' };
-    expect(canStoreBaseline(8.9, same, now).ok).toBe(false);
+    const bumped = { rubric: 'rubric-v2', promptVersion: 'p2', updating: true };
+    const run = (mean: number) => [
+      ...['c01', 'c02', 'c03', 'c04', 'c05', 'c06', 'c07'].map((id) => result(id, mean)),
+      result('c08', 7, { profile: 'thin', tags: ['thin'] }),
+    ];
+    expect(gateCv(run(9.47), 8, same, bumped).reasons.join()).toMatch(/under the baseline/);
+    expect(gateCv(run(9.6), 8, same, bumped).ok).toBe(true);
+    expect(gateCv(run(9.6), 8, same, { ...bumped, updating: false }).ok).toBe(true);
+  });
+
+  it('stores a lower mean under the same rubric only with acceptLower, and a rubric change always', () => {
+    const same: CvBaseline = { ...old, rubric: 'rubric-v2' };
+    const refused = canStoreBaseline(8.9, same, now);
+    expect(refused.ok).toBe(false);
+    expect(refused.ok ? '' : refused.reason).toMatch(/8\.90.*9\.77|9\.77/);
+    expect(canStoreBaseline(8.9, same, { ...now, promptVersion: 'p2' }).ok).toBe(false);
+    expect(canStoreBaseline(8.9, same, { ...now, acceptLower: true }).ok).toBe(true);
+    expect(canStoreBaseline(9.77, same, now).ok).toBe(true);
     expect(canStoreBaseline(9.8, same, now).ok).toBe(true);
     expect(canStoreBaseline(8.9, old, now).ok).toBe(true);
     expect(canStoreBaseline(8.9, null, now).ok).toBe(true);
