@@ -1537,6 +1537,14 @@ describe('scrubDashes', () => {
     expect(text('Trained teams of 10 \u2013 15 people')).toBe('Trained teams of 10-15 people');
   });
 
+  it('keeps a range of years, and does not join a year and a count into a date (N-new-4)', () => {
+    expect(text('Worked 2021 \u2013 2023 on onboarding')).toBe('Worked 2021-2023 on onboarding');
+    expect(text('Joined in 2023 \u2013 12 clients onboarded')).toBe(
+      'Joined in 2023, 12 clients onboarded',
+    );
+    expect(text('Cut 15 \u2013 10 steps')).toBe('Cut 15, 10 steps');
+  });
+
   it('turns a spaced em or en dash into a comma and an unspaced one into a hyphen', () => {
     expect(text('Built dashboards \u2014 and trained users')).toBe(
       'Built dashboards, and trained users',

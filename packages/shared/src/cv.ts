@@ -1160,9 +1160,18 @@ function scrubText(text: string, count: () => void): string {
       const next = text[offset + match.length] ?? '';
       // At an edge there is nothing to join; next to punctuation the dash adds nothing.
       if (offset === 0 || next === '' || stop.test(next)) return '';
-      // Between words with no space on either side: a hyphen. So is a range between two figures.
+      // A range between two figures is a hyphen. A year and a count ("2023 \u2013 12 clients") is no range.
+      if (/\d/.test(prev) && /\d/.test(next)) {
+        const low = /(\d[\d,]*)$/.exec(text.slice(0, offset))?.[1] ?? '';
+        const high = /^(\d[\d,]*)/.exec(text.slice(offset + match.length))?.[1] ?? '';
+        const isYear = (figure: string) => /^\d{4}$/.test(figure);
+        const range =
+          Number(high.replaceAll(',', '')) > Number(low.replaceAll(',', '')) &&
+          isYear(low) === isYear(high);
+        return range ? '-' : ', ';
+      }
+      // Between words with no space on either side: a hyphen.
       if (before === '' && after === '') return '-';
-      if (/\d/.test(prev) && /\d/.test(next)) return '-';
       return stop.test(prev) ? ' ' : ', ';
     },
   );

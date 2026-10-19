@@ -75,6 +75,8 @@ describe('contrast_pattern (hard)', () => {
     'Did not exceed the budget in any month but the first.',
     'It was not clear who owned the rota, so I asked.',
     'Wrote a lot, but not all of it shipped.',
+    'The report was not due until May; it was finished in April.',
+    'The tool was not ready, it was rebuilt in two weeks.',
   ])('does not flag: %s', (text) => {
     expect(codesOf(text)).not.toContain('contrast_pattern');
   });
@@ -329,6 +331,26 @@ describe('inflated_claim ignores the job title and denied uses', () => {
     expect(codesWith('Outstanding results.')).toContain('inflated_claim');
   });
 
+  it.each([
+    'Was a leading contributor to onboarding.',
+    'Worked as a leading analyst on the rota.',
+    'Became a leading member of the support team.',
+  ])('flags "a leading" before a role noun (N-new-5): %s', (text) => {
+    expect(codesWith(text)).toContain('inflated_claim');
+  });
+
+  it('lets a fact own "Lead" only through a verb form, not "leadership" (N-new-5)', () => {
+    const facts = CV_FACTS.map((fact) =>
+      fact.id === 'fact-articles'
+        ? { ...fact, text: 'Wrote guides with leadership support', evidence: 'leadership support' }
+        : fact,
+    );
+    const found = lintCv(withBullet('Lead weekly guide reviews.'), facts, CV_ALIASES)
+      .filter((finding) => finding.path === BULLET)
+      .map((finding) => finding.code);
+    expect(found).toContain('inflated_claim');
+  });
+
   it('flags a denied use next to a real one in the same text', () => {
     expect(codesWith('Never led a team, but managed a rota.')).toContain('inflated_claim');
   });
@@ -351,6 +373,9 @@ describe('soft findings', () => {
     ['first_person', 'My onboarding work covered 12 clients.'],
     ['first_person', 'Wrote the guides for ME and the team.'],
     ['first_person', 'Then I wrote 25 help-centre articles.'],
+    ['first_person', 'At Acme I ran onboarding for 12 clients.'],
+    ['first_person', 'Worked at Example Ltd I built a dashboard.'],
+    ['first_person', 'Built a SQL report in Excel I shared weekly.'],
     ['exclamation', 'Wrote 25 help-centre articles!'],
     [
       'long_sentence',
@@ -369,6 +394,7 @@ describe('soft findings', () => {
     'Wrote a short summary. Added a second one for the setup flow.',
     'Ran Phase I onboarding for the new clients.',
     'Wrote Part I of the guide.',
+    'Taught Key Stage I maths.',
   ])('is quiet on: %s', (text) => {
     expect(codesOf(text)).toEqual([]);
   });
