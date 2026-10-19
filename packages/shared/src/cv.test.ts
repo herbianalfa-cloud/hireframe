@@ -1756,6 +1756,85 @@ describe('an education line citing a classification', () => {
     });
   });
 
+  describe('phrase-based classification (Fix C)', () => {
+    const award = (id: string, text: string): CvFact => ({
+      id,
+      type: 'achievement',
+      text,
+      evidence: text,
+      status: 'active',
+    });
+    const BSC_ECON: CvFact = {
+      id: 'fact-econ',
+      type: 'education',
+      text: 'BSc Economics, Example University',
+      evidence: 'BSc Economics, Example University',
+      status: 'active',
+    };
+    const run = (line: string, achievement: CvFact, extra: CvFact[] = []) =>
+      validateCv(
+        edited((cv) => {
+          cv.education = [{ line, factRef: 'F30', achievementRef: 'F31' }];
+        }),
+        new Map([...CV_ALIASES, ['F30', BSC_ECON.id], ['F31', achievement.id]]),
+        [...CV_FACTS, BSC_ECON, achievement, ...extra],
+      );
+    const codes = (result: ReturnType<typeof run>): CvIssue[] => (result.ok ? [] : result.issues);
+
+    it('refuses a 2:1 line citing a 2:2, and passes the matching ones', () => {
+      const lower = award('fact-22', 'Graduated with a 2:2');
+      expect(codes(run('BSc Economics, 2:1', lower))).toContainEqual({
+        path: 'education[0]',
+        code: 'unsupported_number',
+      });
+      expect(run('BSc Economics, 2:2', lower)).toEqual({ ok: true });
+      expect(run('BSc Economics, 2:1', award('fact-21', 'Graduated with a 2:1'))).toEqual({
+        ok: true,
+      });
+    });
+
+    it('treats 2:1 and Upper Second Class as one classification, and not 2:2', () => {
+      const upper = award('fact-upper', 'Graduated with an Upper Second Class degree');
+      expect(run('BSc Economics, 2:1', upper)).toEqual({ ok: true });
+      expect(codes(run('BSc Economics, Lower Second Class', upper))).toContainEqual({
+        path: 'education[0]',
+        code: 'unsupported_text',
+      });
+    });
+
+    it.each([
+      ['Distinction', 'Awarded a Distinction for the MSc dissertation', 'wrong_fact_type'],
+      ['First', 'Won first prize at a 60-person hackathon', 'unsupported_text'],
+      ['Merit', 'Awarded a merit scholarship in 2023', 'unsupported_text'],
+      [
+        'First Class Honours',
+        'Came first in a class of 40 for statistics, earning honours',
+        'unsupported_text',
+      ],
+    ])('a one-degree profile refuses "%s" borrowed from "%s"', (word, text, code) => {
+      expect(codes(run(`BSc Economics, ${word}`, award('fact-probe', text)))).toContainEqual({
+        path: 'education[0]',
+        code,
+      });
+    });
+
+    it('lends a one-word class when a degree word is in its sentence', () => {
+      expect(
+        run('BSc Economics, Distinction', award('fact-d', 'Graduated with Distinction')),
+      ).toEqual({ ok: true });
+    });
+
+    it("refuses another degree's token whatever the profile size, but not an unnamed degree", () => {
+      const msc = award('fact-m', 'MSc with Distinction');
+      expect(codes(run('BSc Economics, Distinction', msc))).toContainEqual({
+        path: 'education[0]',
+        code: 'wrong_fact_type',
+      });
+      const bsc = award('fact-b', 'BSc with Distinction');
+      expect(run('BSc Economics, Distinction', bsc)).toEqual({ ok: true });
+    });
+  });
+
   it('refuses the classification words when the achievement is not cited', () => {
     const alone = line((e) => {
       e.line = 'BSc Business Information Systems, First Class Honours';

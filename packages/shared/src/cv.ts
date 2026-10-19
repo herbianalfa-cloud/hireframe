@@ -707,33 +707,89 @@ interface FactReads {
   figures: Set<string>;
 }
 
-/** The only words an education line may take from its achievement (M1 of the CV quality review). */
-const CLASSIFICATION_WORDS: ReadonlySet<string> = new Set(
-  [
-    'first class honours',
-    'first class honors',
-    'upper second class',
-    'lower second class',
-    'second class',
-    'third class',
-    'third',
-    'distinction',
-    'merit',
-    'pass',
-    'commendation',
-    'cum laude',
-    'magna cum laude',
-    'summa cum laude',
-  ].flatMap((phrase) => phrase.split(' ')),
-);
-/** The two classifications written as figures; the only figures an achievement may lend. */
-const CLASSIFICATION_FIGURES = /\b2\s?:\s?[12]\b/;
+/**
+ * The classifications an education line may print, each with the phrases that name it
+ * (H-new-1 and M-new-1 of the CV quality re-review). "2:1" and "Upper Second Class" are one
+ * class. A one-word phrase also needs a degree word in its sentence of the achievement, so
+ * "first prize" and "a merit scholarship" are not classifications.
+ */
+const CLASSIFICATIONS: readonly {
+  name: string;
+  phrases: readonly string[];
+  oneWord: readonly string[];
+  figure?: string;
+}[] = [
+  {
+    name: 'first',
+    phrases: ['first class honours', 'first class honors', 'first class'],
+    oneWord: ['first'],
+  },
+  { name: 'upper', phrases: ['upper second class', 'upper second'], oneWord: [], figure: '2:1' },
+  { name: 'lower', phrases: ['lower second class', 'lower second'], oneWord: [], figure: '2:2' },
+  {
+    name: 'second',
+    phrases: ['second class honours', 'second class honors', 'second class'],
+    oneWord: [],
+  },
+  { name: 'third', phrases: ['third class'], oneWord: ['third'] },
+  { name: 'distinction', phrases: [], oneWord: ['distinction'] },
+  { name: 'merit', phrases: [], oneWord: ['merit'] },
+  { name: 'pass', phrases: [], oneWord: ['pass'] },
+  { name: 'commendation', phrases: [], oneWord: ['commendation'] },
+  { name: 'cum-laude', phrases: ['cum laude'], oneWord: [] },
+  { name: 'magna-cum-laude', phrases: ['magna cum laude'], oneWord: [] },
+  { name: 'summa-cum-laude', phrases: ['summa cum laude'], oneWord: [] },
+];
+/** Longest phrase first, so "first class honours" is read before "first". */
+const CLASSIFICATION_PATTERNS = CLASSIFICATIONS.flatMap((entry) => [
+  ...entry.phrases.map((phrase) => ({ entry, phrase, single: false })),
+  ...entry.oneWord.map((phrase) => ({ entry, phrase, single: true })),
+]).sort((x, y) => y.phrase.length - x.phrase.length);
+/** The classifications written as figures, and the class each one is. */
+const CLASSIFICATION_FIGURES = /\b2\s?:\s?([12])\b/g;
 const DEGREE_TOKENS = /\b(?:bsc|ba|beng|msc|ma|meng|mba|phd|llb|mphil)\b/g;
+const DEGREE_WORD = /\b(?:degrees?|graduat(?:e|es|ed|ing|ion)|classification)\b/;
+
+/** The classes `text` names as phrases; `needsDegreeWord` holds one-word phrases to a degree word in their sentence. */
+function classesIn(text: string, needsDegreeWord: boolean): Set<string> {
+  const found = new Set<string>();
+  const joined = text.replace(/(?<=\p{L})\.(?=\p{L})/gu, '');
+  for (const sentence of joined.split(/[.!?;\n]+/)) {
+    for (const match of sentence.matchAll(CLASSIFICATION_FIGURES)) {
+      found.add(match[1] === '1' ? 'upper' : 'lower');
+    }
+    let folded = ` ${foldClaim(sentence).replace(/\s+/g, ' ')} `;
+    const degreeWord = DEGREE_WORD.test(folded) || (folded.match(DEGREE_TOKENS) ?? []).length > 0;
+    for (const { entry, phrase, single } of CLASSIFICATION_PATTERNS) {
+      const at = ` ${phrase} `;
+      if (!folded.includes(at)) continue;
+      folded = folded.replaceAll(at, ' ~ ');
+      if (!single || degreeWord || !needsDegreeWord) found.add(entry.name);
+    }
+  }
+  return found;
+}
+
+/** What a class lends: every word and figure of its phrases. */
+function classWords(name: string): string[] {
+  const entry = CLASSIFICATIONS.find((candidate) => candidate.name === name);
+  return entry === undefined
+    ? []
+    : [...entry.phrases, ...entry.oneWord].flatMap((phrase) => phrase.split(' '));
+}
+function classFigures(name: string): Set<string> {
+  const figure = CLASSIFICATIONS.find((candidate) => candidate.name === name)?.figure;
+  return figure === undefined ? new Set() : figuresIn(figure);
+}
 
 /** Whether a fact names a degree, so a certificate or an A-level is not one. */
 function hasDegreeToken(fact: CvFact): boolean {
   DEGREE_TOKENS.lastIndex = 0;
   return DEGREE_TOKENS.test(foldDegree(fact));
+}
+
+function degreeTokensOf(fact: CvFact): Set<string> {
+  return new Set(foldDegree(fact).match(DEGREE_TOKENS) ?? []);
 }
 
 const foldDegree = (fact: CvFact): string =>
@@ -873,7 +929,17 @@ export function validateCv(
     // An education line's achievement lends a classification and nothing else (M1).
     const lender = cite.classification === true ? byIndex[1] : undefined;
     const owner = cite.classification === true ? byIndex[0] : undefined;
+    // What the achievement is a classification of: whole phrases, with a degree word for a one-word class.
+    const lent =
+      lender === undefined || owner === undefined || lender === owner
+        ? new Set<string>()
+        : new Set([...classesIn(lender.text, true), ...classesIn(lender.evidence, true)]);
     if (lender !== undefined && owner !== undefined && lender !== owner) {
+      // An achievement that names a degree must name the owner's, whatever the profile holds.
+      const named = degreeTokensOf(lender);
+      if (named.size > 0 && ![...degreeTokensOf(owner)].some((token) => named.has(token))) {
+        add(cite.path, 'wrong_fact_type');
+      }
       // Only degrees count: certificates and A-levels name no degree token.
       const degrees = facts.filter(
         (fact) =>
@@ -883,6 +949,14 @@ export function validateCv(
       );
       if (degrees.length >= 2 && !sharesDegree(owner, lender)) {
         add(cite.path, 'wrong_fact_type');
+      }
+      // The line's classification must be one the achievement states.
+      const ownerWords = readsOf(owner).words;
+      for (const text of cite.texts) {
+        for (const name of classesIn(text.value, false)) {
+          const backed = classWords(name).every((word) => ownerWords.has(word));
+          if (!lent.has(name) && !backed) add(text.path, 'unsupported_text');
+        }
       }
     }
 
@@ -900,9 +974,7 @@ export function validateCv(
     if (cite.words === 'fact' && cited.length > 0) {
       const allowed = new Set(
         cited.flatMap((fact) =>
-          fact === lender
-            ? [...readsOf(fact).words].filter((word) => CLASSIFICATION_WORDS.has(word))
-            : [...readsOf(fact).words],
+          fact === lender ? [...lent].flatMap(classWords) : [...readsOf(fact).words],
         ),
       );
       let checked = 0;
@@ -923,9 +995,7 @@ export function validateCv(
     const supported = new Set(
       cited.flatMap((fact) =>
         fact === lender
-          ? CLASSIFICATION_FIGURES.test(`${fact.text}\n${fact.evidence}`)
-            ? [...figuresIn('2:1 2:2')]
-            : []
+          ? [...lent].flatMap((name) => [...classFigures(name)])
           : [...readsOf(fact).figures],
       ),
     );
