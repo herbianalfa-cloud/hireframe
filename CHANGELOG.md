@@ -11,6 +11,12 @@ All notable changes. Format: Keep a Changelog, SemVer.
   - **One revision round:** `composeCv` writes, scores and revises once when a finding is fixable (`cvRevise`, `<draft_cv>`), re-validates both candidates against re-read facts and ships the best valid one. A job costs at most 3 model calls per owner move (was 2), kills included.
   - **CV eval:** 8 fake cases, recorded answers, a gate in `npm run check`, a report-only judge (`cvJudge`), `--suite funnel|cv`. Three LIVE runs cost 46.7p, 30.4p and 27.9p; the last passed (7 of 7 at 8 or more, mean 9.77 under rubric v1). The baseline is now 9.66 under rubric v2 and compares by rubric: a lower mean needs `--accept-lower`.
   - **Docs:** ADR-062 to ADR-064, "Amended by" lines on ADR-053 and ADR-054, PRD R10, ARCHITECTURE, SECURITY, FUNNEL S4, RUNBOOK I7, `evals/README.md`, CLAUDE.md, ROADMAP.
+- **CV preview on the Ready card** (ADR-065; plan `docs/plans/cv-preview-plan.md`).
+  - **Preview CV:** a dialog (full screen on a phone, centred on a laptop) that draws the stored CV PDF with pdf.js, with zoom, a page count that flags a CV over one page, a text version and an in-dialog Download PDF that saves the blob already read. If the viewer fails to load, the PDF won't open or a page won't draw, it shows a message and Download PDF.
+  - **`pdfjs-dist@6.4.299`, legacy build,** loaded on first use with its worker and standard fonts as same-origin files. Documented floor for the preview: Chrome 125+, Safari 18+. No model call, function, rules, CORS or CSP change.
+  - **Code:** `web/src/lib/pdf-preview.ts`, `web/src/services/cv-preview.ts`, `web/src/features/pipeline/CvPreview.tsx`, a fonts plugin in `web/vite.config.ts`.
+  - **`check:bundle`:** scans `.mjs`, names the pdf.js worker (cap 1,400 kB) and the fonts (caps), and fails if pdf.js is in any initial file.
+  - **Docs:** ADR-065, PRD R10, ARCHITECTURE, SECURITY, RUNBOOK (step 89 and I7), ROADMAP, CLAUDE.md.
 ### Fixed
 - **CV quality Fix C:** an education line can no longer print a classification its achievement does not state (a 2:1 from a 2:2, "Distinction" from another degree or from a prize); the baseline no longer switches off on a prompt bump; a cap during a failed revision still ends the run; fewer false calls in the contrast, first-person and "leading" lint; a year and a count are no longer joined into a date.
 ### Changed
