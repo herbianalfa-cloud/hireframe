@@ -24,6 +24,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
 - Measured CV cost: a write about 2.5p to 3.1p and a revision about 3.0p (the plan estimated 4.3p and 4.6p). The reserved worst case per owner move is 26.8p (was 17.7p), so two worst-case moves fit under the 60p daily cap.
 - The cover note greeting is "Dear Hiring Team,".
 - A project's organisation may be empty. An education line cites `factRef` plus an optional `achievementRef`.
+- **Firestore out of the initial JS (roadmap item E, ADR-066).** `getFirebaseCore()` (app, App Check, Auth) is separate from `getFirebase()`, which imports `services/firestore-boot.ts` once the core is ready; the owner-check read and the pipeline badge's listener moved to lazy modules; Auth, Functions and Storage never wait for Firestore. New mark `hf:firestore`. `check:bundle`: initial JS budget 200 kB gzip (was 300), Firestore in exactly one chunk, never in an initial file, cap 165 kB gzip; its own tests (`scripts/check-bundle.test.ts`).
 ### Not yet done
 - Opening one DOCX in Word and Google Docs (RUNBOOK I7), the Opus review rounds, and the rebase after PR #41.
 
