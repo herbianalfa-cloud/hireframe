@@ -4,7 +4,7 @@ All notable changes. Format: Keep a Changelog, SemVer.
 
 ## [Unreleased]
 ### Changed
-- **Firestore out of the initial JS (roadmap item E, ADR-066).** `getFirebaseCore()` (app, App Check, Auth) is separate from `getFirebase()`, which imports `services/firestore-boot.ts` once the core is ready; the owner-check read and the pipeline badge's listener moved to lazy modules; Auth, Functions and Storage never wait for Firestore. New mark `hf:firestore`. `check:bundle`: initial JS budget 200 kB gzip (was 300), Firestore in exactly one chunk, never in an initial file, cap 165 kB gzip; its own tests (`scripts/check-bundle.test.ts`).
+- **Firestore out of the initial JS (roadmap item E, ADR-066): initial JS 295.6 to 164.7 kB gzip.** `getFirebaseCore()` (app, App Check, Auth) is separate from `getFirebase()`, which imports `services/firestore-boot.ts` once the core is ready; the owner-check read and the pipeline badge's listener moved to lazy modules; Auth, Functions and Storage never wait for Firestore. New mark `hf:firestore`. `check:bundle`: initial JS budget 200 kB gzip (was 300), Firestore in exactly one chunk, never in an initial file, cap 165 kB gzip; its own tests (`scripts/check-bundle.test.ts`).
 
 ## [0.9.1] - Unreleased
 ### Added

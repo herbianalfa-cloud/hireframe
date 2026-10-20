@@ -18,7 +18,7 @@ Each milestone = one PR, demoable, docs + CHANGELOG updated.
 **Usable at M6** — start relying on it daily from there.
 
 ## Next
-- **Done (v1.0.x, item E, ADR-066):** Firestore is out of the initial JS (295.6 to about 156 kB gzip); `check:bundle` budgets 200 kB initial and a 165 kB Firestore chunk.
+- **Done (v1.0.x, item E, ADR-066):** Firestore is out of the initial JS (295.6 to 164.7 kB gzip); `check:bundle` budgets 200 kB initial and a 165 kB Firestore chunk.
 - **CV quality plan (Opus · High), before M8:** layout and styling (one page filled top to bottom, formal monochrome), writing rules (no em dashes, no "not X, it's Y", reads like a recent graduate wrote it), a self-score with revision to 8/10 or more, and a CV eval on the fake candidate. Input: Beeb's list of what is wrong with the v0.7.3 CV.
 
 ## Wave 2 (weeks 2–3) — sharper decisions
