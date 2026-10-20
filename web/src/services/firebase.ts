@@ -6,7 +6,7 @@ import {
   type AppCheck,
 } from 'firebase/app-check';
 import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
-import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
+import type { Firestore } from 'firebase/firestore';
 import type { Functions } from 'firebase/functions';
 import type { FirebaseStorage } from 'firebase/storage';
 import { FUNCTIONS_REGION } from '@hireframe/shared';
@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 import { markOnce } from '@/lib/perf';
 
+import type * as FirestoreBoot from './firestore-boot';
 import { isTransient, withRetry, withTimeout } from './resilience';
 
 /**
@@ -24,8 +25,15 @@ import { isTransient, withRetry, withTimeout } from './resilience';
  * - Prod (Firebase Hosting): config comes from the reserved `/__/firebase/init.json`, so no
  *   Firebase config lives in the repo or CI. App Check uses reCAPTCHA Enterprise.
  * Functions and Storage load on first use (ADR-021), so the app shell doesn't ship their SDKs.
+ * Firestore loads once the core (app, App Check, Auth) is up (ADR-066), so its chunk is not in
+ * the initial JS. `getFirebaseCore` never waits for it; `getFirebase` does.
  */
-export interface FirebaseServices {
+export interface FirebaseCore {
+  app: FirebaseApp;
+  auth: Auth;
+}
+
+export interface FirebaseServices extends FirebaseCore {
   app: FirebaseApp;
   auth: Auth;
   db: Firestore;
@@ -50,25 +58,57 @@ const HostingConfigSchema = z.object({
   messagingSenderId: z.string().min(1).exactOptional(),
 });
 
+let core: Promise<FirebaseCore> | undefined;
 let services: Promise<FirebaseServices> | undefined;
+let firestoreBoot: Promise<typeof FirestoreBoot> | undefined;
 let functionsClient: Promise<Functions> | undefined;
 let storageClient: Promise<FirebaseStorage> | undefined;
 
-export function getFirebase(): Promise<FirebaseServices> {
-  services ??= (import.meta.env.DEV ? initEmulators() : initHosted()).then(
+/** App, App Check and Auth: everything but Firestore. Marks `hf:firebase`. */
+export function getFirebaseCore(): Promise<FirebaseCore> {
+  core ??= (import.meta.env.DEV ? initEmulators() : initHosted()).then(
     (ready) => {
       markOnce('hf:firebase');
       return ready;
     },
     (error: unknown) => {
-      services = undefined; // allow a retry from the UI
+      core = undefined; // allow a retry from the UI
       throw error;
     },
   );
+  return core;
+}
+
+/** The Firestore boot module (and with it the `firestore` chunk), imported once. */
+export function loadFirestoreBoot(): Promise<typeof FirestoreBoot> {
+  firestoreBoot ??= import('./firestore-boot').catch((error: unknown) => {
+    firestoreBoot = undefined; // the next call imports again
+    throw error;
+  });
+  return firestoreBoot;
+}
+
+/**
+ * The core plus Firestore. The Firestore import starts when the core is ready, so its evaluation
+ * overlaps Auth's restore request instead of competing with the core's own start (ADR-066). A
+ * failed import resets only this promise; the core stays resolved.
+ */
+export function getFirebase(): Promise<FirebaseServices> {
+  services ??= getFirebaseCore()
+    .then(async (ready) => {
+      const boot = await loadFirestoreBoot();
+      const db = boot.connectDb(ready.app);
+      markOnce('hf:firestore');
+      return { ...ready, db };
+    })
+    .catch((error: unknown) => {
+      services = undefined;
+      throw error;
+    });
   return services;
 }
 
-function initEmulators(): Promise<FirebaseServices> {
+function initEmulators(): Promise<FirebaseCore> {
   const app = initializeApp({
     projectId: DEMO_PROJECT_ID,
     apiKey: 'demo-api-key',
@@ -77,15 +117,13 @@ function initEmulators(): Promise<FirebaseServices> {
     authDomain: `${DEMO_PROJECT_ID}.firebaseapp.com`,
   });
   const auth = getAuth(app);
-  const db = getFirestore(app);
   connectAuthEmulator(auth, `http://${EMULATOR_HOST}:9099`, { disableWarnings: true });
-  connectFirestoreEmulator(db, EMULATOR_HOST, 8080);
-  return Promise.resolve({ app, auth, db });
+  return Promise.resolve({ app, auth });
 }
 
 /** Callables client in London (ADR-017), loaded on first use. */
 export function getFunctionsClient(): Promise<Functions> {
-  functionsClient ??= Promise.all([getFirebase(), import('firebase/functions')])
+  functionsClient ??= Promise.all([getFirebaseCore(), import('firebase/functions')])
     .then(([{ app }, sdk]) => {
       const functions = sdk.getFunctions(app, FUNCTIONS_REGION);
       if (import.meta.env.DEV) sdk.connectFunctionsEmulator(functions, EMULATOR_HOST, 5001);
@@ -109,7 +147,7 @@ export function withDownloadLimit(storage: FirebaseStorage): FirebaseStorage {
 
 /** Storage client, loaded on first use. */
 export function getStorageClient(): Promise<FirebaseStorage> {
-  storageClient ??= Promise.all([getFirebase(), import('firebase/storage')])
+  storageClient ??= Promise.all([getFirebaseCore(), import('firebase/storage')])
     .then(([{ app }, sdk]) => {
       if (!import.meta.env.DEV) return withDownloadLimit(sdk.getStorage(app));
       // Without a bucket name the Storage SDK has nothing to address; the emulator accepts any.
@@ -149,7 +187,7 @@ function markOnFirstAppCheckToken(appCheck: AppCheck): void {
   if (state.done) state.unsubscribe();
 }
 
-async function initHosted(): Promise<FirebaseServices> {
+async function initHosted(): Promise<FirebaseCore> {
   const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
   if (!siteKey) throw new Error('VITE_RECAPTCHA_SITE_KEY is not set for this build');
 
@@ -161,5 +199,5 @@ async function initHosted(): Promise<FirebaseServices> {
     isTokenAutoRefreshEnabled: true,
   });
   markOnFirstAppCheckToken(appCheck);
-  return { app, auth: getAuth(app), db: getFirestore(app) };
+  return { app, auth: getAuth(app) };
 }

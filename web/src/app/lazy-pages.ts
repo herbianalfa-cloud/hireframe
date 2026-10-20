@@ -29,9 +29,9 @@ const importDashboard = () => import('@/services/dashboard');
 let dashboardService: ReturnType<typeof importDashboard> | undefined;
 
 /**
- * Loads the dashboard service's chunk once. The app starts this on load when it lands on `/`,
- * before the signed-in user is known, so the chunk is already in when the uid arrives and the
- * listener starts without waiting for it (ADR-050). It stays a dynamic import: a static one
+ * Loads the dashboard service's chunk once. The app starts this when it lands on `/`, once the
+ * Firebase core is ready (ADR-066) and before the signed-in user is known, so the chunk is
+ * already in when the uid arrives and the listener starts without waiting for it (ADR-050). It stays a dynamic import: a static one
  * pulls the service, the Firestore query helpers and the job schemas into the initial JS.
  */
 export function loadDashboardService(): ReturnType<typeof importDashboard> {
@@ -41,7 +41,7 @@ export function loadDashboardService(): ReturnType<typeof importDashboard> {
 
 /**
  * Starts the Today prefetch (ADR-050) and the Today chunk. The dashboard service is imported
- * dynamically (`loadDashboardService`, already under way when the app landed on `/`). The
+ * dynamically (`loadDashboardService`, already under way once the core was ready when the app landed on `/`). The
  * returned function stops the listener, also when it is called before the import has finished.
  */
 export function startTodayPrefetch(): () => void {

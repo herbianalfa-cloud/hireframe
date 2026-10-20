@@ -1,20 +1,18 @@
-import { Timestamp } from 'firebase/firestore';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetMarksForTest } from '@/lib/perf';
 
 import { checkAccess, evaluateAccess, type AppConfigRead } from './access';
-import { timestampsToDates } from './timestamps';
 
 const OWNER = 'owner-uid-123';
 
-/** Shaped like the `config/app` doc created by hand in the Firebase console (RUNBOOK). */
+/** The `config/app` doc as `readAppConfig` returns it: console Timestamps already Dates. */
 function consoleConfig(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ownerUid: OWNER,
     schemaVersion: 1,
-    createdAt: Timestamp.fromDate(new Date('2026-09-30T08:00:00Z')),
-    updatedAt: Timestamp.fromDate(new Date('2026-09-30T08:05:00Z')),
+    createdAt: new Date('2026-09-30T08:00:00Z'),
+    updatedAt: new Date('2026-09-30T08:05:00Z'),
     ...overrides,
   };
 }
@@ -32,18 +30,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('timestampsToDates', () => {
-  it('converts Firestore Timestamps to Dates, including nested ones', () => {
-    const at = new Date('2026-09-30T08:00:00Z');
-    const converted = timestampsToDates({
-      createdAt: Timestamp.fromDate(at),
-      nested: { list: [Timestamp.fromDate(at), 'text'] },
-      count: 3,
-    });
-    expect(converted).toEqual({ createdAt: at, nested: { list: [at, 'text'] }, count: 3 });
-  });
-});
-
 describe('evaluateAccess', () => {
   it('treats a missing config/app as denied', () => {
     expect(evaluateAccess(OWNER, { exists: false })).toEqual({ status: 'denied' });
@@ -57,7 +43,7 @@ describe('checkAccess', () => {
     expect(performance.getEntriesByName('hf:owner')).toHaveLength(1);
   });
 
-  it('converts console Timestamps before parsing and returns owner for the matching UID', async () => {
+  it('returns owner for the matching UID', async () => {
     await expect(checkAccess(OWNER, read(consoleConfig()))).resolves.toEqual({ status: 'owner' });
   });
 
@@ -79,7 +65,7 @@ describe('checkAccess', () => {
 
   it.each([
     ['a missing timestamp', consoleConfig({ updatedAt: undefined })],
-    ['a string instead of a Timestamp', consoleConfig({ createdAt: '2026-09-30' })],
+    ['a string instead of a date', consoleConfig({ createdAt: '2026-09-30' })],
     ['an empty ownerUid', consoleConfig({ ownerUid: '' })],
   ])('returns error, never owner, for a malformed doc with %s', async (_name, data) => {
     const access = await checkAccess(OWNER, read(data));

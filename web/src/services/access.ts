@@ -1,13 +1,10 @@
-import { AppConfigSchema, DOCS } from '@hireframe/shared';
-import { doc, getDoc } from 'firebase/firestore';
+import { AppConfigSchema } from '@hireframe/shared';
 
 import { markOnce } from '@/lib/perf';
 
-import { getFirebase } from './firebase';
+import { getFirebase, loadFirestoreBoot } from './firebase';
 import { errorCode, logError } from './log';
 import { isTransient, withRetry, withTimeout } from './resilience';
-import { timestampsToDates } from './timestamps';
-import { tally } from './reads';
 
 /**
  * Owner check for the UI (ADR-011). Firestore rules are the real guard; this decides
@@ -16,6 +13,7 @@ import { tally } from './reads';
 export type Access =
   { status: 'owner' } | { status: 'denied' } | { status: 'error'; message: string };
 
+/** `data` has its Firestore Timestamps converted to Dates already (firestore-boot.ts). */
 export type AppConfigRead = { exists: false } | { exists: true; data: unknown };
 export type ReadAppConfig = () => Promise<AppConfigRead>;
 
@@ -23,7 +21,7 @@ const READ_TIMEOUT_MS = 10_000;
 
 export function evaluateAccess(uid: string, read: AppConfigRead): Access {
   if (!read.exists) return { status: 'denied' };
-  const parsed = AppConfigSchema.safeParse(timestampsToDates(read.data));
+  const parsed = AppConfigSchema.safeParse(read.data);
   if (!parsed.success) {
     logError('access.config_invalid', { issues: parsed.error.issues.length });
     return { status: 'error', message: 'The app configuration is invalid. See the runbook.' };
@@ -32,9 +30,8 @@ export function evaluateAccess(uid: string, read: AppConfigRead): Access {
 }
 
 async function readAppConfigFromFirestore(): Promise<AppConfigRead> {
-  const { db } = await getFirebase();
-  const snapshot = await tally(getDoc(doc(db, DOCS.appConfig)), 'access:getDoc');
-  return snapshot.exists() ? { exists: true, data: snapshot.data() } : { exists: false };
+  const [{ db }, boot] = await Promise.all([getFirebase(), loadFirestoreBoot()]);
+  return boot.readAppConfig(db);
 }
 
 export async function checkAccess(
