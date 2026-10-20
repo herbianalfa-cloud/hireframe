@@ -8,7 +8,7 @@ import {
 
 import { markOnce } from '@/lib/perf';
 
-import { getFirebase } from './firebase';
+import { getFirebaseCore } from './firebase';
 import { errorCode, logError } from './log';
 
 export interface AuthUser {
@@ -27,7 +27,7 @@ export function onAuthChange(callback: (state: AuthState) => void): () => void {
   let cancelled = false;
   let unsubscribe: (() => void) | undefined;
 
-  getFirebase().then(
+  getFirebaseCore().then(
     ({ auth }) => {
       if (cancelled) return;
       unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -73,7 +73,7 @@ export function signInErrorMessage(code: string | undefined): string | null {
 export type SignInResult = { ok: true } | { ok: false; message: string | null };
 
 export async function signInWithGoogle(): Promise<SignInResult> {
-  const { auth } = await getFirebase();
+  const { auth } = await getFirebaseCore();
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   try {
@@ -91,6 +91,6 @@ export async function signInWithGoogle(): Promise<SignInResult> {
 }
 
 export async function signOut(): Promise<void> {
-  const { auth } = await getFirebase();
+  const { auth } = await getFirebaseCore();
   await firebaseSignOut(auth);
 }
