@@ -30,6 +30,11 @@ vi.mock('firebase/firestore', async (importOriginal) => ({
 vi.mock('./firebase', () => ({ getFirebase: () => Promise.resolve({ db: {} }) }));
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+/** The listener module is a dynamic import, so wait for the listener itself. */
+const listening = () =>
+  vi.waitFor(() => {
+    expect(state.listens).toHaveBeenCalled();
+  });
 
 beforeEach(() => {
   state.unsubscribe.mockClear();
@@ -42,7 +47,7 @@ describe('watchTodoCount', () => {
     const first: TodoCount[] = [];
     const second: TodoCount[] = [];
     const stopFirst = watchTodoCount((value) => first.push(value));
-    await tick();
+    await listening();
     const stopSecond = watchTodoCount((value) => second.push(value));
     await tick();
 
@@ -61,10 +66,19 @@ describe('watchTodoCount', () => {
     expect(state.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it('starts no listener when everything unsubscribed before the listener module loaded', () => {
+    const stop = watchTodoCount(() => undefined);
+    stop();
+    // Long enough for the dynamic import of the listener module to have finished.
+    return new Promise((resolve) => setTimeout(resolve, 50)).then(() => {
+      expect(state.listens).not.toHaveBeenCalled();
+    });
+  });
+
   it('marks a count at the limit as capped', async () => {
     const seen: TodoCount[] = [];
     const stop = watchTodoCount((value) => seen.push(value));
-    await tick();
+    await listening();
     state.onNext?.({ size: 50 });
     expect(seen.at(-1)).toEqual({ status: 'ready', count: 50, capped: true });
     stop();
@@ -73,7 +87,7 @@ describe('watchTodoCount', () => {
   it('reports a failed read as an error without throwing, and stays in it', async () => {
     const seen: TodoCount[] = [];
     const stop = watchTodoCount((value) => seen.push(value));
-    await tick();
+    await listening();
     state.onError?.({ code: 'permission-denied' });
     expect(seen.at(-1)).toEqual({ status: 'error' });
     // A later subscriber is told the error at once, not "loading". There is no retry: a
@@ -88,7 +102,7 @@ describe('watchTodoCount', () => {
 
   it('starts again from loading after everything unsubscribed', async () => {
     const stop = watchTodoCount(() => undefined);
-    await tick();
+    await listening();
     state.onNext?.({ size: 2 });
     stop();
     const seen: TodoCount[] = [];
