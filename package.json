@@ -10,7 +10,7 @@
     "apps-script"
   ],
   "engines": {
-    "node": ">=22.18 <23"
+    "node": ">=24.15 <25"
   },
   "scripts": {
     "lint": "eslint .",
