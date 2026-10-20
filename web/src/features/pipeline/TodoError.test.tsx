@@ -54,7 +54,9 @@ describe('after the count listener fails', () => {
       </MemoryRouter>,
     );
     await act(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await vi.waitFor(() => {
+        expect(state.onNext).toBeDefined();
+      });
     });
     act(() => {
       state.onNext?.({ size: 2 });
