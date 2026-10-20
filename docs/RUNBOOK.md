@@ -634,7 +634,7 @@ After K13, check that the next scheduled scan succeeds and the morning digest ar
   The second command must show it beside the deployer's `serviceAccountUser`. Then publish the below-threshold message again and expect `billing_guard.below` within 2 minutes. Rollback: the same command with `remove-iam-policy-binding`. If it still logs nothing, check C46 (the only invoker is `hireframe-billing-guard@…`) and C14b (the trigger's service account). Record the live option in ADR-059.
 
 ## Local setup (per machine)
-1. **Node 22:** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.
+1. **Node 24 (>= 24.15):** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast. Cloud Functions still runs Node 22 (ADR-008 addendum); `nvm install 22` if you want to run the bundle smoke locally with `nvm exec 22 node scripts/smoke-functions-bundle.ts`.
 2. **gitleaks:** `brew install gitleaks`. The pre-commit hook is fail-closed: without gitleaks, commits are blocked.
 3. **Java 21** (for the Firebase emulators): `brew install openjdk@21`.
 4. **Install:** `npm ci` installs dependencies and the husky git hooks.

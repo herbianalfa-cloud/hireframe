@@ -36,6 +36,8 @@ Context: the docs fix the stack but not the repo tooling. Decision:
 
 Consequences: one `npm run check` gate locally and in CI; contributors need gitleaks installed; the gitleaks version in CI is bumped by hand (Dependabot can't see it).
 
+*Addendum (Node 24 toolchain, firebase 13):* firebase 13 and `@firebase/rules-unit-testing` 6 require Node >= 24.12, and jsdom and firebase-tools' re2 and node-gyp need >= 24.15 on the 24 line. With `engine-strict`, the whole toolchain moves: `.nvmrc` is `24` and the root `engines.node` is `>=24.15 <25`. **Cloud Functions stays `nodejs22`**: `firebase.json` runtime, the esbuild target `node22`, the deploy `engines.node "22"` and `@types/node` 22.x are unchanged, so typecheck rejects an API that only exists in Node 24, and the functions bundle is byte-identical. CI smokes the built bundle on Node 22 (`ci.yml`, after the web bundle budget), and `scripts/toolchain.test.ts` keeps the three Node 22 pins and the `.nvmrc` range in agreement and checks that the lockfile holds one copy of each Firebase web package. Consequences: the Functions emulator runs on the host's Node 24 and logs a version-mismatch warning, which is accepted; the Node 22 smoke covers loading the bundle. Revisit before Node 22's end of life (ROADMAP, Parking lot).
+
 ## ADR-009 Wave 1 spec clarifications
 Context: a review of the docs before any code found invalid Firestore paths, overlapping verdict rules, an experience rule off by one, and a per-run worst case that exceeds the monthly cap. Decision:
 - **Firestore paths:** `profile/main/facts/{factId}`, `profile/main/documents/{docId}`; the scan lock lives in `locks/scan` (not `runs/lock`), so run queries never return it. → ARCHITECTURE.md
@@ -102,6 +104,8 @@ The emulator suite (`npm run test:rules`) exercises firebase-tools with both ove
 - **Each allowlist entry** names the GHSA id, the direct dependencies it may arrive through (`firebase-tools`, `@google/clasp`), a reason and a `reviewBy` date (2027-01-13). The gate also fails on an advisory that now arrives through another root, on an expired entry, and on an entry that no longer matches anything, so the list can't go stale.
 - **Moderates never fail**, so Dependabot #4 (`sprintf-js`) stays open and is tracked there. The first step (`npm audit --omit=dev --audit-level=high`, shipped code) is unchanged, and the job keeps its name `audit`, so the ruleset's required check is unchanged.
 - **Today's only entry** is `GHSA-vfj7-8cjw-p6xm` (`braces`, via `chokidar` into `firebase-tools` and via `micromatch` into `@google/clasp`). Both are dev tools that ship in no bundle.
+
+*Addendum (firebase 13):* `@firebase/firestore` 4.18.0 (firebase 13) still pins `@grpc/grpc-js ~1.9.0`, so the override stays.
 
 ## ADR-014 Deploy: keyless, tag-only, London
 Context: CLAUDE.md says deploys are CI-only on tagged releases, and there must be no long-lived keys. Decision:

@@ -14,7 +14,7 @@
 | Layer | Choice | Why |
 |---|---|---|
 | Web | React 19, TypeScript strict, Vite, Tailwind v4, shadcn/ui, TanStack Query + Table, Framer Motion (sparingly) | Known stack (Fridger) + premium component base |
-| Backend | Firebase: Auth, Firestore, Storage, Hosting, Cloud Functions v2 (Node 22, TS) | Known stack; scheduled functions |
+| Backend | Firebase: Auth, Firestore, Storage, Hosting, Cloud Functions v2 (Node 22, TS; toolchain Node 24) | Known stack; scheduled functions |
 | Plan | **Blaze (pay-as-you-go)** — required for scheduled functions and outbound HTTP. Budget alert at £5/£10 | Usage stays near free tier |
 | AI | Anthropic API. Models in config: cheap triage model (Haiku 4.5), deep model (Sonnet 5.5, effort low). Prompt caching on the S3 system prompt (profile facts + criteria). Deep reads run inside the scan; Message Batches are parked (ADR-035) | Cost/quality split |
 | Gmail | Google Apps Script in the user's own account (see ADR-003) | Avoids OAuth app verification and 7-day token expiry |

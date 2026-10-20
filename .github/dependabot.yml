@@ -11,7 +11,7 @@ updates:
       # typescript-eslint supports TypeScript < 6.1 only (ADR-008).
       - dependency-name: typescript
         update-types: [version-update:semver-major]
-      # Types track the Node 22 runtime (.nvmrc, Cloud Functions).
+      # Types track the Cloud Functions runtime (nodejs22); the toolchain is Node 24 (ADR-008 addendum).
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
 
