@@ -45,6 +45,6 @@ describe('Node pins', () => {
     const engines = (JSON.parse(read('package.json')) as { engines: { node: string } }).engines
       .node;
     expect(major).toBeGreaterThanOrEqual(24);
-    expect(engines).toBe(`>=24.15 <${major + 1}`);
+    expect(engines).toBe(`>=24.15 <${String(major + 1)}`);
   });
 });
