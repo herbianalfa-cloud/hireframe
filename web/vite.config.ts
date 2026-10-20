@@ -58,6 +58,9 @@ export default defineConfig({
               name: 'firestore',
               test: /node_modules[\\/](@firebase[\\/](firestore|webchannel-wrapper)|firebase[\\/]firestore|re2js)[\\/]/,
               priority: 25,
+              // Its dependencies (@firebase/app, util, component) belong to the `firebase` group
+              // below. Pulled in here they made the entry import this chunk (ADR-066).
+              includeDependenciesRecursively: false,
             },
             {
               name: 'firebase',
