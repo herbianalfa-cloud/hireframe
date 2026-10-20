@@ -44,7 +44,9 @@ export default defineConfig({
       output: {
         // Vendor chunks for what every visit needs (ADR-021): they change less often than the
         // app, so they stay cached across deploys. Functions and Storage are left out on purpose:
-        // they load on first use (services/firebase.ts).
+        // they load on first use (services/firebase.ts). The `firestore` group is a lazy chunk:
+        // services/firestore-boot.ts imports it once the Firebase core is up (ADR-066), and
+        // check:bundle names it, so keep the group (a stable cached chunk with its own cap).
         codeSplitting: {
           groups: [
             {
