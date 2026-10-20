@@ -18,7 +18,7 @@ Each milestone = one PR, demoable, docs + CHANGELOG updated.
 **Usable at M6** — start relying on it daily from there.
 
 ## Next
-- **Done (v1.0.x, item E, ADR-066):** Firestore is out of the initial JS (295.6 to about 156 kB gzip); `check:bundle` budgets 200 kB initial and a 165 kB Firestore chunk.
+- **Done (v1.0.x, item E, ADR-066):** Firestore is out of the initial JS (295.6 to 164.7 kB gzip); `check:bundle` budgets 200 kB initial and a 165 kB Firestore chunk.
 - **CV quality: built** on `feat/cv-quality` (PR #42, draft; **merge after v1.0.0**; ADR-062 to ADR-064; plan `docs/plans/cv-quality-plan.md`, handoffs `cv-quality-handoff-*.md`): a filled one-page formal monochrome layout, code-enforced writing rules, a code quality score with one revision round, and a CV eval on the fake candidate. Still to do before merge: the Opus review and fix rounds, the Word and Google Docs check (RUNBOOK I7), rebase onto `main` after PR #41 and re-check the ADR numbers.
 
 ## Wave 2 (weeks 2–3) — sharper decisions
