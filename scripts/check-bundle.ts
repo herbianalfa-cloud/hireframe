@@ -6,6 +6,7 @@
  * - the dev-only Firestore read counter (C5) is tree-shaken: its warning text is in no chunk.
  * - the CV preview's pdf.js (ADR-065) is lazy: no initial file contains it. Its worker is the one
  *   named exception to the chunk rule, with its own cap, and its standard fonts have caps too.
+ * - Firestore (ADR-066) is in no initial file and in exactly one chunk, under its own gzip cap.
  * It prints each initial file's gzip size, largest first.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ import { READ_WARNING } from '../web/src/services/read-warning.ts';
 // `CHECK_BUNDLE_DIST` points the check at another folder (the script's own tests use it).
 const DIST = process.env.CHECK_BUNDLE_DIST ?? 'web/dist';
 const MAX_CHUNK_BYTES = 500 * 1000;
-const MAX_INITIAL_GZIP_BYTES = 300 * 1000;
+const MAX_INITIAL_GZIP_BYTES = 200 * 1000;
 // The pdf.js worker (legacy build, pinned) was 1,321 kB minified when measured; the cap leaves
 // room for a patch bump, not for a different build. Fonts: largest file 162 kB, 798 kB in all (14 fonts and 2 licence files).
 const WORKER_PATTERN = /^pdf\.worker\.min-.+\.mjs$/;
@@ -28,10 +29,15 @@ const MAX_FONTS_TOTAL_BYTES = 900 * 1000;
 // `PDFWorker` is a pdf.js class name that minification keeps and our adapter never contains
 // (it does carry `GlobalWorkerOptions`, so that one would match the adapter as well).
 const PDFJS_MARKER = 'PDFWorker';
+// The Firestore SDK loads once the Firebase core is up (ADR-066). Its RPC service path is only in
+// the SDK, so it finds the chunk whatever the chunk is named; it appears in exactly one chunk.
+const FIRESTORE_MARKER = 'google.firestore.v1.Firestore';
+const MAX_FIRESTORE_GZIP_BYTES = 165 * 1000;
 
 const kB = (bytes: number) => `${(bytes / 1000).toFixed(1)} kB`;
 const failures: string[] = [];
 
+const firestoreChunks: string[] = [];
 // `.mjs` is scanned too, so the pdf.js worker can't slip past the chunk rule unnamed.
 const chunks = readdirSync(join(DIST, 'assets')).filter((name) => /\.m?js$/.test(name));
 const workers = chunks.filter((name) => WORKER_PATTERN.test(name));
@@ -56,6 +62,7 @@ for (const name of chunks) {
   if (text.includes(READ_WARNING)) {
     failures.push(`${name} contains the dev-only read counter's warning (C5)`);
   }
+  if (text.includes(FIRESTORE_MARKER)) firestoreChunks.push(name);
 }
 
 const html = readFileSync(join(DIST, 'index.html'), 'utf8');
@@ -116,6 +123,25 @@ if (initialGzip > MAX_INITIAL_GZIP_BYTES) {
   failures.push(`initial JS is ${kB(initialGzip)} gzip (max ${kB(MAX_INITIAL_GZIP_BYTES)})`);
 }
 
+for (const { path } of initialSizes) {
+  if (firestoreChunks.includes(path.replace(/^assets\//, ''))) {
+    failures.push(`${path} is initial JS and contains the Firestore SDK (ADR-066)`);
+  }
+}
+let firestoreGzip = 0;
+if (firestoreChunks.length !== 1) {
+  failures.push(
+    `expected the Firestore SDK in exactly one chunk, found ${String(firestoreChunks.length)} (ADR-066)`,
+  );
+} else {
+  firestoreGzip = gzipSync(readFileSync(join(DIST, 'assets', firestoreChunks[0] ?? ''))).length;
+  if (firestoreGzip > MAX_FIRESTORE_GZIP_BYTES) {
+    failures.push(
+      `the Firestore chunk is ${kB(firestoreGzip)} gzip (max ${kB(MAX_FIRESTORE_GZIP_BYTES)})`,
+    );
+  }
+}
+
 if (failures.length > 0) {
   console.error(`check-bundle: over budget\n- ${failures.join('\n- ')}`);
   process.exit(1);
@@ -131,6 +157,7 @@ const workerBytes = workers.reduce(
 console.log(
   `  lazy: pdf.js worker ${kB(workerBytes)} (cap ${kB(MAX_WORKER_BYTES)}), fonts ${kB(fontsTotal)} (cap ${kB(MAX_FONTS_TOTAL_BYTES)})`,
 );
+console.log(`  ${kB(firestoreGzip).padStart(9)} gzip  Firestore (loaded after the core)`);
 console.log(
   `check-bundle: ${String(chunks.length)} chunks, initial JS ${kB(initialGzip)} gzip in ${String(initial.length)} files`,
 );

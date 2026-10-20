@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +12,8 @@ const HTML = `<!doctype html><html><head>
 <link rel="preload" href="/__/firebase/init.json" as="fetch" crossorigin>
 <script type="module" src="/assets/index-a.js"></script>
 </head><body></body></html>`;
+
+const MARKER = 'google.firestore.v1.Firestore';
 
 interface Fixture {
   html: string;
@@ -25,9 +28,13 @@ function healthy(): Fixture {
       'assets/pdf-a.js': 'class PDFWorker {} export { PDFWorker };',
       'assets/pdf.worker.min-a.mjs': 'export const worker = 1;',
       'assets/pdfjs-6.4.299/standard_fonts/Font.ttf': 'font',
+      'assets/firestore-a.js': `export const rpc = "${MARKER}";`,
     },
   };
 }
+
+/** Text that gzip can't shrink, so a fixture reaches a size cap with few bytes. */
+const incompressible = (bytes: number) => randomBytes(bytes).toString('hex');
 
 const dirs: string[] = [];
 function run(fixture: Fixture) {
@@ -154,5 +161,50 @@ describe('check-bundle', () => {
     const fixture = healthy();
     fixture.html = HTML.replace(/<link[^>]*>/, '');
     expect(run(fixture).out).toContain('no preload for /__/firebase/init.json');
+  });
+
+  it('passes a clean dist and prints the Firestore line', () => {
+    const result = run(healthy());
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('Firestore (loaded after the core)');
+  });
+
+  it('fails when the Firestore SDK is in an initial file', () => {
+    const fixture = healthy();
+    fixture.files['assets/index-a.js'] = `export const rpc = "${MARKER}";`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('is initial JS and contains the Firestore SDK');
+  });
+
+  it('fails when the marker is in no chunk, or in two', () => {
+    const none = healthy();
+    delete none.files['assets/firestore-a.js'];
+    const noneResult = run(none);
+    expect(noneResult.code).toBe(1);
+    expect(noneResult.out).toContain('exactly one chunk, found 0');
+
+    const two = healthy();
+    two.files['assets/firestore-b.js'] = `export const rpc = "${MARKER}";`;
+    const twoResult = run(two);
+    expect(twoResult.code).toBe(1);
+    expect(twoResult.out).toContain('exactly one chunk, found 2');
+  });
+
+  it('fails when the Firestore chunk is over 165 kB gzip', () => {
+    const fixture = healthy();
+
+    fixture.files['assets/firestore-a.js'] = `"${MARKER}"${incompressible(170_000)}`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('the Firestore chunk is');
+  });
+
+  it('fails when the initial JS is over 200 kB gzip', () => {
+    const fixture = healthy();
+    fixture.files['assets/index-a.js'] = `export const x = "${incompressible(210_000)}";`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('initial JS is');
   });
 });
