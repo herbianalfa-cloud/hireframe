@@ -30,6 +30,7 @@ Referral path finder and recruiter/HM finder (public sources + one-click LinkedI
 Offer & negotiation helper, autofill browser extension.
 
 ## Parking lot
+**Node 22 end of life:** move Cloud Functions to `nodejs24` before Node 22 reaches end of life on **30 Apr 2027** (also check Google's nodejs22 deprecation date for Cloud Run functions). Change the `firebase.json` runtime, the esbuild target, the deploy engines and `@types/node` to 24, and drop the Node 22 smoke step. All functions rebuild, so this needs the full clean-weekday gate.
 **From the PR 8B fix-commit review:** A re-judgement (Lookup saveDescription, hydrator saveFullText) clears descriptionPurgedAt.
 **From the PR 8B review (pre-existing):** a scan with a source in `config.disabledSources` rewrites that source's doc with a full `set` that drops `quota`, so a kept quota is lost if the source is disabled on the same day as a wipe. Make the disabled-source write a merge.
 **Funnel intake PR B leftovers (ADR-045):** re-test C1 (seniority markers, 17/1/0) and C3 (engineering titles, 23/1/1) one term at a time, since each failed on a single job and some terms may pass alone; count C5 (language blocker) and C6 (ambiguous experience ask at 4+ years) hits before building either; 135 of 499 S2 skips carry a location blocker S1 missed, so look at which location wording S1 lets through.
