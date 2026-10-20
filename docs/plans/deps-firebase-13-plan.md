@@ -122,3 +122,7 @@ Plan approved with these changes:
 1. **Laptop:** nvm is installed and sourced in `~/.zshrc`, with Node 24 and 22 and default 22. `~/.zprofile` and the nvm default are not edited. nvm is a shell function: a bash call that needs it runs `. /opt/homebrew/opt/nvm/nvm.sh` first. The session started on Node 24; check `node -v` >= 24.15 before `npm ci`. This replaces the "Laptop steps" section above.
 2. **Bundle hash proof:** build main in a worktree (`git worktree add ../hf-main origin/main`; there `nvm exec 22 npm ci` and the functions build), compare the sha256 lists, then `git worktree remove ../hf-main`.
 3. **Release:** ship this PR together with #43 in one release after #42's (both Hosting-only), with one Scan-now proof. This replaces step 5's "its own patch release" and the sequence in step 4 and 6.
+
+## Held (20 Oct)
+
+**Held (20 Oct):** firestore 4.18.0 adds BSON/Decimal128 types to its shared core (+~7.5 kB gzip) and re2js 2.8.8 adds ~2 kB, so initial JS is 306.0 > 300 kB. This is not avoidable from our side. The budget stays 300 kB. Resume after ROADMAP item E (Firestore out of initial JS) frees >= 10 kB gzip.
