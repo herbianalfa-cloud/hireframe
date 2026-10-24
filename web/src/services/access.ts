@@ -4,14 +4,18 @@ import { markOnce } from '@/lib/perf';
 
 import { getFirebase, loadFirestoreBoot } from './firebase';
 import { errorCode, logError } from './log';
-import { isTransient, withRetry, withTimeout } from './resilience';
+import { isChunkLoadError, isTransient, withRetry, withTimeout } from './resilience';
 
 /**
  * Owner check for the UI (ADR-011). Firestore rules are the real guard; this decides
  * what to render and never grants access by default.
  */
 export type Access =
-  { status: 'owner' } | { status: 'denied' } | { status: 'error'; message: string };
+  | { status: 'owner' }
+  | { status: 'denied' }
+  // `chunk-load`: the Firestore chunk couldn't be fetched. Only a page reload recovers (the
+  // browser caches the failed import), so the gate's Try again reloads for this kind.
+  | { status: 'error'; message: string; kind?: 'chunk-load' };
 
 /** `data` has its Firestore Timestamps converted to Dates already (firestore-boot.ts). */
 export type AppConfigRead = { exists: false } | { exists: true; data: unknown };
@@ -51,7 +55,9 @@ export async function checkAccess(
   } catch (error) {
     // Rules deny non-owners (and everyone before bootstrap) with permission-denied.
     if (errorCode(error) === 'permission-denied') return { status: 'denied' };
-    return { status: 'error', message: "Couldn't check access. Try again." };
+    const message = "Couldn't check access. Try again.";
+    if (isChunkLoadError(error)) return { status: 'error', message, kind: 'chunk-load' };
+    return { status: 'error', message };
   } finally {
     markOnce('hf:owner');
   }
