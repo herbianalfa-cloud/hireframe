@@ -84,11 +84,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <SignInScreen onSignIn={handleSignIn} busy={signingIn} message={signInMessage} />;
   }
 
+  // A failed chunk import stays failed in the browser until the page reloads, so a refetch
+  // can't recover it. The reload happens only on the click, never by itself.
+  const retryAccess = () => {
+    if (access.data?.status === 'error' && access.data.kind === 'chunk-load') {
+      window.location.reload();
+    } else {
+      void access.refetch();
+    }
+  };
+
   if (access.isError) {
     return (
       <GateErrorScreen
         message="Couldn't check access. Try again."
-        onRetry={() => void access.refetch()}
+        onRetry={retryAccess}
         onSignOut={handleSignOut}
       />
     );
@@ -101,7 +111,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       return (
         <GateErrorScreen
           message={access.data.message}
-          onRetry={() => void access.refetch()}
+          onRetry={retryAccess}
           onSignOut={handleSignOut}
         />
       );

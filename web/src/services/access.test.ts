@@ -110,6 +110,24 @@ describe('checkAccess with the default reader (lazy Firestore boot, ADR-066)', (
     expect(performance.getEntriesByName('hf:owner')).toHaveLength(1);
   });
 
+  it.each([
+    'Failed to fetch dynamically imported module: https://x.test/assets/firestore-boot-1.js',
+    'error loading dynamically imported module: https://x.test/assets/firestore-boot-1.js',
+    'Importing a module script failed.',
+  ])('marks a chunk-load failure (%s) so the gate reloads', async (message) => {
+    boot.loadFirestoreBoot.mockRejectedValue(new TypeError(message));
+    await expect(checkAccess(OWNER)).resolves.toMatchObject({
+      status: 'error',
+      kind: 'chunk-load',
+    });
+  });
+
+  it('does not mark other failures as chunk-load', async () => {
+    boot.getFirebase.mockRejectedValue(new Error('no config'));
+    const access = await checkAccess(OWNER);
+    expect(access).toEqual({ status: 'error', message: "Couldn't check access. Try again." });
+  });
+
   it('returns error when the Firebase core fails to start', async () => {
     boot.getFirebase.mockRejectedValue(new Error('no config'));
     await expect(checkAccess(OWNER)).resolves.toMatchObject({ status: 'error' });
