@@ -31,8 +31,9 @@ let dashboardService: ReturnType<typeof importDashboard> | undefined;
 /**
  * Loads the dashboard service's chunk once. The app starts this when it lands on `/`, once the
  * Firebase core is ready (ADR-066) and before the signed-in user is known, so the chunk is
- * already in when the uid arrives and the listener starts without waiting for it (ADR-050). It stays a dynamic import: a static one
- * pulls the service, the Firestore query helpers and the job schemas into the initial JS.
+ * already in when the uid arrives and the listener starts without waiting for it (ADR-050). It
+ * stays a dynamic import: a static one pulls the service, the Firestore query helpers and the
+ * job schemas into the initial JS.
  */
 export function loadDashboardService(): ReturnType<typeof importDashboard> {
   dashboardService ??= importDashboard();
