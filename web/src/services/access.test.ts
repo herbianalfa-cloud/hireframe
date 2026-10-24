@@ -4,6 +4,16 @@ import { resetMarksForTest } from '@/lib/perf';
 
 import { checkAccess, evaluateAccess, type AppConfigRead } from './access';
 
+const boot = vi.hoisted(() => ({
+  getFirebase: vi.fn(),
+  loadFirestoreBoot: vi.fn(),
+  readAppConfig: vi.fn(),
+}));
+vi.mock('./firebase', () => ({
+  getFirebase: boot.getFirebase,
+  loadFirestoreBoot: boot.loadFirestoreBoot,
+}));
+
 const OWNER = 'owner-uid-123';
 
 /** The `config/app` doc as `readAppConfig` returns it: console Timestamps already Dates. */
@@ -24,6 +34,9 @@ const read =
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  boot.getFirebase.mockReset().mockResolvedValue({ db: { kind: 'db' } });
+  boot.loadFirestoreBoot.mockReset().mockResolvedValue({ readAppConfig: boot.readAppConfig });
+  boot.readAppConfig.mockReset();
 });
 
 afterEach(() => {
@@ -79,5 +92,35 @@ describe('checkAccess', () => {
     const access = await checkAccess(OWNER, offline);
     expect(access.status).toBe('error');
     expect(offline).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('checkAccess with the default reader (lazy Firestore boot, ADR-066)', () => {
+  it('reads config/app through the Firestore chunk and returns owner', async () => {
+    boot.readAppConfig.mockResolvedValue({ exists: true, data: consoleConfig() });
+    await expect(checkAccess(OWNER)).resolves.toEqual({ status: 'owner' });
+    expect(boot.readAppConfig).toHaveBeenCalledWith({ kind: 'db' });
+  });
+
+  it('returns error, never owner, when the Firestore chunk fails to load', async () => {
+    resetMarksForTest();
+    boot.loadFirestoreBoot.mockRejectedValue(new Error('chunk failed'));
+    await expect(checkAccess(OWNER)).resolves.toMatchObject({ status: 'error' });
+    expect(boot.readAppConfig).not.toHaveBeenCalled();
+    expect(performance.getEntriesByName('hf:owner')).toHaveLength(1);
+  });
+
+  it('returns error when the Firebase core fails to start', async () => {
+    boot.getFirebase.mockRejectedValue(new Error('no config'));
+    await expect(checkAccess(OWNER)).resolves.toMatchObject({ status: 'error' });
+  });
+
+  it('returns denied when the rules reject the read through the chunk', async () => {
+    boot.readAppConfig.mockRejectedValue(
+      Object.assign(new Error('Missing or insufficient permissions.'), {
+        code: 'permission-denied',
+      }),
+    );
+    await expect(checkAccess(OWNER)).resolves.toEqual({ status: 'denied' });
   });
 });
