@@ -115,6 +115,14 @@ describe('getFirebaseCore / getFirebase', () => {
     const first = await getFirebaseCore();
     await expect(getFirebase()).rejects.toThrow();
     await expect(getFirebaseCore()).resolves.toBe(first);
+    expect(sdk.connectDb).not.toHaveBeenCalled();
+
+    // Retry: a good boot is mocked, and the next call imports it and connects once.
+    mockBoot();
+    const services = await getFirebase();
+    expect(services.db).toEqual({ kind: 'db' });
+    expect(services.app).toBe(first.app);
+    expect(sdk.connectDb).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -141,7 +149,7 @@ describe('Functions and Storage clients', () => {
     const { getFirebase } = await import('./firebase');
     void getFirebase();
     const { callOwnerCallable } = await import('./callable');
-    await callOwnerCallable('anything' as never, {}).catch(() => undefined);
+    await callOwnerCallable('addFact', {}).catch(() => undefined);
     expect(sdk.httpsCallable).toHaveBeenCalled();
     expect(sdk.connectDb).not.toHaveBeenCalled();
   });

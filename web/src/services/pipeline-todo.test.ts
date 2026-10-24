@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { watchTodoCount, type TodoCount } from './pipeline-todo';
 
@@ -27,19 +27,46 @@ vi.mock('firebase/firestore', async (importOriginal) => ({
     return state.unsubscribe;
   },
 }));
-vi.mock('./firebase', () => ({ getFirebase: () => Promise.resolve({ db: {} }) }));
+/** `getFirebase` settles when the test says so; unset, it resolves at once. */
+const firebase = vi.hoisted(() => ({ pending: undefined as Promise<unknown> | undefined }));
+vi.mock('./firebase', () => ({
+  getFirebase: () => firebase.pending ?? Promise.resolve({ db: {} }),
+}));
+
+function deferred(): {
+  promise: Promise<unknown>;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+} {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<unknown>((res, rej) => {
+    resolve = () => {
+      res({ db: {} });
+    };
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-/** The listener module is a dynamic import, so wait for the listener itself. */
-const listening = () =>
-  vi.waitFor(() => {
-    expect(state.listens).toHaveBeenCalled();
-  });
+
+// Evaluate the listener module (and the Firestore helpers it imports) once, so the cases below
+// only wait for already-resolved promises: no wall-clock timeout decides a result.
+beforeAll(async () => {
+  await import('./pipeline-todo-listen');
+});
 
 beforeEach(() => {
+  firebase.pending = undefined;
   state.unsubscribe.mockClear();
   state.listens.mockClear();
   state.constraints = [];
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('watchTodoCount', () => {
@@ -47,7 +74,7 @@ describe('watchTodoCount', () => {
     const first: TodoCount[] = [];
     const second: TodoCount[] = [];
     const stopFirst = watchTodoCount((value) => first.push(value));
-    await listening();
+    await tick();
     const stopSecond = watchTodoCount((value) => second.push(value));
     await tick();
 
@@ -66,19 +93,51 @@ describe('watchTodoCount', () => {
     expect(state.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it('starts no listener when everything unsubscribed before the listener module loaded', () => {
+  it('starts no listener when everything unsubscribed before Firebase was ready', async () => {
+    const gate = deferred();
+    firebase.pending = gate.promise;
     const stop = watchTodoCount(() => undefined);
     stop();
-    // Long enough for the dynamic import of the listener module to have finished.
-    return new Promise((resolve) => setTimeout(resolve, 50)).then(() => {
-      expect(state.listens).not.toHaveBeenCalled();
-    });
+    gate.resolve();
+    await gate.promise;
+    await import('./pipeline-todo-listen'); // already evaluated: resolves after the start's own
+    await tick();
+    expect(state.listens).not.toHaveBeenCalled();
+  });
+
+  it('publishes an error once, logs it and does not retry when Firebase fails', async () => {
+    const gate = deferred();
+    firebase.pending = gate.promise;
+    const seen: TodoCount[] = [];
+    const stop = watchTodoCount((value) => seen.push(value));
+    gate.reject(Object.assign(new Error('boom'), { code: 'unavailable' }));
+    await tick();
+
+    expect(seen).toEqual([{ status: 'loading' }, { status: 'error' }]);
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('pipeline.todo_failed'));
+    expect(state.listens).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('publishes nothing when everything unsubscribed before Firebase failed', async () => {
+    const gate = deferred();
+    firebase.pending = gate.promise;
+    const seen: TodoCount[] = [];
+    const stop = watchTodoCount((value) => seen.push(value));
+    stop();
+    gate.reject(new Error('boom'));
+    await tick();
+
+    expect(seen).toEqual([{ status: 'loading' }]);
+    expect(console.error).toHaveBeenCalledTimes(1); // still logged
+    expect(state.listens).not.toHaveBeenCalled();
   });
 
   it('marks a count at the limit as capped', async () => {
     const seen: TodoCount[] = [];
     const stop = watchTodoCount((value) => seen.push(value));
-    await listening();
+    await tick();
     state.onNext?.({ size: 50 });
     expect(seen.at(-1)).toEqual({ status: 'ready', count: 50, capped: true });
     stop();
@@ -87,7 +146,7 @@ describe('watchTodoCount', () => {
   it('reports a failed read as an error without throwing, and stays in it', async () => {
     const seen: TodoCount[] = [];
     const stop = watchTodoCount((value) => seen.push(value));
-    await listening();
+    await tick();
     state.onError?.({ code: 'permission-denied' });
     expect(seen.at(-1)).toEqual({ status: 'error' });
     // A later subscriber is told the error at once, not "loading". There is no retry: a
@@ -102,12 +161,44 @@ describe('watchTodoCount', () => {
 
   it('starts again from loading after everything unsubscribed', async () => {
     const stop = watchTodoCount(() => undefined);
-    await listening();
+    await tick();
     state.onNext?.({ size: 2 });
     stop();
     const seen: TodoCount[] = [];
     const stopAgain = watchTodoCount((value) => seen.push(value));
     expect(seen[0]).toEqual({ status: 'loading' });
     stopAgain();
+  });
+});
+
+describe('watchTodoCount when the listener module fails to load', () => {
+  afterEach(() => {
+    vi.doUnmock('./pipeline-todo-listen');
+  });
+
+  it('publishes an error once, logs it, and does not import again', async () => {
+    let imports = 0;
+    vi.resetModules();
+    vi.doMock('./pipeline-todo-listen', () => {
+      imports += 1;
+      throw new Error('chunk failed');
+    });
+    const { watchTodoCount: watchFresh } = await import('./pipeline-todo');
+    const seen: TodoCount[] = [];
+    const stop = watchFresh((value) => seen.push(value));
+    await tick();
+
+    expect(seen).toEqual([{ status: 'loading' }, { status: 'error' }]);
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(imports).toBe(1);
+    expect(state.listens).not.toHaveBeenCalled();
+    // A later subscriber is told the error at once; nothing retries behind its back.
+    const later: TodoCount[] = [];
+    const stopLater = watchFresh((value) => later.push(value));
+    await tick();
+    expect(later).toEqual([{ status: 'error' }]);
+    expect(imports).toBe(1);
+    stopLater();
+    stop();
   });
 });
