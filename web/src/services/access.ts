@@ -30,7 +30,8 @@ export function evaluateAccess(uid: string, read: AppConfigRead): Access {
 }
 
 async function readAppConfigFromFirestore(): Promise<AppConfigRead> {
-  const [{ db }, boot] = await Promise.all([getFirebase(), loadFirestoreBoot()]);
+  const { db } = await getFirebase();
+  const boot = await loadFirestoreBoot(); // already imported by getFirebase: the same promise
   return boot.readAppConfig(db);
 }
 

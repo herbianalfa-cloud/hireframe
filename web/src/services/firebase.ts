@@ -34,8 +34,6 @@ export interface FirebaseCore {
 }
 
 export interface FirebaseServices extends FirebaseCore {
-  app: FirebaseApp;
-  auth: Auth;
   db: Firestore;
 }
 
