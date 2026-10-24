@@ -11,9 +11,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 const HTML = `<!doctype html><html><head>
 <link rel="preload" href="/__/firebase/init.json" as="fetch" crossorigin>
 <script type="module" src="/assets/index-a.js"></script>
+<link rel="modulepreload" crossorigin href="/assets/firebase-a.js">
 </head><body></body></html>`;
 
 const MARKER = 'google.firestore.v1.Firestore';
+const APP_MARKER = 'initializeApp() first';
+const COMPONENT_MARKER = 'has already been registered';
+const CORE = `export const core = ["${APP_MARKER}", "${COMPONENT_MARKER}"];`;
 
 interface Fixture {
   html: string;
@@ -25,6 +29,7 @@ function healthy(): Fixture {
     html: HTML,
     files: {
       'assets/index-a.js': 'export const app = 1;',
+      'assets/firebase-a.js': CORE,
       'assets/firestore-a.js': `export const rpc = "${MARKER}";`,
     },
   };
@@ -97,5 +102,80 @@ describe('check-bundle: Firestore (ADR-066)', () => {
     const result = run(fixture);
     expect(result.code).toBe(1);
     expect(result.out).toContain('initial JS is');
+  });
+});
+
+describe('check-bundle: initial files', () => {
+  const withHead = (head: string): string => HTML.replace('</head>', `${head}\n</head>`);
+
+  it('fails when the Firestore SDK chunk is a modulepreload', () => {
+    const fixture = healthy();
+    fixture.html = withHead('<link rel="modulepreload" href="/assets/firestore-a.js">');
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain(
+      'assets/firestore-a.js is initial JS and contains the Firestore SDK',
+    );
+  });
+
+  it('does not count a prefetch link as initial JS', () => {
+    const fixture = healthy();
+    fixture.html = withHead('<link rel="prefetch" href="/assets/firestore-a.js">');
+    const result = run(fixture);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('in 2 files');
+  });
+
+  it('counts a modulepreload whatever the attribute order', () => {
+    const fixture = healthy();
+    fixture.html = HTML.replace(
+      '<link rel="modulepreload" crossorigin href="/assets/firebase-a.js">',
+      '<link href="/assets/firebase-a.js" crossorigin rel="modulepreload">',
+    );
+    const result = run(fixture);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('in 2 files');
+  });
+});
+
+describe('check-bundle: one copy of the Firebase core (ADR-066)', () => {
+  it('fails when a core marker is in no chunk', () => {
+    for (const marker of [APP_MARKER, COMPONENT_MARKER]) {
+      const fixture = healthy();
+      fixture.files['assets/firebase-a.js'] = CORE.replace(marker, 'gone');
+      const result = run(fixture);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain(`"${marker}" (the Firebase core) in exactly one chunk, found 0`);
+    }
+  });
+
+  it('fails when the core is copied into the Firestore chunk', () => {
+    const fixture = healthy();
+    fixture.files['assets/firestore-a.js'] = `export const rpc = "${MARKER}"; ${CORE}`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain(
+      `"${APP_MARKER}" (the Firebase core) in exactly one chunk, found 2`,
+    );
+    expect(result.out).toContain(
+      `"${COMPONENT_MARKER}" (the Firebase core) in exactly one chunk, found 2`,
+    );
+  });
+
+  it('fails when the only core chunk is not initial JS', () => {
+    const fixture = healthy();
+    fixture.html = HTML.replace(/<link rel="modulepreload"[^>]*>\n/, '');
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('firebase-a.js holds the Firebase core');
+    expect(result.out).toContain('is not initial JS');
+  });
+
+  it('fails when the core only appears in a prefetched chunk', () => {
+    const fixture = healthy();
+    fixture.html = HTML.replace('rel="modulepreload"', 'rel="prefetch"');
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('is not initial JS');
   });
 });

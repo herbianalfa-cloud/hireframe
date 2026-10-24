@@ -5,6 +5,11 @@
  *   gzip budget. Lazy screens and the Functions/Storage SDKs don't count.
  * - the dev-only Firestore read counter (C5) is tree-shaken: its warning text is in no chunk.
  * - Firestore (ADR-066) is in no initial file and in exactly one chunk, under its own gzip cap.
+ * - One copy of the Firebase core (ADR-066): app and component each in exactly one chunk, which is
+ *   initial. A second copy in the Firestore chunk fails at run time ("Service firestore is not
+ *   available"), and `npm run dev` doesn't bundle, so only this check sees it.
+ * The initial files are the entry `<script src>` and the `rel="modulepreload"` links of index.html;
+ * a `rel="prefetch"` link is idle-time loading and doesn't count.
  * It prints each initial file's gzip size, largest first.
  */
 import { readdirSync, readFileSync } from 'node:fs';
@@ -21,11 +26,15 @@ const MAX_INITIAL_GZIP_BYTES = 200 * 1000;
 // the SDK, so it finds the chunk whatever the chunk is named; it appears in exactly one chunk.
 const FIRESTORE_MARKER = 'google.firestore.v1.Firestore';
 const MAX_FIRESTORE_GZIP_BYTES = 165 * 1000;
+// Texts only the Firebase core has: @firebase/app's "call initializeApp() first" error and
+// @firebase/component's duplicate-registration error.
+const CORE_MARKERS = ['initializeApp() first', 'has already been registered'];
 
 const kB = (bytes: number) => `${(bytes / 1000).toFixed(1)} kB`;
 const failures: string[] = [];
 
 const firestoreChunks: string[] = [];
+const coreChunks = new Map<string, string[]>(CORE_MARKERS.map((marker) => [marker, []]));
 const chunks = readdirSync(join(DIST, 'assets')).filter((name) => name.endsWith('.js'));
 for (const name of chunks) {
   const size = readFileSync(join(DIST, 'assets', name)).length;
@@ -35,10 +44,14 @@ for (const name of chunks) {
     failures.push(`${name} contains the dev-only read counter's warning (C5)`);
   }
   if (text.includes(FIRESTORE_MARKER)) firestoreChunks.push(name);
+  for (const [marker, found] of coreChunks) if (text.includes(marker)) found.push(name);
 }
 
 const html = readFileSync(join(DIST, 'index.html'), 'utf8');
-const initial = [...html.matchAll(/(?:src|href)="\/(assets\/[^"]+\.js)"/g)].map((m) => m[1] ?? '');
+const initial = [...html.matchAll(/<(script|link)\b[^>]*>/g)]
+  .filter(([tag, name]) => name === 'script' || /\brel="modulepreload"/.test(tag))
+  .map(([tag]) => /\b(?:src|href)="\/(assets\/[^"]+\.js)"/.exec(tag)?.[1])
+  .filter((path): path is string => path !== undefined);
 if (initial.length === 0) failures.push('index.html loads no JS: is web/dist built?');
 // The Firebase config fetch must start from the HTML, before the entry script (ADR-061).
 const preloadAt = html.search(/<link[^>]*rel="preload"[^>]*href="\/__\/firebase\/init\.json"/);
@@ -60,6 +73,16 @@ if (initialGzip > MAX_INITIAL_GZIP_BYTES) {
 for (const { path } of initialSizes) {
   if (firestoreChunks.includes(path.replace(/^assets\//, ''))) {
     failures.push(`${path} is initial JS and contains the Firestore SDK (ADR-066)`);
+  }
+}
+const initialNames = new Set(initial.map((path) => path.replace(/^assets\//, '')));
+for (const [marker, found] of coreChunks) {
+  if (found.length !== 1) {
+    failures.push(
+      `expected "${marker}" (the Firebase core) in exactly one chunk, found ${String(found.length)} (ADR-066)`,
+    );
+  } else if (!initialNames.has(found[0] ?? '')) {
+    failures.push(`${found[0] ?? ''} holds the Firebase core ("${marker}") but is not initial JS`);
   }
 }
 let firestoreGzip = 0;
