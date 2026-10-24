@@ -195,7 +195,7 @@ describe('AuthGate', () => {
       reload.mockReset();
       Object.defineProperty(window, 'location', {
         configurable: true,
-        value: { ...realLocation, reload },
+        value: { reload },
       });
     });
     afterEach(() => {
