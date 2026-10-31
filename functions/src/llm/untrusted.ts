@@ -4,7 +4,14 @@
  * the text is defused, so the text can't close its own tag and pose as instructions.
  */
 export type UntrustedTag =
-  'cv_text' | 'note' | 'job_posting' | 'job_analysis' | 'owner_notes' | 'email' | 'paste';
+  | 'cv_text'
+  | 'note'
+  | 'job_posting'
+  | 'job_analysis'
+  | 'owner_notes'
+  | 'draft_cv'
+  | 'email'
+  | 'paste';
 
 export function wrapUntrusted(tag: UntrustedTag, text: string): string {
   const escaped = text.replace(new RegExp(`</?${tag}\\s*>`, 'gi'), (match) =>

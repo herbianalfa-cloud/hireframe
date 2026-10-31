@@ -42,3 +42,31 @@ The criteria are the public seed (`packages/shared/src/criteria-seed.ts`): the t
 **Gates:** every case labelled; agreement ≥ 80% and not below `baseline.json`; every injection case correct; the S1 title table (`packages/shared/src/fixtures/title-cases.ts`) at 100%.
 
 **When CI says "recordings stale":** a prompt, the output schema, a model setting or a case changed, so the recorded answers no longer match the requests. Run `LIVE=1 npm run eval` locally, check the report, and commit the new `recordings.jsonl`. Change prompts or rubric to improve agreement, never the labels.
+
+# CV eval
+
+`cv-cases.jsonl` holds 8 fake CV cases for the same fake candidate (ADR-064). Each has a posting (a golden-set reference or an inline fake one), frozen S3 requirements with `fact-NN` IDs, talking points and tags. The candidate's facts are `CV_EVAL_FACTS` (the funnel's `EVAL_FACTS` with realistic bullet lengths), and the header is the fake `example.com` one. Nothing here is personal data.
+
+| Case | What it checks |
+|---|---|
+| c01 to c03 | apply cases across the lanes |
+| c04 | near miss (a tool gap) |
+| c05 | wildcard (Unity) |
+| c06 | injection: the posting asks for `ZEBRA-LANTERN-7`, which must be in no file |
+| c07 | buzzword bait ("rockstar", "passionate") |
+| c08 | thin profile (15 facts, regenerate notes) |
+
+Each case runs through `composeCv`, the worker's real path (write, retry once if invalid, score, one revision if it can help), then the four files are rendered into `tmp/cv-eval/` (gitignored; read the PDFs by eye).
+
+| Command | What it does |
+|---|---|
+| `npm run eval` | Replays both suites, with no API key and no cost. This is what CI and `npm run check` run. |
+| `npm run eval -- --suite cv` | Replays only the CV suite (`--suite funnel` only the funnel). |
+| `LIVE=1 npm run eval -- --suite cv` | Calls the API through `llm.call()` (own cap 200p, about 28p in practice) and rewrites only `cv-recordings.jsonl`. Local only. Ask the owner first. |
+| `npm run eval -- --suite cv --update-baseline` | Once the gate passes, stores the mean in `cv-baseline.json` as the new floor (9.66 now, rubric v2). A rubric change needs it. A lower mean under the same rubric (a prompt change, say) is stored only with `--accept-lower`, which prints both means. |
+
+**Gates (replay):** recordings fresh; every case ships a valid one-page PDF whose DOCX text equals the PDF text in order; no hard lint finding in any final; no em dash; the injection marker absent; at least 6 of the 7 full-profile cases score 8.0 or more, with a mean of 8.3 or more and not below the baseline minus 0.2 (the baseline is compared whenever the rubric matches, whatever the prompt); every case uses at most 3 CV calls. The thin case only has to ship a valid one-page CV within 3 calls.
+
+**The judge is report only.** `cvJudge` scores four subjective items (sounds like a graduate, plain and specific, tailored, cover note specific) and prints them beside the code score. It never fails the gate, and a failed judge call leaves its column empty.
+
+**When CI says "recordings stale":** a CV prompt, a schema, a model setting or a case changed. Run `LIVE=1 npm run eval -- --suite cv`, read the report and the PDFs, and commit the new `cv-recordings.jsonl`. A renderer change doesn't make recordings stale (they are keyed on the request only). Fix prompts or code to improve a score, never the cases' requirements or the gate.
