@@ -33,6 +33,7 @@ import {
 
 import { useAction, type ActionState } from './hooks';
 import { BLOCKED_TEXT, ISSUE_TEXT, LEVEL_TEXT, MATCH_TEXT } from './labels';
+import { CvPreview } from './CvPreview';
 
 const ANSWER_MAX = 2_000;
 const NOTES_MAX = 500;
@@ -343,6 +344,7 @@ function Ready({
               {downloadError}
             </p>
           ) : null}
+          <CvPreview cvId={cvId} headerName={headerName} company={application.job.company} />
         </>
       ) : (
         <p className="text-sm text-muted-foreground">
