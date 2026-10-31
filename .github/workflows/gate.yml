@@ -1,0 +1,23 @@
+# Kit gate in CI: the same checks as `node .claude/kit/gate.mjs` locally (Playbook C6).
+# Needs no secrets: the gate must run offline with mocks.
+name: gate
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"   # or: node-version-file: .nvmrc
+          cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
+      - name: Install
+        run: if [ -f package-lock.json ]; then npm ci; fi
+      - name: Gate
+        run: node .claude/kit/gate.mjs
