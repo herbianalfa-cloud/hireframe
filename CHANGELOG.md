@@ -2,6 +2,10 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [Unreleased]
+### Changed
+- **Firestore out of the initial JS (roadmap item E, ADR-066): initial JS 295.6 to 164.7 kB gzip.** `getFirebaseCore()` (app, App Check, Auth) is separate from `getFirebase()`, which imports `services/firestore-boot.ts` once the core is ready; the owner-check read and the pipeline badge's listener moved to lazy modules; Auth, Functions and Storage never wait for Firestore. New mark `hf:firestore`. `check:bundle`: initial JS budget 200 kB gzip (was 300), Firestore in exactly one chunk, never in an initial file, cap 165 kB gzip, one copy of the Firebase core (in an initial chunk), and only `<script src>` and `modulepreload` count as initial; its own tests (`scripts/check-bundle.test.ts`). The shared constants chunk is now `paths-<hash>.js`, not `firestore-<hash>.js`. Try again on the access error reloads the page when the Firestore chunk failed to load (a failed import stays failed until a reload), only on the click.
+
 ## [0.9.1] - Unreleased
 ### Added
 - **M8 PR 8C1: billing kill switch, dry run** (ADR-059; plan `docs/plans/m8c-plan.md` §2).

@@ -1,20 +1,28 @@
-import { Timestamp } from 'firebase/firestore';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetMarksForTest } from '@/lib/perf';
 
 import { checkAccess, evaluateAccess, type AppConfigRead } from './access';
-import { timestampsToDates } from './timestamps';
+
+const boot = vi.hoisted(() => ({
+  getFirebase: vi.fn(),
+  loadFirestoreBoot: vi.fn(),
+  readAppConfig: vi.fn(),
+}));
+vi.mock('./firebase', () => ({
+  getFirebase: boot.getFirebase,
+  loadFirestoreBoot: boot.loadFirestoreBoot,
+}));
 
 const OWNER = 'owner-uid-123';
 
-/** Shaped like the `config/app` doc created by hand in the Firebase console (RUNBOOK). */
+/** The `config/app` doc as `readAppConfig` returns it: console Timestamps already Dates. */
 function consoleConfig(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ownerUid: OWNER,
     schemaVersion: 1,
-    createdAt: Timestamp.fromDate(new Date('2026-09-30T08:00:00Z')),
-    updatedAt: Timestamp.fromDate(new Date('2026-09-30T08:05:00Z')),
+    createdAt: new Date('2026-09-30T08:00:00Z'),
+    updatedAt: new Date('2026-09-30T08:05:00Z'),
     ...overrides,
   };
 }
@@ -26,22 +34,13 @@ const read =
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  boot.getFirebase.mockReset().mockResolvedValue({ db: { kind: 'db' } });
+  boot.loadFirestoreBoot.mockReset().mockResolvedValue({ readAppConfig: boot.readAppConfig });
+  boot.readAppConfig.mockReset();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-describe('timestampsToDates', () => {
-  it('converts Firestore Timestamps to Dates, including nested ones', () => {
-    const at = new Date('2026-09-30T08:00:00Z');
-    const converted = timestampsToDates({
-      createdAt: Timestamp.fromDate(at),
-      nested: { list: [Timestamp.fromDate(at), 'text'] },
-      count: 3,
-    });
-    expect(converted).toEqual({ createdAt: at, nested: { list: [at, 'text'] }, count: 3 });
-  });
 });
 
 describe('evaluateAccess', () => {
@@ -57,7 +56,7 @@ describe('checkAccess', () => {
     expect(performance.getEntriesByName('hf:owner')).toHaveLength(1);
   });
 
-  it('converts console Timestamps before parsing and returns owner for the matching UID', async () => {
+  it('returns owner for the matching UID', async () => {
     await expect(checkAccess(OWNER, read(consoleConfig()))).resolves.toEqual({ status: 'owner' });
   });
 
@@ -79,7 +78,7 @@ describe('checkAccess', () => {
 
   it.each([
     ['a missing timestamp', consoleConfig({ updatedAt: undefined })],
-    ['a string instead of a Timestamp', consoleConfig({ createdAt: '2026-09-30' })],
+    ['a string instead of a date', consoleConfig({ createdAt: '2026-09-30' })],
     ['an empty ownerUid', consoleConfig({ ownerUid: '' })],
   ])('returns error, never owner, for a malformed doc with %s', async (_name, data) => {
     const access = await checkAccess(OWNER, read(data));
@@ -93,5 +92,53 @@ describe('checkAccess', () => {
     const access = await checkAccess(OWNER, offline);
     expect(access.status).toBe('error');
     expect(offline).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('checkAccess with the default reader (lazy Firestore boot, ADR-066)', () => {
+  it('reads config/app through the Firestore chunk and returns owner', async () => {
+    boot.readAppConfig.mockResolvedValue({ exists: true, data: consoleConfig() });
+    await expect(checkAccess(OWNER)).resolves.toEqual({ status: 'owner' });
+    expect(boot.readAppConfig).toHaveBeenCalledWith({ kind: 'db' });
+  });
+
+  it('returns error, never owner, when the Firestore chunk fails to load', async () => {
+    resetMarksForTest();
+    boot.loadFirestoreBoot.mockRejectedValue(new Error('chunk failed'));
+    await expect(checkAccess(OWNER)).resolves.toMatchObject({ status: 'error' });
+    expect(boot.readAppConfig).not.toHaveBeenCalled();
+    expect(performance.getEntriesByName('hf:owner')).toHaveLength(1);
+  });
+
+  it.each([
+    'Failed to fetch dynamically imported module: https://x.test/assets/firestore-boot-1.js',
+    'error loading dynamically imported module: https://x.test/assets/firestore-boot-1.js',
+    'Importing a module script failed.',
+  ])('marks a chunk-load failure (%s) so the gate reloads', async (message) => {
+    boot.loadFirestoreBoot.mockRejectedValue(new TypeError(message));
+    await expect(checkAccess(OWNER)).resolves.toMatchObject({
+      status: 'error',
+      kind: 'chunk-load',
+    });
+  });
+
+  it('does not mark other failures as chunk-load', async () => {
+    boot.getFirebase.mockRejectedValue(new Error('no config'));
+    const access = await checkAccess(OWNER);
+    expect(access).toEqual({ status: 'error', message: "Couldn't check access. Try again." });
+  });
+
+  it('returns error when the Firebase core fails to start', async () => {
+    boot.getFirebase.mockRejectedValue(new Error('no config'));
+    await expect(checkAccess(OWNER)).resolves.toMatchObject({ status: 'error' });
+  });
+
+  it('returns denied when the rules reject the read through the chunk', async () => {
+    boot.readAppConfig.mockRejectedValue(
+      Object.assign(new Error('Missing or insufficient permissions.'), {
+        code: 'permission-denied',
+      }),
+    );
+    await expect(checkAccess(OWNER)).resolves.toEqual({ status: 'denied' });
   });
 });

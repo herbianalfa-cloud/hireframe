@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isTransient, MAX_ATTEMPTS, TimeoutError, withRetry, withTimeout } from './resilience';
+import {
+  isChunkLoadError,
+  isTransient,
+  MAX_ATTEMPTS,
+  TimeoutError,
+  withRetry,
+  withTimeout,
+} from './resilience';
 
 const noSleep = vi.fn(() => Promise.resolve());
 
@@ -60,5 +67,23 @@ describe('withRetry', () => {
       withRetry(fn, { label: 'test', isRetryable: isTransient, sleep: noSleep }),
     ).resolves.toBe('ok');
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('isChunkLoadError', () => {
+  it('recognises the failed-dynamic-import messages of Chrome, Firefox and Safari', () => {
+    expect(isChunkLoadError(new TypeError('Failed to fetch dynamically imported module: x'))).toBe(
+      true,
+    );
+    expect(isChunkLoadError(new TypeError('error loading dynamically imported module: x'))).toBe(
+      true,
+    );
+    expect(isChunkLoadError(new TypeError('Importing a module script failed.'))).toBe(true);
+  });
+
+  it('is false for other errors and non-errors', () => {
+    expect(isChunkLoadError(new Error('config/app read timed out'))).toBe(false);
+    expect(isChunkLoadError('Failed to fetch dynamically imported module')).toBe(false);
+    expect(isChunkLoadError(undefined)).toBe(false);
   });
 });
