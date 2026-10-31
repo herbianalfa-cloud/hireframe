@@ -6,3 +6,7 @@ coverage/
 functions/deploy/
 apps-script/build/
 .vitest/
+
+# kit (kit files keep their own style)
+.claude/
+.github/workflows/gate.yml
