@@ -49,3 +49,6 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - `npm run eval` — funnel eval against the golden set: replays `evals/recordings.jsonl` (no API key; CI). `LIVE=1 npm run eval` calls the API and refreshes the recordings (local only); `-- --update-baseline` stores a passing agreement as the new floor
 - `node scripts/eval-labels.ts export` / `import <file.csv>` — label the golden set blind in a spreadsheet (`tmp/golden-labels.csv`)
 
+## Kit
+Follow @.claude/kit/WORKFLOW.md — gates, decisions, checkpoints, review, STATUS.md.
+Commands: `/scope import` · `/milestone <name>` · `/build` · `/ship` · `/retro` · `/kit-review`
