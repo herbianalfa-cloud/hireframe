@@ -3,12 +3,15 @@
 You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `docs/ARCHITECTURE.md`, `docs/FUNNEL.md` and `docs/SECURITY.md` before writing code. If code and docs disagree, stop and ask.
 
 ## Working method
-1. One milestone at a time (see `docs/ROADMAP.md`). Start each in plan mode; get approval before coding.
-2. Small commits, Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`). One PR per milestone.
-3. A milestone is done only when: acceptance criteria in PRD pass, tests pass, `npm run check` is clean, docs + `CHANGELOG.md` are updated.
+1. One milestone at a time (see `docs/ROADMAP.md`). `/milestone <name>` saves the plan to `docs/plans/` as `Status: Draft`; only Beeb approves it. Then `/build` runs one PR group per run, with a checkpoint after each, and `/ship` opens the PR.
+2. Small commits, Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`). One PR per plan group; a milestone may have several groups.
+3. A milestone is done only when: acceptance criteria in PRD pass, tests pass, `npm run check` and the gate (`node .claude/kit/gate.mjs`) are clean, docs + `CHANGELOG.md` + `STATUS.md` are updated.
 4. Any non-obvious technical choice → add an ADR to `docs/DECISIONS.md`.
 5. Never widen scope silently. New ideas go to `docs/ROADMAP.md` under "Parking lot".
 6. Before every PR, check the diff against the no-self-triggering rule (Hard rules, last item): no function triggered by an event it can itself cause, no function that reschedules or re-enqueues itself, every loop over external calls or writes bounded by a count and a deadline, and `maxInstances` set on every new function. Say in the PR body what you checked.
+
+## Docs
+`docs/PROJECT.md` (project spec) · `STATUS.md` (decisions, done, next; the handoff) · `LEARNINGS.md` (archived detail) · `docs/plans/` (milestone plans) · plus the PRD, ARCHITECTURE, FUNNEL, SECURITY, DECISIONS, ROADMAP and RUNBOOK files in `docs/`.
 
 ## Code standards
 - TypeScript strict, no `any`. Zod schemas at every boundary (API responses, LLM output, Firestore reads, form input).
@@ -29,6 +32,7 @@ You are building a single-user job-search engine for Beeb. Read `docs/PRD.md`, `
 - **No self-triggering code.** No function may be triggered by a Firestore, Storage or Pub/Sub event that it can itself cause. No function may reschedule or re-enqueue itself. Any loop over external calls or writes has a fixed maximum count and a deadline. Every new function sets `maxInstances`.
 
 ## Commands (keep this list current)
+- `node .claude/kit/gate.mjs` — the kit gate (commands in `.claude/kit.config.json`); all must exit 0 before review and ship
 - `npm run check` — lint + typecheck + unit tests + PII scan + eval replay (`npm run eval`)
 - `npm run format` / `npm run format:check` — Prettier (code and config; Markdown excluded)
 - `npm run scan:pii` — fail on emails/phone numbers in tracked files

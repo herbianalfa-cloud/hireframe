@@ -20,6 +20,7 @@ The repo copy is the master. Spec: `docs/PROJECT.md`. Plans: `docs/plans/`. Olde
   3. **Full clean-weekday gate only** for releases that change scanning, scheduling, cost or IAM in a live way. v1.0.1 (arming) needs one full clean weekday on v1.0.0 first.
   4. Batch releases. Wave 2 ships in 2–3 releases.
   5. Scope filter for Waves 2–3: build only features that get interviews unless Beeb asks for more.
+- **Docs hygiene (2 Nov):** CLAUDE.md aligned with kit PR groups and /milestone; Docs line and gate command added; App Engine Editor K24 vs Decisions resolved.
 - **Playbook 3.0 + kit** (Nov 2026): `STATUS.md` and `docs/PROJECT.md` live in the repo and are the masters. Claude Code works through `/milestone`, `/build`, `/ship`, `/retro`.
 
 ## Done
