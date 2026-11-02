@@ -47,7 +47,7 @@ Sources read: `CLAUDE.md`, `.claude/kit/WORKFLOW.md`, `docs/PROJECT.md`, `STATUS
 ### G1: pre-flight and release prep (docs only, before the window)
 Branch from `origin/main` after `git fetch origin` (the existing `feat/v0-9-1-k6-k13-g1` may be reused; `docs/v0-9-1-release-g1` matches the type better — small decision).
 
-- [ ] **G1.1 Pre-flight on `origin/main` (read-only, no prod access).**
+- [x] **G1.1 Pre-flight on `origin/main` (read-only, no prod access).**
   - Allowed files: none changed (results go into G1.2's evidence doc).
   - Pre-checks: `npm run dev` stopped (STATUS Lesson: `test:rules` port conflict); `nvm use` then `npm ci` (STATUS Lesson); show Beeb `git diff --stat` of the uncommitted `CLAUDE.md`, `STATUS.md`, `docs/PROJECT.md` on the current branch and ask whether they belong in G1 (Decision 9) before anything is staged.
   - Checks to run and record:
@@ -61,7 +61,7 @@ Branch from `origin/main` after `git fetch origin` (the existing `feat/v0-9-1-k6
   - Acceptance: every check above exits 0 or matches its expected output; any miss stops G1 and goes to Beeb (a failing budget is Beeb's call, never relaxed).
   - Hard area: no.
 
-- [ ] **G1.2 Evidence and handoff doc.**
+- [x] **G1.2 Evidence and handoff doc.**
   - Allowed files: `docs/plans/v0-9-1-evidence.md` (new).
   - Pre-checks: G1.1 done.
   - Content: the G1.1 results; a row per K6–K13 step, the Scan-now proof, the I7-lite CV check (DOCX and PDF open; a failure is a stop), C47 and the post-K13 check, each with the RUNBOOK reference, the expected output copied from RUNBOOK, a blank "Result (pasted by Beeb)" cell, time started/finished, and a "deviation" cell; the abort path (section 8); the two conditional fallbacks (C38b, K12 Recovery) with the exact RUNBOOK commands; a redaction note (paste role lists and log tables only; no `user:` lines, no email addresses other than allowlisted service accounts written `name@…`; project number written `<NUM>`).
@@ -69,7 +69,7 @@ Branch from `origin/main` after `git fetch origin` (the existing `feat/v0-9-1-k6
   - Acceptance: every RUNBOOK citation matches `docs/RUNBOOK.md` on `main` word for word for expected outputs; `npm run scan:pii` clean; file ≤ ~300 lines.
   - Hard area: no.
 
-- [ ] **G1.3 CHANGELOG and STATUS.**
+- [x] **G1.3 CHANGELOG and STATUS.**
   - Allowed files: `CHANGELOG.md` (`[0.9.1]` section only), `STATUS.md`, `docs/plans/v0-9-1-plan.md`.
   - Pre-checks: G1.1 commit list.
   - Change: under `[0.9.1]` add a `### Changed` line for what else ships (Dependabot #46 and #49, kit 3.0.1/3.0.2 with the audit fix #53, docs #54/#55), and set the heading date to the planned release day (Decision 4). STATUS "In progress": plan and evidence links, "K6 next".

@@ -58,6 +58,7 @@ One line per milestone (full entries in `LEARNINGS.md`).
 - [process] Chrome request blocking: in Network, right-click the request → **Block request URL**.
 
 ## In progress
+v0.9.1 plan: `docs/plans/v0-9-1-plan.md`; evidence and handoff: `docs/plans/v0-9-1-evidence.md`. **K6 next** (after G1 merges).
 **M8 8C.** State confirmed 2 Nov: only K1–K5 are done (git tags show only v0.9.0):
 - v0.9.1: K6 → K7 tag (from `main`; PR #41 unmerged) → K8–K13 (K12 dry run, K13 budgets £2/£5/£10 + `hireframe-kill` £25) → Scan-now proof → C47 within 24 h of K13. **Not done:** v0.9.1 is not tagged; K6 onward, the Scan-now proof and C47 are not started.
 - Phase 3 (K14–K18): weekday 10:00–16:00 after the Scan-now proof, each step approved alone. **Not done:** not started.
