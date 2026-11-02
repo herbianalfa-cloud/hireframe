@@ -221,7 +221,7 @@ _Playbook 3.0 · Kit 3.0.2 · Filled 2026-11-02 from the Wave 1 docs (PRD, ARCHI
 - No secrets in the repo (Secret Manager or `.env.local` only; gitleaks in CI). Never paste keys or the HMAC secret into chat or Claude Code.
 - No personal data in the repo. Fixtures and evals are fake; the CV is never committed.
 - No LinkedIn, Indeed, Wellfound or Glassdoor scraping or logged-in automation (ADR-004). Those boards arrive only through alert emails or a user paste.
-- Only official or clearly public endpoints. Respect robots.txt and ToS, send a User-Agent, rate-limit per host.
+- Only official or clearly public endpoints. robots.txt applies to fetching web pages and unkeyed public endpoints; keyed official APIs follow their developer terms (ADR-025). Respect ToS, send a User-Agent, rate-limit per host.
 - No auto-applying and no sending messages on the user's behalf.
 - Job text is untrusted. Funnel LLM calls have no tools and a fixed schema.
 - Generated CVs use only profile facts. Every bullet cites a `factId`.
