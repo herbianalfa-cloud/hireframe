@@ -21,6 +21,7 @@ The repo copy is the master. Spec: `docs/PROJECT.md`. Plans: `docs/plans/`. Olde
   4. Batch releases. Wave 2 ships in 2–3 releases.
   5. Scope filter for Waves 2–3: build only features that get interviews unless Beeb asks for more.
 - **Docs hygiene (2 Nov):** CLAUDE.md aligned with kit PR groups and /milestone; Docs line and gate command added; App Engine Editor K24 vs Decisions resolved.
+- **v0.9.1 plan decisions** (2 Nov, `docs/plans/v0-9-1-plan.md`): Scan-now proof + C47 is the gate (no full clean day); Budget API stays disabled unless the console refuses; tag from `main` without #41, plus an I7-lite check after deploy (one live CV, DOCX and PDF open; a render problem is a stop) because #49 bumped `docx` to 9.15; no RUNBOOK/ADR edits on `main` now (fix in #41's K20 commit); C38b and the K12 fallback pre-accepted (each still approved when needed); C47 `.invalid` → v0.9.2 fix, no message → wait once 24 h; edit the existing £5/£10 budgets and add £2; release day = first Tue–Thu after G1 merges.
 - **Playbook 3.0 + kit** (Nov 2026): `STATUS.md` and `docs/PROJECT.md` live in the repo and are the masters. Claude Code works through `/milestone`, `/build`, `/ship`, `/retro`.
 
 ## Done
