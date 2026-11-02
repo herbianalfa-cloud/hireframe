@@ -61,7 +61,7 @@ One line per milestone (full entries in `LEARNINGS.md`).
 - v0.9.1: K6 → K7 tag (from `main`; PR #41 unmerged) → K8–K13 (K12 dry run, K13 budgets £2/£5/£10 + `hireframe-kill` £25) → Scan-now proof → C47 within 24 h of K13. **Not done:** v0.9.1 is not tagged; K6 onward, the Scan-now proof and C47 are not started.
 - Phase 3 (K14–K18): weekday 10:00–16:00 after the Scan-now proof, each step approved alone. **Not done:** not started.
 - Phase 4 (K19–K28) = v1.0.0: after all five gates (phone test, restore drill, clean weekday: done; Scan-now proof on v0.9.1 and C47: not done); weekday 10:00–16:00; nothing Generating. K20 merges PR #41.
-- K order: K19 record gates → **K20 evidence commit, merge #41** → K21 snapshot → K22 buckets → K23 Path F grants → **K24 Editor removal, then straight to K25 tag v1.0.0** → K26 `diff -u` → K27 live checks → K28 24-hour checks, `gcloud auth revoke`, follow-up docs PR (C50, K26, K27, K28, C41).
+- K order: K19 record gates → **K20 evidence commit, merge #41** → K21 snapshot → K22 buckets → K23 Path F grants → **K24 compute-account Editor removal (not the App Engine account), then straight to K25 tag v1.0.0** → K26 `diff -u` → K27 live checks → K28 24-hour checks, `gcloud auth revoke`, follow-up docs PR (C50, K26, K27, K28, C41).
 
 **Open PRs:**
 - **#41** (8C2, `feat/m8c2-hardening`): ready, not merged. Merge only at K20.
