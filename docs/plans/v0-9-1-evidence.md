@@ -36,6 +36,7 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 ### K7 Tag v0.9.1 (C4), RUNBOOK Part K, K7; Part C step 27
 - Run `git checkout main && git pull && git log -1` (HEAD = G1 merge; #39 is in `v0.9.0..HEAD`), then `git tag v0.9.1 && git push origin v0.9.1`, approve the deploy.
 - Expected: "the deploy log shows `functions[billingGuard(europe-west2)] Successful create operation` and no "We failed to modify the IAM policy"".
+- Deploy job duration: (note: over 12 min, record it for 8C2)
 - Result (pasted by Beeb):
 - Start / End:
 - Deviation:
@@ -72,6 +73,7 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 
 ### K12 Dry run (C35), RUNBOOK Part K, K12
 - Env read: `gcloud functions describe billingGuard --region=$R --gen2 --project=$P --format='value(serviceConfig.environmentVariables)'` must "**not** contain `BILLING_GUARD_MODE`".
+- Publish no sooner than 2 min after K8's noted time.
 - Publish below threshold: `gcloud pubsub topics publish billing-guard --project=$P --message='{"budgetDisplayName":"hireframe-kill","costAmount":1,"budgetAmount":25,"currencyCode":"GBP","costIntervalStart":"2026-10-01T00:00:00Z"}'`, then read: `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$P --freshness=10m --limit=10 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'`
 - Expected: "**Within 2 minutes** the log must show `billing_guard.below` with `mode: dry_run`. **Only after that line shows `dry_run`**, publish the same message with `"costAmount":30`: within 2 minutes the log must show `billing_guard.would_disable`. Check: `gcloud billing projects describe $P --format='value(billingEnabled)'` still prints `True`."
 - No log line within 2 minutes: see fallback B below.
@@ -114,7 +116,7 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 - Deviation:
 
 ## Abort path (plan section 8)
-If K7 cannot be fixed by 15:30, or any step says stop: run K9 now (remove only the bindings K6 added), then the K9 diff and deployer role check. Nothing else is needed for safety, because the function has no billing role. To remove the function, revert the export in a PR and release a patch. Report to Claude before retrying. Re-adding grants is never wanted.
+If K9 is not done by 15:30 (for example K7 can't be fixed), or any step says stop: run K9 now (remove only the bindings K6 added), then the K9 diff and deployer role check. Nothing else is needed for safety, because the function has no billing role. To remove the function, revert the export in a PR and release a patch. Report to Claude before retrying. Re-adding grants is never wanted.
 
 ## Conditional fallbacks (accepted in principle, Decision 5; each shown and approved when needed)
 ### A. C38b: Eventarc permission error on the K7 create (permanent)
