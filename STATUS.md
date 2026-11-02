@@ -56,10 +56,10 @@ One line per milestone (full entries in `LEARNINGS.md`).
 - [process] Chrome request blocking: in Network, right-click the request → **Block request URL**.
 
 ## In progress
-**M8 8C.** State after 20 Oct is **Not confirmed** (asked 2 Nov, not answered):
-- v0.9.1: K6 → K7 tag (from `main`; PR #41 unmerged) → K8–K13 (K12 dry run, K13 budgets £2/£5/£10 + `hireframe-kill` £25) → Scan-now proof → C47 within 24 h of K13. **Not confirmed.**
-- Phase 3 (K14–K18): weekday 10:00–16:00 after the Scan-now proof, each step approved alone. **Not confirmed.**
-- Phase 4 (K19–K28) = v1.0.0: after all five gates (phone test, restore drill, clean weekday: done; Scan-now proof on v0.9.1 and C47: not confirmed); weekday 10:00–16:00; nothing Generating. K20 merges PR #41.
+**M8 8C.** State confirmed 2 Nov: only K1–K5 are done (git tags show only v0.9.0):
+- v0.9.1: K6 → K7 tag (from `main`; PR #41 unmerged) → K8–K13 (K12 dry run, K13 budgets £2/£5/£10 + `hireframe-kill` £25) → Scan-now proof → C47 within 24 h of K13. **Not done:** v0.9.1 is not tagged; K6 onward, the Scan-now proof and C47 are not started.
+- Phase 3 (K14–K18): weekday 10:00–16:00 after the Scan-now proof, each step approved alone. **Not done:** not started.
+- Phase 4 (K19–K28) = v1.0.0: after all five gates (phone test, restore drill, clean weekday: done; Scan-now proof on v0.9.1 and C47: not done); weekday 10:00–16:00; nothing Generating. K20 merges PR #41.
 - K order: K19 record gates → **K20 evidence commit, merge #41** → K21 snapshot → K22 buckets → K23 Path F grants → **K24 Editor removal, then straight to K25 tag v1.0.0** → K26 `diff -u` → K27 live checks → K28 24-hour checks, `gcloud auth revoke`, follow-up docs PR (C50, K26, K27, K28, C41).
 
 **Open PRs:**
@@ -90,7 +90,7 @@ Full list in `LEARNINGS.md` ("Parked ideas (full list)") and `docs/ROADMAP.md`.
 
 ## Pending / known
 - **PR #45 lazy-screens decision (Beeb).** The lazy screens have no error boundary, so a failed screen chunk blanks the app (already true on `main` after a deploy for a tab left open). `loadTodayPage()` and `loadDashboardService()` also cache a failed promise. Recommended: one route error boundary with a click-only Reload, plus resetting both loaders on failure, inside #45.
-- **Not confirmed since 20 Oct:** the v0.9.1 status, K14–K18, C47, and the R7 median `hf:usable` (ms) for the K20 evidence.
+- **Not done:** the v0.9.1 tag and Scan-now proof, C47, K14–K18 (not started). The R7 median `hf:usable` (ms) for the K20 evidence is not recorded.
 - **Audit allowlist:** zod via `@google/clasp` until 2027-01-31. Review it by then.
 - **Dependabot alert #4 (moderate): leave it open.** `sprintf-js` via `mammoth`, no patch; owner-only upload.
 - The wipe dialog shows "[400]" after a refusal message (cosmetic). The Pipeline hydration warning (`<div>` inside `<p>` in StageTile) is not from #43 or #45.
