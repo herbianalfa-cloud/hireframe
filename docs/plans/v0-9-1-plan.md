@@ -1,4 +1,4 @@
-Status: Draft
+Status: Approved (2026-11-02)
 
 # v0.9.1: RUNBOOK K6–K13 and the Scan-now proof (plan)
 
