@@ -24,22 +24,35 @@ All PASS.
 ## Setup (window pre-checks 3 and 4)
 Weekday 10:00-16:00 London, digest arrived, nothing Generating. Part K setup block (RUNBOOK lines 497-506) pasted; `gcloud config get-value project` prints `hireframe-f6b03`. Every command is shown in chat and approved first. Only `add-` / `remove-iam-policy-binding`; never `set-iam-policy`; never touch the `user:` owner binding.
 
+## Release-day pre-flight, 3 Nov 2026, 12:22 London (reported by Beeb, bash tab)
+- Part K setup block loaded; `gcloud` account and project correct (`hireframe-f6b03`); `NUM` set (written `<NUM>` here).
+- `~/iam-before-091.txt` (taken 20 Oct, K2) diffs clean against the live policy now. Fresh copy saved as `~/iam-pre-k6-091.txt`. K9 still diffs against `iam-before-091.txt`.
+- Plan step 3 confirmed by Beeb before the K6 grants: morning digest arrived today (yes); Pipeline Generating: none. Weekday, within 10:00-16:00.
+- Repo: `main` = 35a4dd4 (G1 merge, #56).
+
 ## Step table
 Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by Claude.
 
 ### K6 Temporary pre-grant (C45), RUNBOOK Part K, K6
 - Expected: "Check: the read prints 3 lines." Read: `flat | grep -E "^roles/(run.invoker|eventarc.eventReceiver)\s+serviceAccount:$COMPUTE|^roles/iam.serviceAccountTokenCreator\s+serviceAccount:$PSA"`. Grant only the missing ones. If `$PSA` "does not exist": `gcloud beta services identity create --service=pubsub.googleapis.com --project=$P`, then retry. Note which bindings were added. No stop until K9.
 - Result (pasted by Beeb):
-- Start / End:
-- Deviation:
+  - Read, 3 Nov ~12:3x: the three-binding grep printed 0 lines (BSD grep: Beeb used `[[:space:]]` for `\s`). Cross-check `flat | grep -E "$COMPUTE|$PSA" | cut -f1` printed only `roles/editor`. So all three bindings were missing.
+  - Grants: all three added (run.invoker and eventarc.eventReceiver on `<NUM>-compute@…`; serviceAccountTokenCreator on `service-<NUM>@…`). `$PSA` existed; no `services identity create` needed. Re-read prints 3 lines: `roles/eventarc.eventReceiver`, `roles/iam.serviceAccountTokenCreator`, `roles/run.invoker`.
+  - **K9 must remove all three.**
+- Start / End: start not recorded (after the 12:2x pre-flight, before the read); end 12:38:36 London. K9 deadline 15:30.
+- Deviation: grep uses `[[:space:]]` (macOS); no effect on the result.
 
 ### K7 Tag v0.9.1 (C4), RUNBOOK Part K, K7; Part C step 27
 - Run `git checkout main && git pull && git log -1` (HEAD = G1 merge; #39 is in `v0.9.0..HEAD`), then `git tag v0.9.1 && git push origin v0.9.1`, approve the deploy.
 - Expected: "the deploy log shows `functions[billingGuard(europe-west2)] Successful create operation` and no "We failed to modify the IAM policy"".
 - Deploy job duration: (note: over 12 min, record it for 8C2)
 - Result (pasted by Beeb):
-- Start / End:
-- Deviation:
+  - Step 1 (check main), 3 Nov after 12:38: `git checkout main && git pull` = already up to date; `git log -1` = `35a4dd4 ... (G1) (#56)`, equals origin/main. #39 is in `v0.9.0..HEAD` as `017d60c Merge pull request #39`; `merge-base --is-ancestor 017d60c HEAD` true.
+  - Step 2 (tag), 12:45:59 London: `git tag v0.9.1 && git push origin v0.9.1` printed `* [new tag] v0.9.1 -> v0.9.1`. Remote tag = 35a4dd4 (checked by `git ls-remote`). Deploy run 41638473194 (push, `v0.9.1`, sha 35a4dd4) created 12:46:00 and is waiting for review.
+  - Step 3 (deploy), **FAILED**. Run 41638473194: job `deploy` 13:01:39 to 13:07:24 London (so approved about 13:01), conclusion failure. Read by Claude with `gh run view --log-failed` at 14:15. Hosting, Storage rules and Firestore rules released; 13 existing functions `Successful update operation`; `billingGuard(europe-west2)` NOT created: `Unexpected error creating Pub/Sub topic`, then "Deploys failed. Skipping deletes", exit 2. No "We failed to modify the IAM policy" line (K6 worked). Not one of the two planned fallbacks (that message, or an Eventarc permission error).
+  - Code path (firebase-tools 15.34.1, `fabricator.js` `createV2Function`): the CLI does `PUT` on the topic from `eventTrigger.pubsubTopic`; only HTTP 409 is tolerated, any other status throws that message. The topic exists from K3, so the PUT should give 409 unless the deployer is refused (likely 403, `pubsub.topics.create`). Unverified: the real status is not in the log.
+- Start / End: K7 start 12:45:59 (tag push); deploy job ended 13:07:24 (failed).
+- Deviation: Beeb skipped the pasted "tag exists?" pre-check; the `&&` chain and the `[new tag]` result show neither side had it. My `grep "#39\)"` matched nothing (the merge subject has no `)`); Beeb's plain `grep "#39"` plus the ancestor check confirmed it. Beeb's working tree carries the uncommitted evidence-doc edit (`M`); it does not affect the tag.
 
 ### K8 Invoker binding (C38, C46), RUNBOOK Part K, K8
 - Run `gcloud functions add-invoker-policy-binding billingGuard --region=$R --member=serviceAccount:$GUARD --project=$P`, then C46: `gcloud run services get-iam-policy billingguard --region=$R --project=$P --flatten='bindings[].members' --filter='bindings.role:roles/run.invoker' --format='value(bindings.members)'`.
@@ -55,6 +68,8 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 - Start / End:
 - Deviation:
 
+**K9 progress (abort path, Beeb's decision after the K7 failure):** step 1 done 3 Nov, 14:18:48 to 14:19:40 London. All three `remove-iam-policy-binding` calls printed `Updated IAM policy for project [hireframe-f6b03].` Each returned policy shows the binding gone: `run.invoker` for `<NUM>-compute@…`, then `eventarc.eventReceiver` for it, then `serviceAccountTokenCreator` for `service-<NUM>@…` (the `firebase-adminsdk-fbsvc@…` member of that role stays). Step 2 done (about 14:2x): `diff ~/iam-before-091.txt ~/iam-after-091.txt` empty, `diff exit: 0`; deployer roles (C43) = exactly the 7 baseline (cloudfunctions.developer, cloudscheduler.admin, datastore.indexAdmin, firebase.viewer, firebasehosting.admin, firebaserules.admin, serviceusage.serviceUsageConsumer). **K9 PASSED, done well before 15:30; all K6 grants removed; no C38b used.** Note: Beeb pasted whole policies into chat (includes a `user:` line); nothing from them goes in the repo.
+
 ### K10 Checks on billingGuard (C14b, C39a, C39b), RUNBOOK Part K, K10
 - C14b: `gcloud functions describe billingGuard --region=$R --gen2 --project=$P --format='value(serviceConfig.maxInstanceCount,serviceConfig.timeoutSeconds,serviceConfig.availableMemory,serviceConfig.serviceAccountEmail,eventTrigger.serviceAccountEmail,eventTrigger.pubsubTopic,eventTrigger.retryPolicy)'`
   Expected: "It must show `1 60 256Mi hireframe-billing-guard@… hireframe-billing-guard@… projects/hireframe-f6b03/topics/billing-guard RETRY_POLICY_DO_NOT_RETRY`."
@@ -68,8 +83,10 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 - Repeat Part G step 77 (C1, C2) and the C3 line of step 101.
 - Expected (K1): "`scheduledScan`'s job is `30 7,17 * * 1-5`, `Europe/London`, `hireframe-fns@…`. C2: its invoker is only `hireframe-fns`. C3: three scheduler jobs, all ENABLED." Fix: the Recovery entries for a scheduled function.
 - Result (pasted by Beeb):
-- Start / End:
-- Deviation:
+  - C1/C2, 3 Nov after 14:2x (run after the failed deploy, which updated 13 functions): scheduler job `30 7,17 * * 1-5`, `Europe/London`, `hireframe-fns@…`; `scheduledscan` invoker only `serviceAccount:hireframe-fns@…`. PASS.
+  - C3, 3 Nov after 14:2x: exactly three jobs, all ENABLED, all `hireframe-fns@…`: `purgeOldData` `30 3 * * *`, `scheduledScan` `30 7,17 * * 1-5`, `generateCvs` `*/10 7-23 * * *`, all `Europe/London`. PASS. **K11 PASSED.**
+- Start / End: about 14:2x to 14:3x London.
+- Deviation: K11 ran after the failed K7 deploy (abort path), not after a successful one.
 
 ### K12 Dry run (C35), RUNBOOK Part K, K12
 - Env read: `gcloud functions describe billingGuard --region=$R --gen2 --project=$P --format='value(serviceConfig.environmentVariables)'` must "**not** contain `BILLING_GUARD_MODE`".
@@ -95,10 +112,10 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 
 ### I7-lite CV check, plan section 8 step 8b
 - Start an application on one job, wait for Ready, download and open the DOCX and the PDF. Expected: one page, black text, right section order, no garbled characters. A CV render problem is a stop: do not continue to C47 bookkeeping, paste what you see, and Claude diagnoses first. Then step 8c: scheduler list again (three jobs ENABLED).
-- DOCX opens / PDF opens (yes or no):
-- Result (pasted by Beeb):
-- Start / End:
-- Deviation:
+- DOCX opens / PDF opens (yes or no): yes / yes
+- Result (pasted by Beeb): 3 Nov, afternoon, on the live site (docx 9.15 live via the failed deploy's 13 function updates). One application on a health-tech job reached Ready, "well under 20 minutes" (not timed). Both files open; one page; black text on white; all sections present and in order; no garbled characters; bullets fine; Console showed no red errors. **Render check PASSED.** Beeb's own comment: the CV *content* is weak. That is CV quality (queued PR #42, after v1.0.0), not a render problem; not judged here.
+- Start / End: not timed.
+- Deviation: ran on the abort path, with no `billingGuard`. Step 8c (scheduler list after the CV worker ran) pending.
 
 ### C47 budget message, RUNBOOK Part K, K13
 - Within 24 hours of K13: `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$P --freshness=1d --limit=10 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'`

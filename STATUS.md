@@ -1,6 +1,6 @@
 # Hireframe: status & handoff
 
-_Updated: 2026-11-02 · Playbook 3.0 · Kit 3.0.2_
+_Updated: 2026-11-03 · Playbook 3.0 · Kit 3.0.2_
 
 The repo copy is the master. Spec: `docs/PROJECT.md`. Plans: `docs/plans/`. Older detail (Done before 8C, older Lessons, full Next and Parked text): `LEARNINGS.md`.
 
@@ -39,6 +39,7 @@ One line per milestone (full entries in `LEARNINGS.md`).
 - **8C2 built** (17 Oct): PR #41, head 0743bdf, CI and gate green. Plan `m8c2-plan.md`; review `m8c2-review.md` (all fixed). 14 functions with literal `maxInstances: 1` + `timeoutSeconds`; ADR-060; ADR-059 addendum; RUNBOOK K14–K28; SECURITY checklist. The bundle hash changed, so v1.0.0 rebuilds every function.
 - **Clean weekday on v0.9.0:** Fri 16 Oct. **R7 phone test** (step 97): passed 20 Oct. **Restore drill** C17–C20: done 20 Oct (backup `41ead5bb-…`, restore-drill deleted).
 - **v0.9.1 K1–K5 done** (20 Oct): C1/C2/C3 checked, deployer has the 7 baseline roles, topic `billing-guard` and SA `hireframe-billing-guard` created. The Billing Budget API stays disabled outside a K step.
+- **v0.9.1 attempt, day 1** (3 Nov, evidence in `v0-9-1-evidence.md`): K6 grants done 12:38; tag `v0.9.1` pushed 12:45 (sha 35a4dd4); the Deploy run failed 13:07 at `billingGuard` create (`Unexpected error creating Pub/Sub topic`). Hosting, rules and the 13 existing functions were released; `billingGuard` does not exist. Abort path run: K9 done 14:19 (diff vs `iam-before-091.txt` empty, deployer 7 roles). K11 passed (C1–C3). I7-lite render check passed (DOCX and PDF fine, no console errors).
 - **Kit and deps** (late Oct): kit 3.0.2 (#53) with `npm audit fix` (zod via clasp allowlisted to 2027-01-31); Dependabot #46 and #49 merged.
 - **PR #45 built** (20–24 Oct, draft, ADR-066): initial JS 295.6 → 164.7 kB gzip; Firestore chunk lazy at 131.0 kB. Opus Medium review fixed; L7 bug (Try again cannot recover a failed chunk) fixed with a click-only full reload. Gate green except `test:rules` (port conflict with `npm run dev`).
 
@@ -48,6 +49,8 @@ One line per milestone (full entries in `LEARNINGS.md`).
 - [tech] **zsh reads `$VAR:r…` as a modifier** (20 Oct). Write `${VAR}` before a colon, or run the block in `bash <<'EOF'`. Give heredoc blocks outside numbered lists in chat.
 - [tech] **Firestore document counts:** the console shows none. Use a `runAggregationQuery` count with curl and `gcloud auth print-access-token`, in bash. Pick a named database with the console's database selector.
 - [process] The restore drill is safe on a weekday, because it never touches `(default)`. RUNBOOK step 103 says "weekend": fix the wording in the next docs PR.
+- [tech] **A Part K deploy can fail midway** (3 Nov): Hosting, rules and the other functions were already released when the `billingGuard` create failed, and the tag exists. Plan for a partial release; K9 and K11 still apply.
+- [process] **macOS grep has no `\s`:** use `[[:space:]]` in the RUNBOOK K6 read (fix in a later docs PR).
 - [process] **RUNBOOK Part K runs fine in a laptop `bash` tab**: type `bash`, then paste the Part K setup block.
 - [tech] **A new service account can return NOT_FOUND on `describe` for up to a minute** after `create`. Wait 60 s; never re-run the create.
 - [process] Splitting Part K across days is safe up to K5. Never stop between K6 and K9: the K6 pre-grant stays on until K9.
@@ -58,9 +61,9 @@ One line per milestone (full entries in `LEARNINGS.md`).
 - [process] Chrome request blocking: in Network, right-click the request → **Block request URL**.
 
 ## In progress
-v0.9.1 plan: `docs/plans/v0-9-1-plan.md`; evidence and handoff: `docs/plans/v0-9-1-evidence.md`. **K6 next** (after G1 merges).
+v0.9.1 plan: `docs/plans/v0-9-1-plan.md`; evidence and handoff: `docs/plans/v0-9-1-evidence.md`. **v0.9.1 is tagged but incomplete:** `billingGuard` failed to deploy on 3 Nov (see Done); K6 and K9 are done, K7 needs a decision.
 **M8 8C.** State confirmed 2 Nov: only K1–K5 are done (git tags show only v0.9.0):
-- v0.9.1: K6 → K7 tag (from `main`; PR #41 unmerged) → K8–K13 (K12 dry run, K13 budgets £2/£5/£10 + `hireframe-kill` £25) → Scan-now proof → C47 within 24 h of K13. **Not done:** v0.9.1 is not tagged; K6 onward, the Scan-now proof and C47 are not started.
+- v0.9.1: K6 and K9 done (3 Nov, grants added then removed); K7 tagged but the `billingGuard` create failed → K8, K10, K12, K13, the Scan-now proof and C47 **not done**. Next: planner diagnosis (report only), then Beeb decides the fix and a new release day (tag `v0.9.1` already exists on `35a4dd4`; a re-run of the failed job or a `v0.9.2` is the choice).
 - Phase 3 (K14–K18): weekday 10:00–16:00 after the Scan-now proof, each step approved alone. **Not done:** not started.
 - Phase 4 (K19–K28) = v1.0.0: after all five gates (phone test, restore drill, clean weekday: done; Scan-now proof on v0.9.1 and C47: not done); weekday 10:00–16:00; nothing Generating. K20 merges PR #41.
 - K order: K19 record gates → **K20 evidence commit, merge #41** → K21 snapshot → K22 buckets → K23 Path F grants → **K24 compute-account Editor removal (not the App Engine account), then straight to K25 tag v1.0.0** → K26 `diff -u` → K27 live checks → K28 24-hour checks, `gcloud auth revoke`, follow-up docs PR (C50, K26, K27, K28, C41).
@@ -93,7 +96,8 @@ Full list in `LEARNINGS.md` ("Parked ideas (full list)") and `docs/ROADMAP.md`.
 
 ## Pending / known
 - **PR #45 lazy-screens decision (Beeb).** The lazy screens have no error boundary, so a failed screen chunk blanks the app (already true on `main` after a deploy for a tab left open). `loadTodayPage()` and `loadDashboardService()` also cache a failed promise. Recommended: one route error boundary with a click-only Reload, plus resetting both loaders on failure, inside #45.
-- **Not done:** the v0.9.1 tag and Scan-now proof, C47, K14–K18 (not started). The R7 median `hf:usable` (ms) for the K20 evidence is not recorded.
+- **v0.9.1 deploy failure (3 Nov):** cause unconfirmed. firebase-tools 15.34.1 `createV2Function` does a `PUT` on the topic and tolerates only HTTP 409; the topic exists, so the deployer was probably refused (`pubsub.topics.create`?). Fix options (temporary grant around the re-run, like K6/K9, or a custom role) are Beeb's decision; the planner report comes first. The K6 grants are removed, so any retry needs K6 again.
+- **Not done:** the `billingGuard` deploy, the Scan-now proof, C47, K14–K18 (not started). I7-lite step 8c (scheduler list after the CV worker) was still to be pasted. The R7 median `hf:usable` (ms) for the K20 evidence is not recorded.
 - **Audit allowlist:** zod via `@google/clasp` until 2027-01-31. Review it by then.
 - **Dependabot alert #4 (moderate): leave it open.** `sprintf-js` via `mammoth`, no patch; owner-only upload.
 - The wipe dialog shows "[400]" after a refusal message (cosmetic). The Pipeline hydration warning (`<div>` inside `<p>` in StageTile) is not from #43 or #45.
