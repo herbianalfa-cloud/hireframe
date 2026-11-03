@@ -115,7 +115,7 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 - DOCX opens / PDF opens (yes or no): yes / yes
 - Result (pasted by Beeb): 3 Nov, afternoon, on the live site (docx 9.15 live via the failed deploy's 13 function updates). One application on a health-tech job reached Ready, "well under 20 minutes" (not timed). Both files open; one page; black text on white; all sections present and in order; no garbled characters; bullets fine; Console showed no red errors. **Render check PASSED.** Beeb's own comment: the CV *content* is weak. That is CV quality (queued PR #42, after v1.0.0), not a render problem; not judged here.
 - Start / End: not timed.
-- Deviation: ran on the abort path, with no `billingGuard`. Step 8c (scheduler list after the CV worker ran) pending.
+- Deviation: ran on the abort path, with no `billingGuard`. Step 8c (scheduler list after the CV worker ran), 3 Nov afternoon: run twice, identical both times: `purgeOldData` `30 3 * * *`, `scheduledScan` `30 7,17 * * 1-5`, `generateCvs` `*/10 7-23 * * *`, all ENABLED. **8c PASSED.**
 
 ### C47 budget message, RUNBOOK Part K, K13
 - Within 24 hours of K13: `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="billingguard"' --project=$P --freshness=1d --limit=10 --format='table(timestamp,severity,jsonPayload.event,jsonPayload.mode,jsonPayload.step,jsonPayload.code)'`
