@@ -197,6 +197,14 @@ G2 review: `reviewer`.
 11. If the Budget API was enabled in K13: disable it after step 9 passes, then confirm one more `billing_guard.below` arrives (Decision 7).
 12. Paste the results to Claude for G2. Merge G1 and G2 when green (Beeb only).
 
+### 8b. Retry after the 3 Nov deploy failure (Beeb's decision, 4 Nov)
+The 3 Nov Deploy run failed creating `billingGuard`: the deployer lacks `pubsub.topics.create` (audit log and role check confirmed, evidence doc). Release day 2 is **Thu 5 Nov, 10:00** (window 10:00-16:00, K9 by 15:30). Changes to the steps above:
+- **Before K6:** Beeb creates a custom role with only `pubsub.topics.create` (shown and approved first).
+- **K6b (new, after K6):** bind that role to `github-deployer@…` at project level. Topic-level does not work (create is checked on the project).
+- **K7:** no new tag. Actions -> Deploy -> run 41638473194 -> Re-run failed jobs; approve `production` if asked. If the re-run is refused, stop and ask (a `v0.9.2` is the fallback).
+- **K9:** also unbind K6b, then delete the custom role (in that order). The diff against `iam-before-091.txt` is empty and the deployer has the 7 baseline roles.
+- The role, its binding and the delete are Hard area IAM changes: each is shown in chat and approved before it runs.
+
 ## 9. Noticed
 1. **K6 may be unnecessary but is still the safe path.** In `checkIam.js` (15.34.1) a failed *read* of the project policy only warns and continues; only a failed *write* throws. Whether the deployer can read the policy decides it; the pre-grant makes the CLI skip the write either way. Keep K6 as written.
 2. **v0.9.1 is bigger than 8C1.** It ships #49's 18 dependency bumps to Hosting and every function. If any are web runtime packages, PROJECT.md's rule ("steps 89/97 for each release that touches the load path") may apply; G1.1's `check:bundle` number shows whether initial JS moved. Beeb decides whether a step 89 lab record is wanted.

@@ -132,6 +132,16 @@ Columns: Result = pasted by Beeb; Start/End = London time; Deviation = filled by
 - Start / End:
 - Deviation:
 
+## Diagnosis checks and retry decision, Wed 4 Nov 2026 (about 13:25 London)
+Planner report: `docs/plans/v0-9-1-deploy-diagnosis.md` (report only; its claims are marked CONFIRMED or UNVERIFIED there).
+- **5a (audit log, read-only): CONFIRMED cause.** `CreateTopic` at 2026-11-03T13:05:49Z by `github-deployer@…`: status code 7, "User not authorized to perform this action.", permission `pubsub.topics.create`, granted False. That is the 403 the CLI does not tolerate (only 409 passes). It is the only row in 12:55-13:10Z.
+- **5b (role permissions, read-only): CONFIRMED.** None of the deployer's 7 roles lists `pubsub.topics.create` (seven headers, nothing under any); the `billing-guard` topic policy printed nothing (no bindings). Beeb's paste also echoed the next command line under the first role header: a terminal paste artifact, not output.
+- **Decision (Beeb, 4 Nov, 13:2x):** retry **Thu 5 Nov, 10:00** (today is past the cutoff; nothing else today). Fix = a **temporary one-permission custom role** (`pubsub.topics.create`) bound to the deployer as **K6b** next to K6; in **K9** unbind it **and delete the custom role** (not kept). No new tag: Re-run failed jobs on run 41638473194 (planner: idempotent; UNVERIFIED that `production` approval is asked again). K6 must be redone first.
+- **Retry-day sequence:** pre-checks (weekday 10:00-16:00, digest arrived, nothing Generating; `flat` diff vs `~/iam-before-091.txt` empty; deployer 7 roles) -> create the role -> **K6** (3 bindings) -> **K6b** (bind the role to `$SA`) -> Re-run failed jobs, approve -> expect `functions[billingGuard(europe-west2)] Successful create operation` -> K8 (wait 2 min before K12) -> **K9** (remove the 3 K6 bindings, unbind K6b, delete the role; diff empty, deployer 7 roles) -> K10, K11, K12, K13, Scan-now proof. Hard stop: K9 by 15:30.
+- Role and binding commands are shown in chat and approved first on the day. K9 order matters: unbind before deleting the role.
+- Open / UNVERIFIED (from the report): whether `createFunction` needs another caller permission after the topic step (a new error would name it; C38b is the known Eventarc fallback); how long a deleted custom role ID stays reserved (not needed again).
+- ADR-059 and RUNBOOK K6/K6b/K9 text: update later in #41's K20 commit (Decision 2), not now.
+
 ## Abort path (plan section 8)
 If K9 is not done by 15:30 (for example K7 can't be fixed), or any step says stop: run K9 now (remove only the bindings K6 added), then the K9 diff and deployer role check. Nothing else is needed for safety, because the function has no billing role. To remove the function, revert the export in a PR and release a patch. Report to Claude before retrying. Re-adding grants is never wanted.
 

@@ -1,6 +1,6 @@
 # Hireframe: status & handoff
 
-_Updated: 2026-11-03 · Playbook 3.0 · Kit 3.0.2_
+_Updated: 2026-11-04 · Playbook 3.0 · Kit 3.0.2_
 
 The repo copy is the master. Spec: `docs/PROJECT.md`. Plans: `docs/plans/`. Older detail (Done before 8C, older Lessons, full Next and Parked text): `LEARNINGS.md`.
 
@@ -22,6 +22,7 @@ The repo copy is the master. Spec: `docs/PROJECT.md`. Plans: `docs/plans/`. Olde
   5. Scope filter for Waves 2–3: build only features that get interviews unless Beeb asks for more.
 - **Docs hygiene (2 Nov):** CLAUDE.md aligned with kit PR groups and /milestone; Docs line and gate command added; App Engine Editor K24 vs Decisions resolved.
 - **v0.9.1 plan decisions** (2 Nov, `docs/plans/v0-9-1-plan.md`): Scan-now proof + C47 is the gate (no full clean day); Budget API stays disabled unless the console refuses; tag from `main` without #41, plus an I7-lite check after deploy (one live CV, DOCX and PDF open; a render problem is a stop) because #49 bumped `docx` to 9.15; no RUNBOOK/ADR edits on `main` now (fix in #41's K20 commit); C38b and the K12 fallback pre-accepted (each still approved when needed); C47 `.invalid` → v0.9.2 fix, no message → wait once 24 h; edit the existing £5/£10 budgets and add £2; release day = first Tue–Thu after G1 merges.
+- **v0.9.1 retry** (4 Nov, Beeb): release day 2 = **Thu 5 Nov, 10:00**. Temporary custom role with only `pubsub.topics.create`, bound to the deployer as K6b next to K6, then unbound **and the role deleted** in K9. No new tag: re-run the failed job on run 41638473194. Plan section 8b.
 - **Playbook 3.0 + kit** (Nov 2026): `STATUS.md` and `docs/PROJECT.md` live in the repo and are the masters. Claude Code works through `/milestone`, `/build`, `/ship`, `/retro`.
 
 ## Done
@@ -40,6 +41,7 @@ One line per milestone (full entries in `LEARNINGS.md`).
 - **Clean weekday on v0.9.0:** Fri 16 Oct. **R7 phone test** (step 97): passed 20 Oct. **Restore drill** C17–C20: done 20 Oct (backup `41ead5bb-…`, restore-drill deleted).
 - **v0.9.1 K1–K5 done** (20 Oct): C1/C2/C3 checked, deployer has the 7 baseline roles, topic `billing-guard` and SA `hireframe-billing-guard` created. The Billing Budget API stays disabled outside a K step.
 - **v0.9.1 attempt, day 1** (3 Nov, evidence in `v0-9-1-evidence.md`): K6 grants done 12:38; tag `v0.9.1` pushed 12:45 (sha 35a4dd4); the Deploy run failed 13:07 at `billingGuard` create (`Unexpected error creating Pub/Sub topic`). Hosting, rules and the 13 existing functions were released; `billingGuard` does not exist. Abort path run: K9 done 14:19 (diff vs `iam-before-091.txt` empty, deployer 7 roles). K11 passed (C1–C3). I7-lite render check passed (DOCX and PDF fine, no console errors); step 8c scheduler list: three jobs ENABLED.
+- **v0.9.1 cause confirmed** (4 Nov): audit log shows `github-deployer@…` refused on `pubsub.topics.create` (code 7) at 13:05:49Z; none of its 7 roles holds it. Details: `v0-9-1-evidence.md`, `v0-9-1-deploy-diagnosis.md`.
 - **Kit and deps** (late Oct): kit 3.0.2 (#53) with `npm audit fix` (zod via clasp allowlisted to 2027-01-31); Dependabot #46 and #49 merged.
 - **PR #45 built** (20–24 Oct, draft, ADR-066): initial JS 295.6 → 164.7 kB gzip; Firestore chunk lazy at 131.0 kB. Opus Medium review fixed; L7 bug (Try again cannot recover a failed chunk) fixed with a click-only full reload. Gate green except `test:rules` (port conflict with `npm run dev`).
 
@@ -63,7 +65,7 @@ One line per milestone (full entries in `LEARNINGS.md`).
 ## In progress
 v0.9.1 plan: `docs/plans/v0-9-1-plan.md`; evidence and handoff: `docs/plans/v0-9-1-evidence.md`. **v0.9.1 is tagged but incomplete:** `billingGuard` failed to deploy on 3 Nov (see Done); K6 and K9 are done, K7 needs a decision.
 **M8 8C.** State confirmed 2 Nov: only K1–K5 are done (git tags show only v0.9.0):
-- v0.9.1: K6 and K9 done (3 Nov, grants added then removed); K7 tagged but the `billingGuard` create failed → K8, K10, K12, K13, the Scan-now proof and C47 **not done**. Planner report done: `docs/plans/v0-9-1-deploy-diagnosis.md`. Recommended: re-run the failed job (no new tag), after read-only checks 5a/5b and a temporary one-permission custom-role grant ("K6b") removed in K9. Beeb decides.
+- v0.9.1: K6 and K9 done (3 Nov, grants added then removed); K7 tagged but the `billingGuard` create failed → K8, K10, K12, K13, the Scan-now proof and C47 **not done**. Planner report: `docs/plans/v0-9-1-deploy-diagnosis.md`. Retry **Thu 5 Nov 10:00** with K6 + K6b, re-run of the failed job, K9 also deletes the custom role (plan 8b).
 - Phase 3 (K14–K18): weekday 10:00–16:00 after the Scan-now proof, each step approved alone. **Not done:** not started.
 - Phase 4 (K19–K28) = v1.0.0: after all five gates (phone test, restore drill, clean weekday: done; Scan-now proof on v0.9.1 and C47: not done); weekday 10:00–16:00; nothing Generating. K20 merges PR #41.
 - K order: K19 record gates → **K20 evidence commit, merge #41** → K21 snapshot → K22 buckets → K23 Path F grants → **K24 compute-account Editor removal (not the App Engine account), then straight to K25 tag v1.0.0** → K26 `diff -u` → K27 live checks → K28 24-hour checks, `gcloud auth revoke`, follow-up docs PR (C50, K26, K27, K28, C41).
@@ -96,7 +98,7 @@ Full list in `LEARNINGS.md` ("Parked ideas (full list)") and `docs/ROADMAP.md`.
 
 ## Pending / known
 - **PR #45 lazy-screens decision (Beeb).** The lazy screens have no error boundary, so a failed screen chunk blanks the app (already true on `main` after a deploy for a tab left open). `loadTodayPage()` and `loadDashboardService()` also cache a failed promise. Recommended: one route error boundary with a click-only Reload, plus resetting both loaders on failure, inside #45.
-- **v0.9.1 deploy failure (3 Nov):** cause unconfirmed. firebase-tools 15.34.1 `createV2Function` does a `PUT` on the topic and tolerates only HTTP 409; the topic exists, so the deployer was probably refused (`pubsub.topics.create`?). Fix options are Beeb's decision (see the planner report: the CLI PUTs the topic only on function create; the deployer's 7 roles likely lack `pubsub.topics.create`, which is checked on the project). The K6 grants are removed, so any retry needs K6 again.
+- **v0.9.1 deploy failure (3 Nov):** cause confirmed 4 Nov: the CLI PUTs the topic only when it creates a function, and the deployer lacks `pubsub.topics.create` (checked on the project). Fix and retry day decided (see Decisions, plan 8b). The K6 grants are removed, so the retry needs K6 again.
 - **Not done:** the `billingGuard` deploy, the Scan-now proof, C47, K14–K18 (not started). The R7 median `hf:usable` (ms) for the K20 evidence is not recorded.
 - **Audit allowlist:** zod via `@google/clasp` until 2027-01-31. Review it by then.
 - **Dependabot alert #4 (moderate): leave it open.** `sprintf-js` via `mammoth`, no patch; owner-only upload.
