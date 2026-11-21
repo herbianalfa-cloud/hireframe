@@ -38,7 +38,7 @@ Add the same check to the self-review prompt in PLAYBOOK.md.
 
 ### 4. Alerts that reach a phone
 - Budget thresholds at £2, £5 and £10, both actual and forecast.
-- Confirm the alert email goes to herbianalfa@ and is not filtered.
+- Confirm the alert email goes to $OWNER and is not filtered.
 - Add GCP spend this month to the System screen and the morning digest, next to the Anthropic meter, if the Billing export makes it cheap. Otherwise park it.
 
 ### 5. Time-dependent tests
@@ -55,7 +55,7 @@ The public case stayed hidden for 23 days because it depended on a 30-day expiry
 A stolen Google account is the only route to a bill of thousands. No code cap applies to it.
 - Set Compute Engine CPU and GPU quotas to 0 in every region for `hireframe-f6b03` (confirm first that Functions v2 and Cloud Build do not need them).
 - Disable every GCP API the project does not use.
-- Passkey or hardware key on herbianalfa@. Check the recovery phone and email.
+- Passkey or hardware key on $OWNER. Check the recovery phone and email.
 - No service account key files anywhere (keyless deploy already). Remove Editor from the default compute service account (already on the M8 list).
 - RUNBOOK: run `gcloud auth revoke` on the laptop when the login is not needed; prefer Cloud Shell.
 

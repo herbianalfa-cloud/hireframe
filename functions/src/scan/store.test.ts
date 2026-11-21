@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
+
 import type { Firestore } from 'firebase-admin/firestore';
 import { describe, expect, it } from 'vitest';
 
 import { SCAN, SHORT_LOCK } from '../config.js';
-import { liveLockHolder, lockStaleMs } from './store.js';
+import { isLockLive, liveLockHolder, lockLiveUntil, lockStaleMs } from './store.js';
 
 const NOW = new Date('2026-10-07T09:00:00Z');
 const MIN = 60_000;
@@ -62,5 +64,73 @@ describe('lock staleness (ADR-048): a lock is live until its window ends, then f
   it('a released or missing lock is free', async () => {
     expect(await liveLockHolder(dbWith(undefined), NOW)).toBeNull();
     expect(await liveLockHolder(dbWith({ lastFinishedAt: NOW, schemaVersion: 1 }), NOW)).toBeNull();
+  });
+});
+
+describe('lockLiveUntil and isLockLive: the one stale rule (ADR-048)', () => {
+  const START = new Date('2026-10-07T08:00:00Z');
+  const at = (ms: number) => new Date(START.getTime() + ms);
+
+  it.each([
+    ['scan', 12],
+    ['rescore', 12],
+    ['email', 3],
+    ['lookup', 2],
+    ['wipe', 3],
+  ] as const)(
+    '%s: live 1 ms before %i min, free at the window and 1 ms after',
+    (holder, minutes) => {
+      const window = minutes * MIN;
+      const lock = {
+        runId: 'r1',
+        startedAt: START,
+        staleAt: new Date(START.getTime() + lockStaleMs(holder)),
+      };
+      expect(lockLiveUntil(lock)).toEqual(at(window));
+      expect(isLockLive(lock, at(window - 1))).toBe(true);
+      expect(isLockLive(lock, at(window))).toBe(false);
+      expect(isLockLive(lock, at(window + 1))).toBe(false);
+    },
+  );
+
+  it('a legacy lock (no staleAt, no holder) falls back to 12 minutes', () => {
+    const lock = { runId: 'old', startedAt: START };
+    expect(lockLiveUntil(lock)).toEqual(at(12 * MIN));
+    expect(isLockLive(lock, at(12 * MIN - 1))).toBe(true);
+    expect(isLockLive(lock, at(12 * MIN))).toBe(false);
+    expect(isLockLive(lock, at(12 * MIN + 1))).toBe(false);
+  });
+
+  it('a staleAt shorter than the 12-minute fallback is honoured', () => {
+    const lock = { runId: 'r1', startedAt: START, staleAt: at(MIN) };
+    expect(lockLiveUntil(lock)).toEqual(at(MIN));
+    expect(isLockLive(lock, at(MIN - 1))).toBe(true);
+    expect(isLockLive(lock, at(MIN))).toBe(false);
+  });
+
+  it('no runId, or an empty one, is not live', () => {
+    expect(lockLiveUntil({ startedAt: START })).toBeUndefined();
+    expect(lockLiveUntil({ runId: '', startedAt: START })).toBeUndefined();
+    expect(isLockLive({ startedAt: START }, at(1))).toBe(false);
+    expect(isLockLive({ runId: '', startedAt: START }, at(1))).toBe(false);
+  });
+
+  it('no startedAt is not live, even with a future staleAt', () => {
+    const lock = { runId: 'r1', staleAt: at(60 * MIN) };
+    expect(lockLiveUntil(lock)).toBeUndefined();
+    expect(isLockLive(lock, at(1))).toBe(false);
+  });
+
+  it('no lock at all is not live', () => {
+    expect(lockLiveUntil(undefined)).toBeUndefined();
+    expect(isLockLive(undefined, at(1))).toBe(false);
+  });
+
+  it('drift guard: the fallback is written once, and all three sites use isLockLive', () => {
+    const source = readFileSync(new URL('./store.ts', import.meta.url), 'utf8');
+    expect(source.match(/\+ SCAN\.lockStaleMs/g)).toHaveLength(1);
+    const uses = source.split('isLockLive(').length - 1;
+    // One definition plus at least three call sites.
+    expect(uses).toBeGreaterThanOrEqual(4);
   });
 });

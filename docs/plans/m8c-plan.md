@@ -1,5 +1,7 @@
 # M8 PR 8C: billing guards, IAM, v1.0.0 (plan)
 
+> **Note (8C2 planning):** `docs/plans/m8c2-plan.md` and RUNBOOK K14–K28 are authoritative for 8C2 and v1.0.0. Where they differ from §3 and §4 below, they win: there are **14** functions, not 15; the 8C2 branch is `feat/m8c2-hardening`; the K numbers run K14–K28; and the gate is the 7 steps `check`, `format:check`, `test:rules`, `build`, `check:bundle`, `smoke-functions-bundle`, `audit`.
+
 ## Context
 - v0.9.0 (8B) is live. 8C finishes M8 and releases **v1.0.0**. ADR-059 and ADR-060 are reserved for it.
 - Scope comes from `m8-plan.md` §8C and `m8-billing-guards.md`:
@@ -49,7 +51,7 @@
 | PR | Branch | Tag | What |
 |---|---|---|---|
 | **8C1** | `feat/m8c1-billing-guard` | **v0.9.1** | `billingGuard` (dry run), ADR-059, time-dependent tests (C4), client read counter (C5), the CLAUDE.md working-method step |
-| **8C2** | `chore/m8c2-iam-release` | **v1.0.0** | Explicit `maxInstances` everywhere plus the table and source tests (C2), ADR-060 (Path F), SECURITY checklist, RUNBOOK complete, ROADMAP, CHANGELOG 1.0.0 |
+| **8C2** | `feat/m8c2-hardening` | **v1.0.0** | Explicit `maxInstances` everywhere plus the table and source tests (C2), ADR-060 (Path F), SECURITY checklist, RUNBOOK complete, ROADMAP, CHANGELOG 1.0.0 |
 
 **Why split:**
 - **One risky infra change per release.**
@@ -444,7 +446,7 @@ gcloud projects add-iam-policy-binding $P --member=serviceAccount:$COMPUTE --rol
 
 **K23 (C4). Tag v1.0.0. This is the proving deploy.**
 - Check:
-  - every function shows "Successful update operation" (15 functions, none Skipped);
+  - every function shows "Successful update operation" (14 functions, none Skipped);
   - C50: `gcloud builds list --region=$R --project=$P --limit=20 --format='table(id,createTime.date(),status,serviceAccount)'` shows all SUCCESS, run as `$COMPUTE`.
 - If a build fails: C40, wait 2 minutes, then **Re-run failed jobs**. Those functions kept their old hash, so they rebuild. Then report the failing build's log line.
 
@@ -514,7 +516,7 @@ gcloud projects add-iam-policy-binding $P --member=serviceAccount:$COMPUTE --rol
 - **C38b (`eventarc.developer`), if needed, stays permanently**, because updates need it.
 - **A `defineString` param would fail every CI deploy** (finding 4). Not used.
 - **Re-runs prove nothing** (finding 5). The proving deploy is the C2 bundle change.
-- **Deploy job time:** 15 functions rebuild, inside the job's 20 min `timeout-minutes`. Watch v0.9.1's time; if it is over 12 minutes, raise the job timeout in 8C2.
+- **Deploy job time:** 14 functions rebuild, inside the job's 20 min `timeout-minutes`. Watch v0.9.1's time; if it is over 12 minutes, raise the job timeout in 8C2.
 
 **Other**
 - **The throwaway's billable resources:** one afternoon, then C31.

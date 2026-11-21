@@ -31,6 +31,10 @@ apps-script/.clasp.json
 !**/fixtures/**
 !evals/*.jsonl
 
+# IAM snapshots taken for the v1.0.0 diff (RUNBOOK Part K) stay local.
+iam-*.json
+iam-*.txt
+
 # Vitest local output (a direct `vitest run` writes .vitest/json/output.json)
 .vitest/
 
