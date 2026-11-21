@@ -1,10 +1,7 @@
-import { COLLECTIONS, TODO_COUNT_LIMIT, todoApplicationsSpec } from '@hireframe/shared';
-import { collection, limit, query } from 'firebase/firestore';
+import { TODO_COUNT_LIMIT } from '@hireframe/shared';
 
 import { getFirebase } from './firebase';
 import { errorCode, logError } from './log';
-import { specConstraints } from './query-spec';
-import { watchSnapshot } from './reads';
 
 /**
  * The pipeline's "things to do" count (M7 7D.4): applications waiting on the owner (a question to
@@ -31,24 +28,17 @@ function publish(next: TodoCount): void {
 function start(): () => void {
   let cancelled = false;
   let unsubscribe: (() => void) | undefined;
-  getFirebase().then(
-    ({ db }) => {
+  // The listener module (and the Firestore query helpers it brings) is a lazy chunk (ADR-066).
+  Promise.all([getFirebase(), import('./pipeline-todo-listen')]).then(
+    ([{ db }, listen]) => {
       if (cancelled) return;
-      unsubscribe = watchSnapshot(
-        query(
-          collection(db, COLLECTIONS.applications),
-          ...specConstraints(todoApplicationsSpec),
-          limit(TODO_COUNT_LIMIT),
-        ),
-        (snapshot) => {
-          publish({
-            status: 'ready',
-            count: snapshot.size,
-            capped: snapshot.size >= TODO_COUNT_LIMIT,
-          });
+      unsubscribe = listen.listenTodoApplications(
+        db,
+        (count) => {
+          publish({ status: 'ready', count, capped: count >= TODO_COUNT_LIMIT });
         },
-        (error) => {
-          logError('pipeline.todo_failed', { code: error.code });
+        (code) => {
+          logError('pipeline.todo_failed', { code });
           publish({ status: 'error' });
         },
       );

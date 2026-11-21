@@ -55,3 +55,20 @@ export function isTransient(error: unknown): boolean {
   const code = errorCode(error);
   return code === 'unavailable' || code === 'deadline-exceeded';
 }
+
+const CHUNK_LOAD_MESSAGES = [
+  /failed to fetch dynamically imported module/i, // Chrome, Edge
+  /error loading dynamically imported module/i, // Firefox
+  /importing a module script failed/i, // Safari
+  /unable to preload css/i, // Vite's preload helper
+];
+
+/**
+ * A failed dynamic import (a chunk that couldn't be fetched). The browser keeps the failed
+ * module in its module map, so importing the same URL again fails again until the page reloads.
+ */
+export function isChunkLoadError(error: unknown): boolean {
+  return (
+    error instanceof Error && CHUNK_LOAD_MESSAGES.some((pattern) => pattern.test(error.message))
+  );
+}
