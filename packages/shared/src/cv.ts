@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { CV_ISSUE_CODES, type CvIssueCode } from './applications.js';
+import { FINDING_CODES } from './cv-findings.js';
 import { foldText, LEGAL_SUFFIXES } from './normalise.js';
 import { EMAIL, PHONE, isPhoneLike } from './pii.js';
 import type { Fact, FactContent } from './profile.js';
@@ -39,6 +40,8 @@ export const CV_LIMITS = {
 export const EXPERIENCE_HEADING_FACT_TYPES: readonly Fact['type'][] = ['experience'];
 export const PROJECT_HEADING_FACT_TYPES: readonly Fact['type'][] = ['project', 'experience'];
 export const EDUCATION_FACT_TYPES: readonly Fact['type'][] = ['education'];
+/** The one other fact an education line may cite: its classification ("First Class Honours"). */
+export const EDUCATION_ACHIEVEMENT_FACT_TYPES: readonly Fact['type'][] = ['achievement'];
 export const SKILL_FACT_TYPES: readonly Fact['type'][] = ['skill'];
 
 /**
@@ -67,12 +70,15 @@ function contentSchema(strict: boolean) {
     strict ? z.array(item).min(min).max(max) : z.array(item).max(max * 4);
 
   const cited = (max: number) => z.strictObject({ text: text(max), factRefs: refs });
-  const entry = (maxEntries: number) =>
+  /** A project may have no organisation ("" is a real answer); an experience entry may not. */
+  const org = (optional: boolean) =>
+    strict && optional ? z.string().trim().max(CV_LIMITS.org) : text(CV_LIMITS.org);
+  const entry = (maxEntries: number, optionalOrg: boolean) =>
     list(
       z.strictObject({
         heading: z.strictObject({
           role: text(CV_LIMITS.role),
-          org: text(CV_LIMITS.org),
+          org: org(optionalOrg),
           factRef: ref,
         }),
         bullets: list(cited(CV_LIMITS.bullet), 0, CV_LIMITS.bulletsPerEntry),
@@ -83,10 +89,15 @@ function contentSchema(strict: boolean) {
 
   return z.strictObject({
     summary: cited(CV_LIMITS.summary),
-    experience: entry(CV_LIMITS.experienceEntries),
-    projects: entry(CV_LIMITS.projectEntries),
+    experience: entry(CV_LIMITS.experienceEntries, false),
+    projects: entry(CV_LIMITS.projectEntries, true),
     education: list(
-      z.strictObject({ line: text(CV_LIMITS.educationLine), factRef: ref }),
+      z.strictObject({
+        line: text(CV_LIMITS.educationLine),
+        factRef: ref,
+        /** An achievement fact the line may borrow its classification from ("First Class Honours"). */
+        achievementRef: ref.exactOptional(),
+      }),
       0,
       CV_LIMITS.educationEntries,
     ),
@@ -150,6 +161,59 @@ export function cvId(jobId: string, version: number): string {
   return `${jobId}-v${String(version)}`;
 }
 
+/** The rubric's criteria, in the order `scoreCv` adds them up (cv-score.ts). */
+export const CV_CRITERIA = [
+  'fill',
+  'writing',
+  'numbers',
+  'tailoring',
+  'craft',
+  'structure',
+  /** Rubric v2 on; a `cvs` doc scored under v1 has none. */
+  'note',
+] as const;
+export type CvCriterion = (typeof CV_CRITERIA)[number];
+
+/** Why a below-target draft was not revised. */
+export const REVISION_SKIPPED = [
+  'deadline',
+  'cap',
+  'error',
+  'output',
+  /** The revision came back but did not validate (its issue codes are logged). */
+  'invalid',
+  'not_fixable',
+  'attempts',
+] as const;
+export type RevisionSkipped = (typeof REVISION_SKIPPED)[number];
+
+/**
+ * What the quality score keeps on a `cvs` doc: codes and paths only, never the text found.
+ * `draftTotal` is the first draft's score when a revision was tried.
+ */
+export const CvQualitySchema = z.strictObject({
+  rubric: z.string().min(1).max(40),
+  total: z.number().min(0).max(10),
+  criteria: z.strictObject(
+    Object.fromEntries(
+      CV_CRITERIA.map((name) => [
+        name,
+        name === 'note' ? z.number().min(0).max(10).exactOptional() : z.number().min(0).max(10),
+      ]),
+    ) as Record<CvCriterion, z.ZodNumber>,
+  ),
+  findings: z
+    .array(z.strictObject({ code: z.enum(FINDING_CODES), path: z.string().min(1).max(80) }))
+    .max(20),
+  revised: z.boolean(),
+  revisionSkipped: z.enum(REVISION_SKIPPED).exactOptional(),
+  draftTotal: z.number().min(0).max(10).exactOptional(),
+  /** Dashes `scrubDashes` replaced in the model's output. */
+  dashesReplaced: z.int().min(0),
+  layout: z.strictObject({ bodySize: z.number().positive(), fill: z.number().min(0).max(1) }),
+});
+export type CvQuality = z.infer<typeof CvQualitySchema>;
+
 /** `cvs/{cvId}`: one generated CV and cover note, kept as a version. */
 export const CvDocSchema = z.strictObject({
   jobId: z.string().min(1),
@@ -169,6 +233,8 @@ export const CvDocSchema = z.strictObject({
   }),
   /** `trimOrder` steps the one-page fit applied. */
   trimmed: z.int().min(0),
+  /** The quality score (CV quality plan §3). Absent on CVs written before rubric v1. */
+  quality: CvQualitySchema.exactOptional(),
   notes: z.string().trim().min(1).max(500).exactOptional(),
   model: z.string().min(1),
   costPence: z.number().min(0),
@@ -195,6 +261,17 @@ export function formatFactDates(dates: FactContent['dates']): string {
   if (start !== undefined) return `${formatPartialDate(start)} – Present`;
   if (end !== undefined) return end === 'present' ? 'Present' : formatPartialDate(end);
   return '';
+}
+
+/**
+ * An education line's date: the year only, of the end (a graduation year) or, with no end, the
+ * start (a certificate). Never "2021 – Present"; a course still running says "Present".
+ */
+export function formatEducationDates(dates: FactContent['dates']): string {
+  const { start, end } = dates;
+  const year = (value: string): string => value.split('-')[0] ?? value;
+  if (end !== undefined) return end === 'present' ? 'Present' : year(end);
+  return start === undefined ? '' : year(start);
 }
 
 // ---- Characters the PDF can print ----
@@ -486,10 +563,14 @@ interface Cite {
   /** Fact types that may never be cited here. */
   denied: readonly Fact['type'][];
   /** Model texts under this citation, each with its path (length limits are reported per text). */
-  texts: { path: string; value: string; max: number }[];
+  texts: { path: string; value: string; max: number; allowEmpty?: boolean }[];
   refs: readonly string[];
   /** Fact types the cited facts must have; `undefined` for any. */
   types?: readonly Fact['type'][];
+  /** Fact types for the ref at the same index, where the refs are not alike (an education line). */
+  typesByRef?: readonly (readonly Fact['type'][])[];
+  /** An education line: `refs[1]` is an achievement that may lend its classification only. */
+  classification?: boolean;
 }
 
 function cites(content: CvContent): Cite[] {
@@ -508,7 +589,12 @@ function cites(content: CvContent): Cite[] {
         path: `${base}.heading`,
         texts: [
           { path: `${base}.heading.role`, value: entry.heading.role, max: CV_LIMITS.role },
-          { path: `${base}.heading.org`, value: entry.heading.org, max: CV_LIMITS.org },
+          {
+            path: `${base}.heading.org`,
+            value: entry.heading.org,
+            max: CV_LIMITS.org,
+            allowEmpty: section === 'projects',
+          },
         ],
         refs: entry.heading.factRef === '' ? [] : [entry.heading.factRef],
         types:
@@ -531,11 +617,15 @@ function cites(content: CvContent): Cite[] {
   entries('projects');
   content.education.forEach((entry, i) => {
     const path = `education[${String(i)}]`;
+    const achievement = entry.achievementRef ?? '';
     out.push({
       path,
       texts: [{ path, value: entry.line, max: CV_LIMITS.educationLine }],
-      refs: entry.factRef === '' ? [] : [entry.factRef],
-      types: EDUCATION_FACT_TYPES,
+      refs:
+        entry.factRef === '' ? [] : [entry.factRef, ...(achievement === '' ? [] : [achievement])],
+      // The line's own fact first, then at most one achievement for the classification.
+      typesByRef: [EDUCATION_FACT_TYPES, EDUCATION_ACHIEVEMENT_FACT_TYPES],
+      classification: true,
       words: 'fact',
       denied: NOT_IN_ENTRIES,
     });
@@ -615,6 +705,104 @@ interface FactReads {
   /** The folded text and evidence, for a part with no word (`R`). */
   phrase: string;
   figures: Set<string>;
+}
+
+/**
+ * The classifications an education line may print, each with the phrases that name it
+ * (H-new-1 and M-new-1 of the CV quality re-review). "2:1" and "Upper Second Class" are one
+ * class. A one-word phrase also needs a degree word in its sentence of the achievement, so
+ * "first prize" and "a merit scholarship" are not classifications.
+ */
+const CLASSIFICATIONS: readonly {
+  name: string;
+  phrases: readonly string[];
+  oneWord: readonly string[];
+  figure?: string;
+}[] = [
+  {
+    name: 'first',
+    phrases: ['first class honours', 'first class honors', 'first class'],
+    oneWord: ['first'],
+  },
+  { name: 'upper', phrases: ['upper second class', 'upper second'], oneWord: [], figure: '2:1' },
+  { name: 'lower', phrases: ['lower second class', 'lower second'], oneWord: [], figure: '2:2' },
+  {
+    name: 'second',
+    phrases: ['second class honours', 'second class honors', 'second class'],
+    oneWord: [],
+  },
+  { name: 'third', phrases: ['third class'], oneWord: ['third'] },
+  { name: 'distinction', phrases: [], oneWord: ['distinction'] },
+  { name: 'merit', phrases: [], oneWord: ['merit'] },
+  { name: 'pass', phrases: [], oneWord: ['pass'] },
+  { name: 'commendation', phrases: [], oneWord: ['commendation'] },
+  { name: 'cum-laude', phrases: ['cum laude'], oneWord: [] },
+  { name: 'magna-cum-laude', phrases: ['magna cum laude'], oneWord: [] },
+  { name: 'summa-cum-laude', phrases: ['summa cum laude'], oneWord: [] },
+];
+/** Longest phrase first, so "first class honours" is read before "first". */
+const CLASSIFICATION_PATTERNS = CLASSIFICATIONS.flatMap((entry) => [
+  ...entry.phrases.map((phrase) => ({ entry, phrase, single: false })),
+  ...entry.oneWord.map((phrase) => ({ entry, phrase, single: true })),
+]).sort((x, y) => y.phrase.length - x.phrase.length);
+/** The classifications written as figures, and the class each one is. */
+const CLASSIFICATION_FIGURES = /\b2\s?:\s?([12])\b/g;
+const DEGREE_TOKENS = /\b(?:bsc|ba|beng|msc|ma|meng|mba|phd|llb|mphil)\b/g;
+const DEGREE_WORD = /\b(?:degrees?|graduat(?:e|es|ed|ing|ion)|classification)\b/;
+
+/** The classes `text` names as phrases; `needsDegreeWord` holds one-word phrases to a degree word in their sentence. */
+function classesIn(text: string, needsDegreeWord: boolean): Set<string> {
+  const found = new Set<string>();
+  const joined = text.replace(/(?<=\p{L})\.(?=\p{L})/gu, '');
+  for (const sentence of joined.split(/[.!?;\n]+/)) {
+    for (const match of sentence.matchAll(CLASSIFICATION_FIGURES)) {
+      found.add(match[1] === '1' ? 'upper' : 'lower');
+    }
+    let folded = ` ${foldClaim(sentence).replace(/\s+/g, ' ')} `;
+    const degreeWord = DEGREE_WORD.test(folded) || (folded.match(DEGREE_TOKENS) ?? []).length > 0;
+    for (const { entry, phrase, single } of CLASSIFICATION_PATTERNS) {
+      const at = ` ${phrase} `;
+      if (!folded.includes(at)) continue;
+      folded = folded.replaceAll(at, ' ~ ');
+      if (!single || degreeWord || !needsDegreeWord) found.add(entry.name);
+    }
+  }
+  return found;
+}
+
+/** What a class lends: every word and figure of its phrases. */
+function classWords(name: string): string[] {
+  const entry = CLASSIFICATIONS.find((candidate) => candidate.name === name);
+  return entry === undefined
+    ? []
+    : [...entry.phrases, ...entry.oneWord].flatMap((phrase) => phrase.split(' '));
+}
+function classFigures(name: string): Set<string> {
+  const figure = CLASSIFICATIONS.find((candidate) => candidate.name === name)?.figure;
+  return figure === undefined ? new Set() : figuresIn(figure);
+}
+
+/** Whether a fact names a degree, so a certificate or an A-level is not one. */
+function hasDegreeToken(fact: CvFact): boolean {
+  DEGREE_TOKENS.lastIndex = 0;
+  return DEGREE_TOKENS.test(foldDegree(fact));
+}
+
+function degreeTokensOf(fact: CvFact): Set<string> {
+  return new Set(foldDegree(fact).match(DEGREE_TOKENS) ?? []);
+}
+
+const foldDegree = (fact: CvFact): string =>
+  `${fact.text}\n${fact.evidence}`.toLowerCase().replaceAll('.', '');
+
+/** Whether an achievement belongs to this degree: a degree token or a year in both texts. */
+function sharesDegree(education: CvFact, achievement: CvFact): boolean {
+  const tokens = (fact: CvFact, pattern: RegExp): Set<string> =>
+    new Set(foldDegree(fact).match(pattern) ?? []);
+  const degrees = tokens(achievement, DEGREE_TOKENS);
+  if ([...tokens(education, DEGREE_TOKENS)].some((token) => degrees.has(token))) return true;
+  const years = tokens(achievement, /\b(?:19|20)\d{2}\b/g);
+  return [...tokens(education, /\b(?:19|20)\d{2}\b/g)].some((year) => years.has(year));
 }
 
 function readFact(fact: CvFact): FactReads {
@@ -718,25 +906,65 @@ export function validateCv(
 
     // Distinct refs only: the work below is per fact, not per mention.
     const cited: CvFact[] = [];
-    for (const ref of new Set(cite.refs)) {
+    const byIndex: (CvFact | undefined)[] = [];
+    const seen = new Set<string>();
+    cite.refs.forEach((ref, index) => {
+      if (seen.has(ref)) return;
+      seen.add(ref);
       const id = aliases.get(ref);
       const fact = id === undefined ? undefined : byId.get(id);
       if (fact?.status !== 'active') {
         add(cite.path, 'unknown_fact');
-        continue;
+        return;
       }
+      byIndex[index] = fact;
+      const types = cite.typesByRef?.[index] ?? cite.types;
       const wrongType =
-        cite.denied.includes(fact.type) ||
-        (cite.types !== undefined && !cite.types.includes(fact.type));
+        cite.denied.includes(fact.type) || (types !== undefined && !types.includes(fact.type));
       if (wrongType) add(cite.path, 'wrong_fact_type');
       if (!cited.includes(fact)) cited.push(fact);
-    }
+    });
     const citedReads = cited.map(readsOf);
+
+    // An education line's achievement lends a classification and nothing else (M1).
+    const lender = cite.classification === true ? byIndex[1] : undefined;
+    const owner = cite.classification === true ? byIndex[0] : undefined;
+    // What the achievement is a classification of: whole phrases, with a degree word for a one-word class.
+    const lent =
+      lender === undefined || owner === undefined || lender === owner
+        ? new Set<string>()
+        : new Set([...classesIn(lender.text, true), ...classesIn(lender.evidence, true)]);
+    if (lender !== undefined && owner !== undefined && lender !== owner) {
+      // An achievement that names a degree must name the owner's, whatever the profile holds.
+      const named = degreeTokensOf(lender);
+      if (named.size > 0 && ![...degreeTokensOf(owner)].some((token) => named.has(token))) {
+        add(cite.path, 'wrong_fact_type');
+      }
+      // Only degrees count: certificates and A-levels name no degree token.
+      const degrees = facts.filter(
+        (fact) =>
+          fact.status === 'active' &&
+          EDUCATION_FACT_TYPES.includes(fact.type) &&
+          hasDegreeToken(fact),
+      );
+      if (degrees.length >= 2 && !sharesDegree(owner, lender)) {
+        add(cite.path, 'wrong_fact_type');
+      }
+      // The line's classification must be one the achievement states.
+      const ownerWords = readsOf(owner).words;
+      for (const text of cite.texts) {
+        for (const name of classesIn(text.value, false)) {
+          const backed = classWords(name).every((word) => ownerWords.has(word));
+          if (!lent.has(name) && !backed) add(text.path, 'unsupported_text');
+        }
+      }
+    }
 
     // Contact allowance: the cited facts' text only, tokenised once for every text under the cite.
     const allowance = contactAllowance(cited.map((fact) => fact.text).join('\n'));
     for (const text of cite.texts) {
-      if (text.value.length > text.max || text.value.trim() === '') add(text.path, 'too_long');
+      const empty = text.value.trim() === '' && text.allowEmpty !== true;
+      if (text.value.length > text.max || empty) add(text.path, 'too_long');
       if (hasContactDetails(text.value, allowance)) add(text.path, 'contact_in_text');
       // NFC first: "e" + a combining accent is the é the font has, written the long way.
       // Never dropped or swapped silently: the PDF fonts can't print it (ADR-054).
@@ -744,7 +972,11 @@ export function validateCv(
     }
 
     if (cite.words === 'fact' && cited.length > 0) {
-      const allowed = new Set(citedReads.flatMap((read) => [...read.words]));
+      const allowed = new Set(
+        cited.flatMap((fact) =>
+          fact === lender ? [...lent].flatMap(classWords) : [...readsOf(fact).words],
+        ),
+      );
       let checked = 0;
       for (const text of cite.texts) {
         const words = wordsOf(text.value);
@@ -760,7 +992,13 @@ export function validateCv(
       }
     }
 
-    const supported = new Set(citedReads.flatMap((read) => [...read.figures]));
+    const supported = new Set(
+      cited.flatMap((fact) =>
+        fact === lender
+          ? [...lent].flatMap((name) => [...classFigures(name)])
+          : [...readsOf(fact).figures],
+      ),
+    );
     for (const text of cite.texts) {
       for (const figure of figuresIn(text.value)) {
         if (!supported.has(figure)) add(text.path, 'unsupported_number');
@@ -788,22 +1026,206 @@ export function citedFactIds(content: CvContent, aliases: ReadonlyMap<string, st
   return [...ids].sort();
 }
 
+// ---- Entry order ----
+
+/**
+ * A sort key for when a fact ended, from its dates: `2024-05`, a bare year as its December, and
+ * `present` (or no end date at all) after every real month. Plain strings compare in order.
+ */
+export function factEndKey(dates: FactContent['dates'] | undefined): string {
+  const end = dates?.end;
+  if (end === undefined || end === 'present') return '9999-12';
+  const [year = '', month = '12'] = end.split('-');
+  return `${year}-${month}`;
+}
+
+/**
+ * `content` with experience, projects and education ordered by the heading fact each entry cites
+ * (`endKeyOf(factRef)`, e.g. through `factEndKey`). Ties keep the model's order, so the model's
+ * relevance order survives among equal dates. Bullets are the model's. Does not mutate.
+ *   - Experience and projects: newest first; a start with no end counts as Present; entries with
+ *     no dates at all follow the dated ones, in the model's order. `hasDatesOf` says which (all
+ *     have dates when omitted).
+ *   - Education: lines with an end date first, newest first; lines with no end date or only a
+ *     start date after them, in the model's order. `hasEndOf` says which (all do when omitted).
+ */
+export function orderEntries<T extends CvContent | TrimmedCvContent>(
+  content: T,
+  endKeyOf: (factRef: string) => string,
+  hasEndOf: (factRef: string) => boolean = () => true,
+  hasDatesOf: (factRef: string) => boolean = () => true,
+): T {
+  const newestFirst = <E>(
+    list: readonly E[],
+    refOf: (item: E) => string,
+    dated: (item: E) => boolean = () => true,
+  ): E[] =>
+    list
+      .map((item, index) => ({ item, index, key: endKeyOf(refOf(item)), dated: dated(item) }))
+      .sort((x, y) => {
+        if (x.dated !== y.dated) return x.dated ? -1 : 1;
+        if (!x.dated || x.key === y.key) return x.index - y.index;
+        return x.key < y.key ? 1 : -1;
+      })
+      .map(({ item }) => item);
+  return {
+    ...content,
+    experience: newestFirst(
+      content.experience,
+      (entry) => entry.heading.factRef,
+      (entry) => hasDatesOf(entry.heading.factRef),
+    ),
+    projects: newestFirst(
+      content.projects,
+      (entry) => entry.heading.factRef,
+      (entry) => hasDatesOf(entry.heading.factRef),
+    ),
+    education: newestFirst(
+      content.education,
+      (line) => line.factRef,
+      (line) => hasEndOf(line.factRef),
+    ),
+  };
+}
+
+// ---- Count limits ----
+
+/**
+ * `content` cut down to the count limits: entries per section, bullets per entry, education
+ * lines, skills and note paragraphs. It only ever removes items, from the end (the model puts
+ * the most relevant first), so it can't add a claim. Run it on every model output before
+ * `validateCv`: a revision that adds a sixth bullet to an entry then loses that bullet instead
+ * of the whole revision. Texts, citations and counts below the limits are left alone. Does not
+ * mutate.
+ */
+export function clampCvCounts<T extends CvContent | TrimmedCvContent>(content: T): T {
+  const entries = (list: T['experience'], max: number): T['experience'] =>
+    list.slice(0, max).map((entry) => ({
+      ...entry,
+      bullets: entry.bullets.slice(0, CV_LIMITS.bulletsPerEntry),
+    }));
+  return {
+    ...content,
+    experience: entries(content.experience, CV_LIMITS.experienceEntries),
+    projects: entries(content.projects, CV_LIMITS.projectEntries),
+    education: content.education.slice(0, CV_LIMITS.educationEntries),
+    skills: content.skills.slice(0, CV_LIMITS.skills),
+    coverNote: {
+      ...content.coverNote,
+      paragraphs: content.coverNote.paragraphs.slice(0, CV_LIMITS.noteParagraphsMax),
+    },
+  };
+}
+
+/**
+ * Drops each skill that cites no fact, or cites a fact that is not a skill ("Zendesk" from an
+ * experience fact belongs in a bullet, not the skills list). Only removes, so it never adds a
+ * claim; an alias or fact it can't resolve is left for `validateCv` to refuse. `dropped` is how
+ * many went, for the eval to report. Does not mutate.
+ */
+export function dropUnsupportedSkills<T extends CvContent | TrimmedCvContent>(
+  content: T,
+  aliases: ReadonlyMap<string, string>,
+  facts: readonly CvFact[],
+): { content: T; dropped: number } {
+  const typeOf = new Map(facts.map((fact) => [fact.id, fact.type]));
+  const unsupported = (skill: T['skills'][number]): boolean =>
+    skill.factRefs.length === 0 ||
+    skill.factRefs.some((ref) => {
+      const type = typeOf.get(aliases.get(ref) ?? '');
+      return type !== undefined && !SKILL_FACT_TYPES.includes(type);
+    });
+  const skills = content.skills.filter((skill) => !unsupported(skill));
+  return {
+    content: skills.length === content.skills.length ? content : { ...content, skills },
+    dropped: content.skills.length - skills.length,
+  };
+}
+
+// ---- Dashes ----
+
+/** Keys whose strings are citations, not prose. */
+const CITATION_KEYS: ReadonlySet<string> = new Set(['factRef', 'factRefs', 'achievementRef']);
+
+/** An em or en dash, with the whitespace around it. */
+const DASH = /(\s*)([\u2013\u2014])(\s*)/g;
+
+function scrubText(text: string, count: () => void): string {
+  const stop = /[.,;:!?]/;
+  return text.replace(
+    DASH,
+    (match, before: string, _dash: string, after: string, offset: number) => {
+      count();
+      const prev = text[offset - 1] ?? '';
+      const next = text[offset + match.length] ?? '';
+      // At an edge there is nothing to join; next to punctuation the dash adds nothing.
+      if (offset === 0 || next === '' || stop.test(next)) return '';
+      // A range between two figures is a hyphen. A year and a count ("2023 \u2013 12 clients") is no range.
+      if (/\d/.test(prev) && /\d/.test(next)) {
+        const low = /(\d[\d,]*)$/.exec(text.slice(0, offset))?.[1] ?? '';
+        const high = /^(\d[\d,]*)/.exec(text.slice(offset + match.length))?.[1] ?? '';
+        const isYear = (figure: string) => /^\d{4}$/.test(figure);
+        const range =
+          Number(high.replaceAll(',', '')) > Number(low.replaceAll(',', '')) &&
+          isYear(low) === isYear(high);
+        return range ? '-' : ', ';
+      }
+      // Between words with no space on either side: a hyphen.
+      if (before === '' && after === '') return '-';
+      return stop.test(prev) ? ' ' : ', ';
+    },
+  );
+}
+
+/**
+ * `content` with every em and en dash taken out of the prose: a spaced dash becomes a comma, an
+ * unspaced one between words a hyphen, and a dash beside punctuation or at an edge is dropped
+ * so no doubled punctuation is left.
+ * Citations are left alone. Figures and the parts of a skill label are unchanged (`validateCv`
+ * splits labels on a spaced dash and on a comma alike). `replaced` counts the dashes. Run it
+ * after `normaliseCvText` and before `validateCv`, so what is validated is what ships. Dates
+ * that code writes from a fact keep their en dash: they never pass through here. Does not mutate.
+ */
+export function scrubDashes<T extends CvContent | TrimmedCvContent>(
+  content: T,
+): { content: T; replaced: number } {
+  let replaced = 0;
+  const count = () => {
+    replaced += 1;
+  };
+  const walk = (value: unknown, key?: string): unknown => {
+    if (typeof value === 'string') {
+      return key !== undefined && CITATION_KEYS.has(key) ? value : scrubText(value, count);
+    }
+    if (Array.isArray(value)) return value.map((item) => walk(item, key));
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([k, item]) => [k, walk(item, k)]));
+    }
+    return value;
+  };
+  return { content: walk(content) as T, replaced };
+}
+
 // ---- One-page trim ----
 
 export type TrimStep =
-  | { kind: 'bullet'; section: 'experience'; entry: number; index: number }
+  | { kind: 'bullet'; section: 'experience' | 'projects'; entry: number; index: number }
   | { kind: 'project'; index: number }
   | { kind: 'skill'; index: number }
   | { kind: 'summary' };
 
 const KEPT_SKILLS = 10;
+/** The bullets a trim leaves on an experience entry and on a project. */
+const KEPT_EXPERIENCE_BULLETS = 2;
+const KEPT_PROJECT_BULLETS = 1;
 
 /**
- * The removals that make a long CV shorter, in the order they are tried. Deterministic, so the
- * same content always trims the same way:
- *   1. the last bullet of the experience entry with the most bullets (the later entry on a tie),
- *      repeated until each entry has one bullet left;
- *   2. then projects, last first;
+ * The removals that make a long CV shorter, in the order they are tried (v2, ADR-062).
+ * Deterministic, so the same content always trims the same way:
+ *   1. the last bullet of whichever entry, in Experience or Projects, has the most bullets (the
+ *      later one on a tie, and a project before an experience entry), until every experience
+ *      entry is down to 2 bullets and every project to 1;
+ *   2. then projects, last first (the oldest, as `orderEntries` puts newest first);
  *   3. then skills beyond the first 10, last first;
  *   4. then the summary.
  * Headings and education are never removed. Each step refers to the content as the steps before
@@ -811,16 +1233,35 @@ const KEPT_SKILLS = 10;
  */
 export function trimOrder(content: CvContent): TrimStep[] {
   const steps: TrimStep[] = [];
-  const counts = content.experience.map((entry) => entry.bullets.length);
+  const entries = [
+    ...content.experience.map((entry, index) => ({
+      section: 'experience' as const,
+      entry: index,
+      count: entry.bullets.length,
+      keep: KEPT_EXPERIENCE_BULLETS,
+    })),
+    ...content.projects.map((entry, index) => ({
+      section: 'projects' as const,
+      entry: index,
+      count: entry.bullets.length,
+      keep: KEPT_PROJECT_BULLETS,
+    })),
+  ];
   for (;;) {
-    let longest = -1;
-    counts.forEach((count, entry) => {
-      if (count > 1 && (longest === -1 || count >= (counts[longest] ?? 0))) longest = entry;
+    let longest: (typeof entries)[number] | undefined;
+    for (const item of entries) {
+      if (item.count > item.keep && (longest === undefined || item.count >= longest.count)) {
+        longest = item;
+      }
+    }
+    if (longest === undefined) break;
+    longest.count -= 1;
+    steps.push({
+      kind: 'bullet',
+      section: longest.section,
+      entry: longest.entry,
+      index: longest.count,
     });
-    if (longest === -1) break;
-    const index = (counts[longest] ?? 1) - 1;
-    steps.push({ kind: 'bullet', section: 'experience', entry: longest, index });
-    counts[longest] = index;
   }
   for (let index = content.projects.length - 1; index >= 0; index -= 1) {
     steps.push({ kind: 'project', index });
@@ -835,18 +1276,28 @@ export function trimOrder(content: CvContent): TrimStep[] {
 /** `content` with the first `count` steps of `trimOrder(content)` applied. Does not mutate. */
 export function applyTrim(content: CvContent, count: number): TrimmedCvContent {
   const steps = trimOrder(content).slice(0, Math.max(0, count));
-  const experience = content.experience.map((entry) => ({
-    ...entry,
-    bullets: [...entry.bullets],
-  }));
-  let projects = [...content.projects];
+  const clone = (list: CvContent['experience']) =>
+    list.map((entry) => ({ ...entry, bullets: [...entry.bullets] }));
+  const experience = clone(content.experience);
+  const bulletProjects = clone(content.projects);
   let skills = [...content.skills];
   let summary: CvContent['summary'] | null = content.summary;
+  let removedProjects = 0;
   for (const step of steps) {
-    if (step.kind === 'bullet') experience[step.entry]?.bullets.splice(step.index, 1);
-    else if (step.kind === 'project') projects = projects.filter((_, i) => i !== step.index);
-    else if (step.kind === 'skill') skills = skills.filter((_, i) => i !== step.index);
-    else summary = null;
+    if (step.kind === 'bullet') {
+      (step.section === 'experience' ? experience : bulletProjects)[step.entry]?.bullets.splice(
+        step.index,
+        1,
+      );
+    } else if (step.kind === 'project') {
+      removedProjects += 1;
+    } else if (step.kind === 'skill') {
+      skills = skills.filter((_, i) => i !== step.index);
+    } else {
+      summary = null;
+    }
   }
+  // Projects go last first, and the bullet steps all come before any project step.
+  const projects = bulletProjects.slice(0, bulletProjects.length - removedProjects);
   return { ...content, experience, projects, skills, summary };
 }

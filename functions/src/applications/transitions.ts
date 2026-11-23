@@ -4,6 +4,7 @@ import {
   type Application,
   type ApplicationStage,
   type BlockedCode,
+  type CvIssue,
   type CvIssueCode,
   type JobDeep,
   type Question,
@@ -244,19 +245,38 @@ export function planAttempt(current: Application, now: Date): Application | null
   return { ...current, attempt: current.attempt + 1, updatedAt: now };
 }
 
+/** The codes and where they were found (distinct, capped), or neither when there are none. */
+function setIssues(next: Application, issues: readonly CvIssueCode[], where: readonly CvIssue[]) {
+  if (issues.length > 0) next.lastIssues = [...issues];
+  else delete next.lastIssues;
+  const seen = new Set<string>();
+  const kept = where.filter((issue) => {
+    const key = `${issue.code} ${issue.path}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (kept.length > 0) {
+    next.lastIssueAt = kept
+      .slice(0, APPLICATION_LIMITS.issueAt)
+      .map(({ code, path }) => ({ code, path }));
+  } else delete next.lastIssueAt;
+}
+
 /**
- * An invalid output with an attempt left: stays generating, with the codes the next call is told.
- * `attempt` stays as counted, so the next run's call is the second and the last.
+ * An invalid output with a write left: stays generating, with the codes the next call is told.
+ * `attempt` stays as counted, so the next run's call is the second write and the last. A revision
+ * is never retried: only a write is, so this is bounded by `maxWrites`, not `maxAttempts`.
  */
 export function planRetry(
   current: Application,
   issues: readonly CvIssueCode[],
   now: Date,
+  where: readonly CvIssue[] = [],
 ): Application | null {
-  if (!generating(current) || current.attempt >= APPLICATION_LIMITS.maxAttempts) return null;
+  if (!generating(current) || current.attempt >= APPLICATION_LIMITS.maxWrites) return null;
   const next: Application = { ...current, updatedAt: now };
-  if (issues.length > 0) next.lastIssues = [...issues];
-  else delete next.lastIssues;
+  setIssues(next, issues, where);
   return next;
 }
 
@@ -266,6 +286,7 @@ export function planBlocked(
   code: BlockedCode,
   now: Date,
   issues: readonly CvIssueCode[] = [],
+  where: readonly CvIssue[] = [],
 ): Application | null {
   if (!generating(current)) return null;
   const next: Application = {
@@ -275,8 +296,7 @@ export function planBlocked(
     updatedAt: now,
     blocked: { code, at: now },
   };
-  if (issues.length > 0) next.lastIssues = [...issues];
-  else delete next.lastIssues;
+  setIssues(next, issues, where);
   return next;
 }
 
@@ -294,5 +314,6 @@ export function planReady(current: Application, cvId: string, now: Date): Applic
   };
   delete next.blocked;
   delete next.lastIssues;
+  delete next.lastIssueAt;
   return next;
 }
