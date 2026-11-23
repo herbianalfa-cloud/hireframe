@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkAccess, type Access } from '@/services/access';
 import { prefetchToday } from '@/services/dashboard';
@@ -186,6 +186,47 @@ describe('AuthGate', () => {
     expect(await screen.findByRole('heading', { name: 'Something went wrong' })).toBeDefined();
     expect(screen.getByRole('alert').textContent).toBe("Couldn't check access. Try again.");
     expectNothingOfTheApp();
+  });
+
+  describe('Try again after a failed access check', () => {
+    const reload = vi.fn();
+    const realLocation = window.location;
+    beforeEach(() => {
+      reload.mockReset();
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { reload },
+      });
+    });
+    afterEach(() => {
+      Object.defineProperty(window, 'location', { configurable: true, value: realLocation });
+    });
+
+    const message = "Couldn't check access. Try again.";
+
+    it('reloads the page once, and only on the click, when the Firestore chunk failed to load', async () => {
+      givenAuth({ status: 'signed-in', user });
+      givenAccess({ status: 'error', message, kind: 'chunk-load' });
+      renderGate();
+
+      await screen.findByRole('button', { name: 'Try again' });
+      await vi.dynamicImportSettled();
+      expect(reload).not.toHaveBeenCalled();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(reload).toHaveBeenCalledOnce();
+      expect(checkAccess).toHaveBeenCalledTimes(1);
+    });
+
+    it('checks access again, without a reload, for any other error', async () => {
+      givenAuth({ status: 'signed-in', user });
+      vi.mocked(checkAccess).mockResolvedValueOnce({ status: 'error', message });
+      renderGate();
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+      expect(checkAccess).toHaveBeenCalledTimes(2);
+      expect(reload).not.toHaveBeenCalled();
+    });
   });
 
   it('shows an error state when Firebase fails to start', async () => {

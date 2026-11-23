@@ -28,6 +28,7 @@ export type LogEvent =
   | 'cv_worker.job'
   | 'cv_worker.done'
   | 'cv_worker.failed'
+  | 'cv_worker.revision_invalid'
   | 'profile.fact_invalid'
   | 'profile.reset'
   | 'http.retry'

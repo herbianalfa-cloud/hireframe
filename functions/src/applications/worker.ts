@@ -1,20 +1,14 @@
 import {
   APPLICATION_LIMITS,
-  CvContentSchema,
   CvContentShapeSchema,
   CvDocSchema,
   cvId,
-  citedFactIds,
   factAliases,
   isPrintable,
-  issueCodes,
-  normaliseCvText,
-  validateCv,
   type Application,
   type BlockedCode,
-  type CvContent,
-  type CvFact,
   type CvHeader,
+  type CvIssue,
   type CvIssueCode,
   type ExistingFact,
 } from '@hireframe/shared';
@@ -23,6 +17,7 @@ import type * as Render from '../cv/render/index.js';
 import type { LlmCallInput, LlmCallResult } from '../llm/call.js';
 import { DailyCapExceededError, LlmOutputError, SpendCapExceededError } from '../llm/errors.js';
 import { errorFields, log } from '../log.js';
+import { composeCv, type ComposeResult } from './compose.js';
 import { cvFilePaths, type CvFileBytes, type CvFileStore } from './files.js';
 import { cvSystem, cvUser, type PromptFact } from './prompt.js';
 import type { ApplicationStore } from './store.js';
@@ -34,20 +29,22 @@ import { planAttempt, planBlocked, planReady, planRetry } from './transitions.js
  * every outcome is testable on a fake clock. `schedule.ts` wires the real ones.
  *
  * Bounds (CLAUDE.md "No self-triggering code"): it runs only when the schedule starts it, takes at
- * most `maxPerRun` applications, starts no model call after `startDeadlineMs`, and never
- * re-enqueues anything. A job's `attempt` is counted in a precondition transaction BEFORE each
- * call and only an owner's move resets it, so a job costs at most `maxAttempts` calls, however
- * many runs are killed.
+ * most `maxPerRun` applications, starts no model call after `startDeadlineMs` (the revision
+ * included), and never re-enqueues anything. A job's `attempt` is counted in a precondition
+ * transaction BEFORE each call, the revision's too, and only an owner's move resets it, so a job
+ * costs at most `maxAttempts` calls, however many runs are killed.
  */
 
 /** The renderer's surface the worker uses; loaded on first use (`schedule.ts`). */
 export type CvRenderer = Pick<
   typeof Render,
-  | 'fitOnePage'
+  | 'fitPage'
   | 'renderCvDocx'
   | 'renderNotePdf'
   | 'renderNoteDocx'
   | 'makeDateOf'
+  | 'makeEndKeyOf'
+  | 'makeHasEndOf'
   | 'CvRenderError'
 >;
 
@@ -55,7 +52,12 @@ export interface CvWorkerLimits {
   maxPerRun: number;
   readLimit: number;
   startDeadlineMs: number;
+  /** Writes one job may cost (the first and one retry): `invalid` blocks at this count. */
+  maxWrites: number;
+  /** Model calls one job may cost, the revision included. */
   maxAttempts: number;
+  /** A CV at or above this total, with no hard finding, is not revised. */
+  scoreTarget: number;
 }
 
 export interface CvWorkerDeps {
@@ -123,15 +125,6 @@ function promptFacts(facts: readonly ExistingFact[]): PromptFact[] {
     }));
 }
 
-const validatorFacts = (facts: readonly ExistingFact[]): CvFact[] =>
-  facts.map((fact) => ({
-    id: fact.id,
-    type: fact.content.type,
-    text: fact.content.text,
-    evidence: fact.content.evidence,
-    status: fact.status,
-  }));
-
 export async function runCvWorker(deps: CvWorkerDeps): Promise<WorkerSummary> {
   const { limits } = deps;
   const startedAt = deps.now().getTime();
@@ -157,7 +150,7 @@ export async function runCvWorker(deps: CvWorkerDeps): Promise<WorkerSummary> {
     }
     let outcome: JobOutcome;
     try {
-      outcome = await generateOne(deps, application);
+      outcome = await generateOne(deps, application, startedAt);
     } catch (error) {
       if (!(error instanceof StopRun)) throw error;
       summary.stoppedBy = error.reason;
@@ -201,25 +194,27 @@ async function block(
   attempt: number,
   code: BlockedCode,
   issues: readonly CvIssueCode[] = [],
+  where: readonly CvIssue[] = [],
 ): Promise<JobOutcome> {
   const moved = await move(deps, application, attempt, (current) =>
-    planBlocked(current, code, deps.now(), issues),
+    planBlocked(current, code, deps.now(), issues, where),
   );
   log.info('cv_worker.job', { outcome: moved ? 'blocked' : 'lost', code, attempt });
   return moved ? 'blocked' : 'lost';
 }
 
-/** An invalid output: one more try while an attempt is left, else blocked with the codes. */
+/** An invalid output: one more try while a write is left, else blocked with the codes. */
 async function invalid(
   deps: CvWorkerDeps,
   counted: Counted,
   issues: readonly CvIssueCode[],
+  where: readonly CvIssue[],
 ): Promise<JobOutcome> {
-  if (counted.attempt >= deps.limits.maxAttempts) {
-    return block(deps, counted, counted.attempt, 'invalid_output', issues);
+  if (counted.attempt >= deps.limits.maxWrites) {
+    return block(deps, counted, counted.attempt, 'invalid_output', issues, where);
   }
   const moved = await move(deps, counted, counted.attempt, (current) =>
-    planRetry(current, issues, deps.now()),
+    planRetry(current, issues, deps.now(), where),
   );
   log.info('cv_worker.job', {
     outcome: moved ? 'retry' : 'lost',
@@ -242,50 +237,47 @@ async function fail(deps: CvWorkerDeps, counted: Counted, error: unknown): Promi
     if (error.failure === 'refusal' || error.failure === 'max_tokens') {
       return block(deps, counted, counted.attempt, 'invalid_output');
     }
-    return invalid(deps, counted, []);
+    return invalid(deps, counted, [], []);
   }
   // An API, storage or render failure. The attempt is already counted, so the next run's call is
-  // the last; on the last attempt the job is blocked rather than left to run again.
+  // the last write; once the writes are spent the job is blocked rather than left to run again.
   log.error('cv_worker.failed', { attempt: counted.attempt, ...errorFields(error) });
-  if (counted.attempt >= deps.limits.maxAttempts) {
+  if (counted.attempt >= deps.limits.maxWrites) {
     throw new StopRun('error', await block(deps, counted, counted.attempt, 'error'));
   }
   throw new StopRun('error', 'deferred');
 }
 
-type Rendered = { ok: true; fit: FitOk; bytes: CvFileBytes } | { ok: false; code: CvIssueCode };
-type FitOk = Extract<Awaited<ReturnType<CvRenderer['fitOnePage']>>, { ok: true }>;
+type FitOk = Extract<Awaited<ReturnType<CvRenderer['fitPage']>>, { ok: true }>;
 
-/** The one-page fit and the four files; a content that can't be rendered is an issue code. */
+/** The four files of a fitted CV; a cover note that doesn't fit one page is an issue code. */
 async function renderFiles(
   render: CvRenderer,
   header: CvHeader,
-  content: CvContent,
+  fit: FitOk,
   dateOf: ReturnType<CvRenderer['makeDateOf']>,
-): Promise<Rendered> {
+): Promise<CvFileBytes | CvIssueCode> {
   try {
-    const fit = await render.fitOnePage(header, content, dateOf);
-    if (!fit.ok) return { ok: false, code: fit.code };
     const note = await render.renderNotePdf(header, fit.content.coverNote);
     // The 250-word limit makes this hold; `pages` is exact, so it is checked, not assumed.
-    if (note.pages !== 1) return { ok: false, code: 'too_long' };
+    if (note.pages !== 1) return 'too_long';
     return {
-      ok: true,
-      fit,
-      bytes: {
-        cvPdf: fit.bytes,
-        cvDocx: await render.renderCvDocx(header, fit.content, dateOf),
-        notePdf: note.bytes,
-        noteDocx: await render.renderNoteDocx(header, fit.content.coverNote),
-      },
+      cvPdf: fit.bytes,
+      cvDocx: await render.renderCvDocx(header, fit.content, dateOf, fit.spec),
+      notePdf: note.bytes,
+      noteDocx: await render.renderNoteDocx(header, fit.content.coverNote),
     };
   } catch (error) {
-    if (error instanceof render.CvRenderError) return { ok: false, code: error.code };
+    if (error instanceof render.CvRenderError) return error.code;
     throw error;
   }
 }
 
-async function generateOne(deps: CvWorkerDeps, application: Application): Promise<JobOutcome> {
+async function generateOne(
+  deps: CvWorkerDeps,
+  application: Application,
+  startedAt: number,
+): Promise<JobOutcome> {
   const { jobId } = application;
   const { store, limits } = deps;
 
@@ -306,95 +298,144 @@ async function generateOne(deps: CvWorkerDeps, application: Application): Promis
   const shown = promptFacts(facts);
   if (shown.length === 0) return block(deps, application, application.attempt, 'error');
 
-  // The attempt is counted before the call. A run killed from here on has still used it.
-  const counting = await store.commit({
-    jobId,
-    expect: { stage: 'generating', attempt: application.attempt },
-    build: (current) => (current ? planAttempt(current, deps.now()) : null),
-    now: deps.now(),
-  });
-  if (!counting.ok) return 'lost';
-  const counted = counting.application;
+  // Every model call is counted before it is made (the write here, the revision in `compose`).
+  // A run killed from here on has still used it.
+  const countNext = async (from: Counted): Promise<Counted | null> => {
+    const counting = await store.commit({
+      jobId,
+      expect: { stage: 'generating', attempt: from.attempt },
+      build: (current) => (current ? planAttempt(current, deps.now()) : null),
+      now: deps.now(),
+    });
+    return counting.ok ? counting.application : null;
+  };
+  let counted = await countNext(application);
+  if (!counted) return 'lost';
 
   const { toAlias, toId } = factAliases(shown.map((fact) => fact.id));
   const version = counted.cvIds.length + 1;
   const id = cvId(jobId, version);
+  const system = cvSystem(shown, toAlias);
   // Which step the files are at: an upload that failed part-way, or a commit that threw, leaves
   // files nothing records. `none` has written nothing; `unrecorded` is safe to delete outright;
   // `committing` may have committed, so it is checked before anything is removed.
   let files: 'none' | 'unrecorded' | 'committing' = 'none';
 
   try {
-    const result = await deps.llm({
+    const written = await deps.llm({
       purpose: 'cvWrite',
-      system: cvSystem(shown, toAlias),
+      system,
       user: cvUser({
         job,
         notes: counted.notes,
         issues: counted.attempt > 1 ? counted.lastIssues : undefined,
+        where: counted.attempt > 1 ? counted.lastIssueAt : undefined,
+        toAlias,
       }),
       schema: CvContentShapeSchema,
       // The worker's own attempt counter is the retry, so no request is made unaccounted.
       maxSends: 1,
     });
 
-    // NFC first: the validator checks printability after NFC, the renderer does not.
-    const content = normaliseCvText(result.data);
-    // Re-read: a fact archived while the model wrote is caught here, not after publishing.
-    const fresh = validatorFacts(await deps.facts());
-    const verdict = validateCv(content, toId, fresh);
-    if (!verdict.ok) return await invalid(deps, counted, issueCodes(verdict.issues));
-    const strict = CvContentSchema.safeParse(content);
-    if (!strict.success) return await invalid(deps, counted, ['too_long']);
-
     const render = await deps.loadRenderer();
+    const composed: ComposeResult = await composeCv(
+      {
+        render,
+        // Re-read: a fact archived while the model wrote is caught here, not after publishing.
+        facts: () => deps.facts(),
+        countAttempt: async () => {
+          const next = await countNext(counted ?? application);
+          if (next) counted = next;
+          return next !== null;
+        },
+        revise: (user) =>
+          deps.llm({
+            purpose: 'cvRevise',
+            system,
+            user,
+            schema: CvContentShapeSchema,
+            maxSends: 1,
+          }),
+        beforeDeadline: () => deps.now().getTime() - startedAt < limits.startDeadlineMs,
+      },
+      {
+        draft: written.data,
+        header,
+        job,
+        notes: counted.notes,
+        facts: await deps.facts(),
+        toAlias,
+        toId,
+        attempt: counted.attempt,
+        maxAttempts: limits.maxAttempts,
+        scoreTarget: limits.scoreTarget,
+        writeCostPence: written.costPence,
+      },
+    );
+    if (composed.kind === 'lost') return 'lost';
+    if (composed.kind === 'invalid') {
+      const outcome = await invalid(deps, counted, composed.issues, composed.where);
+      if (composed.stop) throw new StopRun(composed.stop, outcome);
+      return outcome;
+    }
+    const { shipped } = composed;
+    const { fit } = shipped;
+
     const dateOf = render.makeDateOf(
       toId,
-      facts.map((fact) => ({ id: fact.id, dates: fact.content.dates })),
+      shipped.facts.map((fact) => ({ id: fact.id, dates: fact.content.dates })),
     );
-    const rendered = await renderFiles(render, header, strict.data, dateOf);
-    if (!rendered.ok) return await invalid(deps, counted, [rendered.code]);
-    const { fit } = rendered;
+    const bytes = await renderFiles(render, header, fit, dateOf);
+    if (typeof bytes === 'string') return await invalid(deps, counted, [bytes], []);
     // Files first: a lost transaction leaves files the next attempt overwrites.
     files = 'unrecorded';
-    await deps.files.put(id, rendered.bytes);
+    await deps.files.put(id, bytes);
 
     const doc = CvDocSchema.parse({
       jobId,
       applicationVersion: version,
       content: fit.content,
       aliases: Object.fromEntries(toId),
-      factIds: citedFactIds(strict.data, toId),
+      factIds: shipped.factIds,
       storagePaths: cvFilePaths(id),
       trimmed: fit.trimmed,
+      quality: shipped.quality,
       ...(counted.notes ? { notes: counted.notes } : {}),
-      model: result.model,
-      costPence: result.costPence,
+      model: written.model,
+      costPence: shipped.costPence,
       createdAt: deps.now(),
       schemaVersion: 1,
     });
+    const expectAttempt = counted.attempt;
     files = 'committing';
-    const written = await store.commit({
+    const committed = await store.commit({
       jobId,
-      expect: { stage: 'generating', attempt: counted.attempt },
+      expect: { stage: 'generating', attempt: expectAttempt },
       build: (current) => (current ? planReady(current, id, deps.now()) : null),
       cvDoc: { cvId: id, doc },
       now: deps.now(),
     });
-    if (!written.ok) {
+    if (!committed.ok) {
       // The owner withdrew (or restarted) while the model wrote: take the files back. A
       // transaction that reran after its first attempt landed also reports lost, and then the
       // document lists this version: removeIfUnrecorded keeps those files.
       await removeIfUnrecorded(deps, jobId, id);
-      log.info('cv_worker.job', { outcome: 'lost', attempt: counted.attempt });
+      log.info('cv_worker.job', { outcome: 'lost', attempt: expectAttempt });
       return 'lost';
     }
     log.info('cv_worker.job', {
       outcome: 'ready',
-      attempt: counted.attempt,
+      attempt: expectAttempt,
       trimmed: fit.trimmed,
-      costPence: result.costPence,
+      costPence: shipped.costPence,
+      total: shipped.quality.total,
+      revised: shipped.quality.revised,
+      ...(shipped.quality.revisionSkipped
+        ? { revisionSkipped: shipped.quality.revisionSkipped }
+        : {}),
     });
+    // A revision refused by a cap, or failed by the API, shipped its draft; the run ends after it.
+    if (composed.stop) throw new StopRun(composed.stop, 'ready');
     return 'ready';
   } catch (error) {
     if (error instanceof StopRun) throw error;

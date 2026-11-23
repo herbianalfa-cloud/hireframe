@@ -9,6 +9,7 @@ import {
   answerQuestion,
   downloadCvFile,
   loadAppliedThisWeek,
+  loadReadyScores,
   regenerateApplication,
   retryApplication,
   skipAllQuestions,
@@ -20,7 +21,7 @@ import {
 } from '@/services/applications';
 import type { LiveState } from '@/services/profile';
 
-import { makeApplication, QUESTION_A, QUESTION_B } from './fixtures';
+import { makeApplication, makeQuality, QUESTION_A, QUESTION_B } from './fixtures';
 import { BLOCKED_TEXT } from './labels';
 import { TimeoutError } from '@/services/resilience';
 
@@ -37,6 +38,7 @@ vi.mock('@/services/applications', async (importOriginal) => ({
   regenerateApplication: vi.fn(),
   withdrawApplication: vi.fn(),
   downloadCvFile: vi.fn(),
+  loadReadyScores: vi.fn(),
 }));
 vi.mock('@/lib/download', () => ({ saveBlob: vi.fn() }));
 vi.mock('@/features/profile/hooks', () => ({
@@ -81,6 +83,7 @@ const RESULT = { jobId: 'job1', stage: 'generating', unanswered: 0 } as const;
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(loadAppliedThisWeek).mockResolvedValue(3);
+  vi.mocked(loadReadyScores).mockResolvedValue({ quality: null, luck: null });
   for (const fn of [
     answerQuestion,
     skipQuestion,
@@ -454,6 +457,115 @@ describe('Ready to send', () => {
     expect(saveBlob).toHaveBeenLastCalledWith(blob, 'Alex Example - CV - Acme Analytics.pdf');
     expect(screen.getByText(/This is version 2/)).toBeDefined();
     expect(screen.getByText('Last notes: lead with reporting')).toBeDefined();
+  });
+
+  describe('the score line', () => {
+    const line = (text: string | RegExp) => screen.findByText(text);
+
+    it('shows quality and the job luck, and asks for the current version', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockResolvedValue({ quality: makeQuality(), luck: 7 });
+      open();
+      expect(await line('Quality 8.6/10 · Luck 7/10')).toBeDefined();
+      expect(loadReadyScores).toHaveBeenCalledWith('job5', 'job5-v2');
+      expect(screen.queryByText(/Below target/)).toBeNull();
+    });
+
+    it('shows the quality alone when the job has no luck score', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockResolvedValue({
+        quality: makeQuality({ total: 9 }),
+        luck: null,
+      });
+      open();
+      expect(await line('Quality 9/10')).toBeDefined();
+      expect(screen.queryByText(/Luck/)).toBeNull();
+    });
+
+    it('shows nothing new for a version written before scoring', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockResolvedValue({ quality: null, luck: 7 });
+      open();
+      await waitFor(() => {
+        expect(loadReadyScores).toHaveBeenCalled();
+      });
+      expect(screen.queryByText(/Quality/)).toBeNull();
+      expect(screen.queryByText(/Luck/)).toBeNull();
+      expect(screen.getByText(/Your CV and cover note are ready/)).toBeDefined();
+    });
+
+    it('names the top two findings when below target, hard ones first', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockResolvedValue({
+        quality: makeQuality({
+          total: 7.5,
+          findings: [
+            { code: 'buzzword', path: 'summary' },
+            { code: 'contrast_pattern', path: 'experience[0].bullets[1]' },
+            { code: 'cliche', path: 'coverNote.paragraphs[0]' },
+            { code: 'contrast_pattern', path: 'experience[1].bullets[0]' },
+          ],
+        }),
+        luck: 6,
+      });
+      open();
+      const below = await line(/^Below target:/);
+      expect(below.textContent).toBe(
+        'Below target: uses a "not this, but that" contrast; uses a stock CV phrase. Regenerate with notes, or add facts on Profile.',
+      );
+    });
+
+    it('says below target without words when only the page fill is short', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockResolvedValue({
+        quality: makeQuality({ total: 7.2 }),
+        luck: null,
+      });
+      open();
+      expect((await line(/^Below target\./)).textContent).toBe(
+        'Below target. Regenerate with notes, or add facts on Profile.',
+      );
+    });
+
+    it('flags a hard finding even at a total of 8 or more', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockResolvedValue({
+        quality: makeQuality({ total: 8.4, findings: [{ code: 'cliche', path: 'summary' }] }),
+        luck: 5,
+      });
+      open();
+      expect(await line(/^Below target: uses a stock CV phrase/)).toBeDefined();
+    });
+
+    it('does not flag soft findings at the target', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockResolvedValue({
+        quality: makeQuality({ total: 8, findings: [{ code: 'buzzword', path: 'summary' }] }),
+        luck: 5,
+      });
+      open();
+      expect(await line('Quality 8/10 · Luck 5/10')).toBeDefined();
+      expect(screen.queryByText(/Below target/)).toBeNull();
+    });
+
+    it('leaves the line out when the read fails, and the downloads still show', async () => {
+      given({ ready: ready(readyView) });
+      vi.mocked(loadReadyScores).mockRejectedValue(new Error('offline'));
+      open();
+      await waitFor(() => {
+        expect(loadReadyScores).toHaveBeenCalled();
+      });
+      expect(screen.queryByText(/Quality/)).toBeNull();
+      expect(screen.getByRole('button', { name: 'Download CV as PDF' })).toBeDefined();
+    });
+
+    it('does not read scores for a stage other than Ready', () => {
+      given({
+        applied: ready(makeApplication('job9', { stage: 'applied', stageBefore: 'ready' })),
+      });
+      open();
+      expect(loadReadyScores).not.toHaveBeenCalled();
+    });
   });
 
   it('shows a failed download without leaving the page', async () => {
