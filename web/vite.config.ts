@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import tailwindcss from '@tailwindcss/vite';
@@ -30,8 +33,45 @@ const earlyFirebase: Plugin = {
   ],
 };
 
+/**
+ * The pdf.js standard fonts (ADR-065), served as plain same-origin files under a folder named
+ * for the pdf.js version, with their original names because pdf.js asks for them by name. They
+ * load lazily, one file at a time, only when a previewed PDF names that font.
+ */
+const pdfjsRoot = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
+const pdfjsVersion = (
+  JSON.parse(readFileSync(join(pdfjsRoot, 'package.json'), 'utf8')) as { version: string }
+).version;
+const fontsRoot = join(pdfjsRoot, 'standard_fonts');
+// Relative to the output folder and, in dev, to `base` (Vite strips `base` before plugin
+// middleware runs), so it holds for any `base`. `fontBaseUrl` in `lib/pdf-preview.ts` adds it.
+const fontsDir = `assets/pdfjs-${pdfjsVersion}/standard_fonts/`;
+const pdfjsFonts: Plugin = {
+  name: 'hireframe-pdfjs-fonts',
+  configureServer(server) {
+    server.middlewares.use(`/${fontsDir}`, (request, response, next) => {
+      const name = (request.url ?? '').slice(1).split('?')[0] ?? '';
+      if (!readdirSync(fontsRoot).includes(name)) {
+        next();
+        return;
+      }
+      response.setHeader('Content-Type', 'application/octet-stream');
+      response.end(readFileSync(join(fontsRoot, name)));
+    });
+  },
+  generateBundle() {
+    for (const name of readdirSync(fontsRoot)) {
+      this.emitFile({
+        type: 'asset',
+        fileName: `${fontsDir}${name}`,
+        source: readFileSync(join(fontsRoot, name)),
+      });
+    }
+  },
+};
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), earlyFirebase],
+  plugins: [react(), tailwindcss(), earlyFirebase, pdfjsFonts],
   resolve: {
     // `source` resolves `@hireframe/shared` to its TypeScript sources (ADR-012).
     conditions: ['source', ...defaultClientConditions],
@@ -42,9 +82,19 @@ export default defineConfig({
     target: 'es2023',
     rolldownOptions: {
       output: {
+        // The shared constants (collection names, paths, region) land in a chunk of their own,
+        // all from packages/shared. Its name must not start with `firestore-`: check:bundle and
+        // the prefetch find the Firestore SDK chunk by that name (ADR-066).
+        chunkFileNames: (chunk) =>
+          chunk.moduleIds.length > 0 &&
+          chunk.moduleIds.every((id) => /[\\/]packages[\\/]shared[\\/]/.test(id))
+            ? 'assets/paths-[hash].js'
+            : 'assets/[name]-[hash].js',
         // Vendor chunks for what every visit needs (ADR-021): they change less often than the
         // app, so they stay cached across deploys. Functions and Storage are left out on purpose:
-        // they load on first use (services/firebase.ts).
+        // they load on first use (services/firebase.ts). The `firestore` group is a lazy chunk:
+        // services/firestore-boot.ts imports it once the Firebase core is up (ADR-066), and
+        // check:bundle names it, so keep the group (a stable cached chunk with its own cap).
         codeSplitting: {
           groups: [
             {
@@ -56,6 +106,9 @@ export default defineConfig({
               name: 'firestore',
               test: /node_modules[\\/](@firebase[\\/](firestore|webchannel-wrapper)|firebase[\\/]firestore|re2js)[\\/]/,
               priority: 25,
+              // Its dependencies (@firebase/app, util, component) belong to the `firebase` group
+              // below. Pulled in here they made the entry import this chunk (ADR-066).
+              includeDependenciesRecursively: false,
             },
             {
               name: 'firebase',

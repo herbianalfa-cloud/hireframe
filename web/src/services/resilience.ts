@@ -1,23 +1,11 @@
+import { TimeoutError, withTimeout } from '@/lib/timeout';
+
 import { errorCode, logError } from './log';
 
 /** CLAUDE.md: every external call has a timeout and at most 3 attempts with exponential backoff. */
 export const MAX_ATTEMPTS = 3;
 
-export class TimeoutError extends Error {
-  override name = 'TimeoutError';
-}
-
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new TimeoutError(`${label} timed out after ${String(ms)} ms`));
-    }, ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    clearTimeout(timer);
-  });
-}
+export { TimeoutError, withTimeout };
 
 interface RetryOptions {
   label: string;
@@ -54,4 +42,21 @@ export function isTransient(error: unknown): boolean {
   if (error instanceof TimeoutError) return true;
   const code = errorCode(error);
   return code === 'unavailable' || code === 'deadline-exceeded';
+}
+
+const CHUNK_LOAD_MESSAGES = [
+  /failed to fetch dynamically imported module/i, // Chrome, Edge
+  /error loading dynamically imported module/i, // Firefox
+  /importing a module script failed/i, // Safari
+  /unable to preload css/i, // Vite's preload helper
+];
+
+/**
+ * A failed dynamic import (a chunk that couldn't be fetched). The browser keeps the failed
+ * module in its module map, so importing the same URL again fails again until the page reloads.
+ */
+export function isChunkLoadError(error: unknown): boolean {
+  return (
+    error instanceof Error && CHUNK_LOAD_MESSAGES.some((pattern) => pattern.test(error.message))
+  );
 }

@@ -2,6 +2,33 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [Unreleased]
+### Added
+- **CV quality** (ADR-062, ADR-063, ADR-064; plan `docs/plans/cv-quality-plan.md`; PR #42, **not to merge before v1.0.0**).
+  - **Layout v2:** `fitPage` replaces `fitOnePage` (measured fit-and-fill over body sizes 11, 10.5 and 10, spacing spread within caps, one PDF render, twip-identical PDF and DOCX specs). Black only, centred name and contact line, bold role with a regular organisation, entries newest first, order Summary, Education, Experience, Projects, Skills. `trimOrder` v2 trims the entry with the most bullets first. The PDF wraps 1.5% narrower than the DOCX, and an entry's dates sit on the title's last line.
+  - **Writing rules in code:** `scrubDashes`, `lintCv` (hard and soft findings that never hold text), prompt v2 (voice, length target from the layout, `(facts: F3, F7)` mapping), removal-only clamps and `dropUnsupportedSkills` before validation.
+  - **Quality score:** `scoreCv` (rubric v2 with its own cover-note criterion, gate 8 with no hard finding), stored as `cvs/{cvId}.quality`, shown on the Ready card as "Quality n/10 · Luck n/10" with "Below target" findings in words.
+  - **One revision round:** `composeCv` writes, scores and revises once when a finding is fixable (`cvRevise`, `<draft_cv>`), re-validates both candidates against re-read facts and ships the best valid one. A job costs at most 3 model calls per owner move (was 2), kills included.
+  - **CV eval:** 8 fake cases, recorded answers, a gate in `npm run check`, a report-only judge (`cvJudge`), `--suite funnel|cv`. Three LIVE runs cost 46.7p, 30.4p and 27.9p; the last passed (7 of 7 at 8 or more, mean 9.77 under rubric v1). The baseline is now 9.66 under rubric v2 and compares by rubric: a lower mean needs `--accept-lower`.
+  - **Docs:** ADR-062 to ADR-064, "Amended by" lines on ADR-053 and ADR-054, PRD R10, ARCHITECTURE, SECURITY, FUNNEL S4, RUNBOOK I7, `evals/README.md`, CLAUDE.md, ROADMAP.
+- **CV preview on the Ready card** (ADR-065; plan `docs/plans/cv-preview-plan.md`).
+  - **Preview CV:** a dialog (full screen on a phone, centred on a laptop) that draws the stored CV PDF with pdf.js, with zoom, a page count that flags a CV over one page, a text version and an in-dialog Download PDF that saves the blob already read. If the viewer fails to load, the PDF won't open or a page won't draw, it shows a message and Download PDF.
+  - **`pdfjs-dist@6.4.299`, legacy build,** loaded on first use with its worker and standard fonts as same-origin files. Stated floor for the preview: Chrome 125+, Safari 18+ (ours, not pdf.js's). Eval is off by version and WASM by option (`useWasm: false`); Dependabot leaves the pin to a deliberate bump. No model call, function, rules, CORS or CSP change.
+  - **Code:** `web/src/lib/pdf-preview.ts`, `web/src/services/cv-preview.ts`, `web/src/features/pipeline/CvPreview.tsx`, a fonts plugin in `web/vite.config.ts`.
+  - **`check:bundle`:** scans `.mjs`, names the pdf.js worker (cap 1,400 kB) and the fonts (caps), and fails if pdf.js is in any initial file.
+  - **Docs:** ADR-065, PRD R10, ARCHITECTURE, SECURITY, RUNBOOK (step 89 and I7), ROADMAP, CLAUDE.md.
+### Fixed
+- **CV quality Fix C:** an education line can no longer print a classification its achievement does not state (a 2:1 from a 2:2, "Distinction" from another degree or from a prize); the baseline no longer switches off on a prompt bump; a cap during a failed revision still ends the run; fewer false calls in the contrast, first-person and "leading" lint; a year and a count are no longer joined into a date.
+### Changed
+- `ApplicationSchema.attempt` is 0..3 and `lastIssueAt` is new (both optional-compatible); `APPLICATION_LIMITS` is the one source for `maxWrites` 2, `maxRevisions` 1 and `maxAttempts` 3.
+- Measured CV cost: a write about 2.5p to 3.1p and a revision about 3.0p (the plan estimated 4.3p and 4.6p). The reserved worst case per owner move is 26.8p (was 17.7p), so two worst-case moves fit under the 60p daily cap.
+- The cover note greeting is "Dear Hiring Team,".
+- A project's organisation may be empty. An education line cites `factRef` plus an optional `achievementRef`.
+- **Firestore out of the initial JS (roadmap item E, ADR-066): initial JS 295.6 to 164.7 kB gzip.** `getFirebaseCore()` (app, App Check, Auth) is separate from `getFirebase()`, which imports `services/firestore-boot.ts` once the core is ready; the owner-check read and the pipeline badge's listener moved to lazy modules; Auth, Functions and Storage never wait for Firestore. New mark `hf:firestore`. `check:bundle`: initial JS budget 200 kB gzip (was 300), Firestore in exactly one chunk, never in an initial file, cap 165 kB gzip, one copy of the Firebase core (in an initial chunk), and only `<script src>` and `modulepreload` count as initial; its own tests (`scripts/check-bundle.test.ts`). The shared constants chunk is now `paths-<hash>.js`, not `firestore-<hash>.js`. Try again on the access error reloads the page when the Firestore chunk failed to load (a failed import stays failed until a reload), only on the click.
+- **A failed screen chunk no longer blanks the app (PR #45, ADR-066 addendum).** Each screen sits in an error boundary inside the shell: "This screen didn't load" and a click-only Reload, navigation kept. `loadTodayPage()` and `loadDashboardService()` forget a failed import and retry on the next call.
+### Not yet done
+- Opening one DOCX in Word and Google Docs (RUNBOOK I7), the Opus review rounds, and the rebase after PR #41.
+
 ## [0.9.1] - Unreleased
 <!-- Release day: first Tue-Thu after G1 merges (plan Decision 4); no exact date yet. -->
 ### Added

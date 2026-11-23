@@ -1,0 +1,290 @@
+import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+// Each case builds a small fake `web/dist` and runs the real script against it, so the failure
+// branches (worker count, fonts folder, marker, caps) are exercised without a Vite build.
+const HTML = `<!doctype html><html><head>
+<link rel="preload" href="/__/firebase/init.json" as="fetch" crossorigin>
+<script type="module" src="/assets/index-a.js"></script>
+<link rel="modulepreload" crossorigin href="/assets/firebase-a.js">
+</head><body></body></html>`;
+
+const MARKER = 'google.firestore.v1.Firestore';
+const APP_MARKER = 'initializeApp() first';
+const COMPONENT_MARKER = 'has already been registered';
+const CORE = `export const core = ["${APP_MARKER}", "${COMPONENT_MARKER}"];`;
+
+interface Fixture {
+  html: string;
+  files: Record<string, string | Buffer>;
+}
+
+function healthy(): Fixture {
+  return {
+    html: HTML,
+    files: {
+      'assets/index-a.js': 'export const app = 1;',
+      'assets/pdf-a.js': 'class PDFWorker {} export { PDFWorker };',
+      'assets/pdf.worker.min-a.mjs': 'export const worker = 1;',
+      'assets/pdfjs-6.4.299/standard_fonts/Font.ttf': 'font',
+      'assets/firebase-a.js': CORE,
+      'assets/firestore-a.js': `export const rpc = "${MARKER}";`,
+    },
+  };
+}
+
+/** Text that gzip can't shrink, so a fixture reaches a size cap with few bytes. */
+const incompressible = (bytes: number) => randomBytes(bytes).toString('hex');
+
+const dirs: string[] = [];
+function run(fixture: Fixture) {
+  const dist = mkdtempSync(join(tmpdir(), 'check-bundle-'));
+  dirs.push(dist);
+  writeFileSync(join(dist, 'index.html'), fixture.html);
+  for (const [path, content] of Object.entries(fixture.files)) {
+    mkdirSync(join(dist, path, '..'), { recursive: true });
+    writeFileSync(join(dist, path), content);
+  }
+  const result = spawnSync(process.execPath, ['scripts/check-bundle.ts'], {
+    env: { ...process.env, CHECK_BUNDLE_DIST: dist },
+    encoding: 'utf8',
+  });
+  return { code: result.status, out: `${result.stdout}${result.stderr}` };
+}
+
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function without(fixture: Fixture, path: string): Fixture {
+  const files = Object.entries(fixture.files).filter(([name]) => name !== path);
+  return { ...fixture, files: Object.fromEntries(files) };
+}
+
+describe('check-bundle', () => {
+  it('passes a healthy dist', () => {
+    const result = run(healthy());
+    expect(result.out).toContain('check-bundle:');
+    expect(result.code).toBe(0);
+  });
+
+  it('fails when there is no pdf.js worker, or two', () => {
+    const none = run(without(healthy(), 'assets/pdf.worker.min-a.mjs'));
+    expect(none.code).toBe(1);
+    expect(none.out).toContain('expected exactly one pdf.js worker asset, found 0');
+    const two = healthy();
+    two.files['assets/pdf.worker.min-b.mjs'] = 'export const worker = 2;';
+    expect(run(two).out).toContain('found 2');
+  });
+
+  it('fails when the worker is over its cap', () => {
+    const fixture = healthy();
+    fixture.files['assets/pdf.worker.min-a.mjs'] = Buffer.alloc(1400 * 1000 + 1, 'a');
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/pdf\.worker\.min-a\.mjs is 1400\.0 kB/);
+  });
+
+  it('fails when there is no fonts folder, or two', () => {
+    const none = run(without(healthy(), 'assets/pdfjs-6.4.299/standard_fonts/Font.ttf'));
+    expect(none.code).toBe(1);
+    expect(none.out).toContain('expected exactly one pdf.js fonts folder, found 0');
+    const two = healthy();
+    two.files['assets/pdfjs-6.5.0/standard_fonts/Font.ttf'] = 'font';
+    expect(run(two).out).toContain('expected exactly one pdf.js fonts folder, found 2');
+  });
+
+  it('names a fonts folder without standard_fonts instead of throwing', () => {
+    const fixture = without(healthy(), 'assets/pdfjs-6.4.299/standard_fonts/Font.ttf');
+    fixture.files['assets/pdfjs-6.4.299/other.txt'] = 'x';
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('pdfjs-6.4.299 has no standard_fonts folder');
+    expect(result.out).not.toContain('ENOENT');
+  });
+
+  it('fails when a font is over its cap, or the fonts are over the total', () => {
+    const big = healthy();
+    big.files['assets/pdfjs-6.4.299/standard_fonts/Big.ttf'] = Buffer.alloc(200 * 1000 + 1, 'a');
+    expect(run(big).out).toContain('pdfjs-6.4.299/Big.ttf is 200.0 kB');
+    const many = healthy();
+    for (let i = 0; i < 5; i += 1) {
+      many.files[`assets/pdfjs-6.4.299/standard_fonts/F${String(i)}.ttf`] = Buffer.alloc(
+        190 * 1000,
+        'a',
+      );
+    }
+    expect(run(many).out).toContain('pdf.js fonts total');
+  });
+
+  it('fails when pdf.js is in an initial file, .js or .mjs', () => {
+    const inEntry = healthy();
+    inEntry.files['assets/index-a.js'] = 'class PDFWorker {}';
+    const entry = run(inEntry);
+    expect(entry.code).toBe(1);
+    expect(entry.out).toContain('assets/index-a.js contains pdf.js');
+    const inModule = healthy();
+    inModule.html = HTML.replace(
+      '</head>',
+      '<link rel="modulepreload" href="/assets/vendor-a.mjs"></head>',
+    );
+    inModule.files['assets/vendor-a.mjs'] = 'class PDFWorker {}';
+    expect(run(inModule).out).toContain('assets/vendor-a.mjs contains pdf.js');
+  });
+
+  it('fails when no lazy chunk carries the marker, or two do', () => {
+    const none = run(without(healthy(), 'assets/pdf-a.js'));
+    expect(none.code).toBe(1);
+    expect(none.out).toContain('expected exactly one lazy chunk with the pdf.js marker');
+    const two = healthy();
+    two.files['assets/pdf-b.js'] = 'class PDFWorker {}';
+    expect(run(two).out).toContain('found 2');
+  });
+
+  it('says it is the pdf.js chunk, and points at ADR-065, when that chunk is over the cap', () => {
+    const fixture = healthy();
+    fixture.files['assets/pdf-a.js'] = `class PDFWorker {}${' '.repeat(500 * 1000)}`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/pdf-a\.js is 500\.\d kB .*pdf\.js chunk.*ADR-065/);
+  });
+
+  it('keeps the generic message for any other chunk over the cap', () => {
+    const fixture = healthy();
+    fixture.files['assets/Other-a.js'] = 'a'.repeat(500 * 1000 + 1);
+    const result = run(fixture);
+    expect(result.out).toMatch(/Other-a\.js is 500\.0 kB \(max 500\.0 kB\)\n/);
+    expect(result.out).not.toContain('ADR-065');
+  });
+
+  it('fails on a missing init.json preload', () => {
+    const fixture = healthy();
+    fixture.html = HTML.replace(/<link[^>]*>/, '');
+    expect(run(fixture).out).toContain('no preload for /__/firebase/init.json');
+  });
+
+  it('passes a clean dist and prints the Firestore line', () => {
+    const result = run(healthy());
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('Firestore (loaded after the core)');
+  });
+
+  it('fails when the Firestore SDK is in an initial file', () => {
+    const fixture = healthy();
+    fixture.files['assets/index-a.js'] = `export const rpc = "${MARKER}";`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('is initial JS and contains the Firestore SDK');
+  });
+
+  it('fails when the marker is in no chunk, or in two', () => {
+    const none = healthy();
+    delete none.files['assets/firestore-a.js'];
+    const noneResult = run(none);
+    expect(noneResult.code).toBe(1);
+    expect(noneResult.out).toContain('exactly one chunk, found 0');
+
+    const two = healthy();
+    two.files['assets/firestore-b.js'] = `export const rpc = "${MARKER}";`;
+    const twoResult = run(two);
+    expect(twoResult.code).toBe(1);
+    expect(twoResult.out).toContain('exactly one chunk, found 2');
+  });
+
+  it('fails when the Firestore chunk is over 165 kB gzip', () => {
+    const fixture = healthy();
+
+    fixture.files['assets/firestore-a.js'] = `"${MARKER}"${incompressible(170_000)}`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('the Firestore chunk is');
+  });
+
+  it('fails when the initial JS is over 200 kB gzip', () => {
+    const fixture = healthy();
+    fixture.files['assets/index-a.js'] = `export const x = "${incompressible(210_000)}";`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('initial JS is');
+  });
+});
+
+describe('check-bundle: initial files', () => {
+  const withHead = (head: string): string => HTML.replace('</head>', `${head}\n</head>`);
+
+  it('fails when the Firestore SDK chunk is a modulepreload', () => {
+    const fixture = healthy();
+    fixture.html = withHead('<link rel="modulepreload" href="/assets/firestore-a.js">');
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain(
+      'assets/firestore-a.js is initial JS and contains the Firestore SDK',
+    );
+  });
+
+  it('does not count a prefetch link as initial JS', () => {
+    const fixture = healthy();
+    fixture.html = withHead('<link rel="prefetch" href="/assets/firestore-a.js">');
+    const result = run(fixture);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('in 2 files');
+  });
+
+  it('counts a modulepreload whatever the attribute order', () => {
+    const fixture = healthy();
+    fixture.html = HTML.replace(
+      '<link rel="modulepreload" crossorigin href="/assets/firebase-a.js">',
+      '<link href="/assets/firebase-a.js" crossorigin rel="modulepreload">',
+    );
+    const result = run(fixture);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('in 2 files');
+  });
+});
+
+describe('check-bundle: one copy of the Firebase core (ADR-066)', () => {
+  it('fails when a core marker is in no chunk', () => {
+    for (const marker of [APP_MARKER, COMPONENT_MARKER]) {
+      const fixture = healthy();
+      fixture.files['assets/firebase-a.js'] = CORE.replace(marker, 'gone');
+      const result = run(fixture);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain(`"${marker}" (the Firebase core) in exactly one chunk, found 0`);
+    }
+  });
+
+  it('fails when the core is copied into the Firestore chunk', () => {
+    const fixture = healthy();
+    fixture.files['assets/firestore-a.js'] = `export const rpc = "${MARKER}"; ${CORE}`;
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain(
+      `"${APP_MARKER}" (the Firebase core) in exactly one chunk, found 2`,
+    );
+    expect(result.out).toContain(
+      `"${COMPONENT_MARKER}" (the Firebase core) in exactly one chunk, found 2`,
+    );
+  });
+
+  it('fails when the only core chunk is not initial JS', () => {
+    const fixture = healthy();
+    fixture.html = HTML.replace(/<link rel="modulepreload"[^>]*>\n/, '');
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('firebase-a.js holds the Firebase core');
+    expect(result.out).toContain('is not initial JS');
+  });
+
+  it('fails when the core only appears in a prefetched chunk', () => {
+    const fixture = healthy();
+    fixture.html = HTML.replace('rel="modulepreload"', 'rel="prefetch"');
+    const result = run(fixture);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('is not initial JS');
+  });
+});

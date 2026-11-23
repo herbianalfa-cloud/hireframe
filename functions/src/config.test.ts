@@ -1,4 +1,8 @@
-import { CALLABLE_TIMEOUT_SECONDS, DEFAULT_MONTHLY_CAP_PENCE } from '@hireframe/shared';
+import {
+  APPLICATION_LIMITS,
+  CALLABLE_TIMEOUT_SECONDS,
+  DEFAULT_MONTHLY_CAP_PENCE,
+} from '@hireframe/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -68,6 +72,29 @@ describe('CV worker budgets (M7, ADR-053)', () => {
     ).toBeGreaterThan(workerMs);
   });
 
+  it('the eval judge is Sonnet 5.5 at low effort and fits the worker timeout', () => {
+    expect(MODELS.cvJudge).toMatchObject({ id: 'claude-sonnet-5-5', effort: 'low' });
+    expect(MODELS.cvJudge.budgetMs + LLM.callableMarginMs).toBeLessThanOrEqual(workerMs);
+  });
+
+  it('a revision is a generateCvs call with the limits of a write', () => {
+    expect(PURPOSE_CALLABLE.cvRevise).toBe('generateCvs');
+    expect(MODELS.cvRevise).toEqual(MODELS.cvWrite);
+    expect(
+      APPLICATIONS.workerStartDeadlineMs + MODELS.cvRevise.budgetMs + LLM.callableMarginMs,
+    ).toBeLessThanOrEqual(workerMs);
+  });
+
+  it('a job costs at most two writes and one revision, and the limits live in one place', () => {
+    expect(APPLICATION_LIMITS.maxWrites + APPLICATION_LIMITS.maxRevisions).toBe(
+      APPLICATION_LIMITS.maxAttempts,
+    );
+    expect(APPLICATION_LIMITS.maxAttempts).toBe(3);
+    // No copy of a limit in config that could drift from the shared one.
+    expect(APPLICATIONS).not.toHaveProperty('maxAttempts');
+    expect(APPLICATIONS).not.toHaveProperty('maxWrites');
+  });
+
   it('answers turn into facts under the application callable timeout', () => {
     expect(PURPOSE_CALLABLE.answerFact).toBe('application');
     expect(CALLABLE_TIMEOUT_SECONDS.application).toBe(120);
@@ -78,7 +105,7 @@ describe('CV worker budgets (M7, ADR-053)', () => {
     expect(APPLICATIONS).toMatchObject({
       dailyCapPence: 60,
       maxQuestions: 5,
-      maxAttempts: 2,
+      scoreTarget: 8,
       workerMaxPerRun: 10,
     });
     expect(ApplicationOverridesSchema.safeParse({ dailyCapPence: 80 }).success).toBe(true);
