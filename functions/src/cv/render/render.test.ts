@@ -654,7 +654,9 @@ describe('PDF and DOCX agree', () => {
     expect(sizeOf('Title')).toBe('36');
     expect(sizeOf('Heading1')).toBe('23');
     expect(sizeOf('Heading2')).toBe('22');
-    expect(styles).not.toMatch(/<w:color w:val="(?!000000")/);
+    // docx 9.15 ships an unused Caption style in grey (44546A); no CV paragraph uses it.
+    const used = styles.replace(/<w:style [^>]*w:styleId="Caption".*?<\/w:style>/s, '');
+    expect(used).not.toMatch(/<w:color w:val="(?!000000")/);
   });
 
   it('writes the spec spacing in twips, the same numbers the PDF used', async () => {
