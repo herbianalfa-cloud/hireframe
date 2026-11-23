@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, useState, type ReactNode } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router';
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router';
 
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Skeleton } from '@/components/ui/skeleton';
 
 import { AuthGate } from './AuthGate';
@@ -51,7 +52,25 @@ function ScreenLoading() {
   );
 }
 
-const screen = (page: ReactNode) => () => <Suspense fallback={<ScreenLoading />}>{page}</Suspense>;
+/**
+ * A screen chunk that fails to load (typically a tab left open across a deploy) shows a message
+ * and a click-only Reload inside the shell, so the navigation stays. Keyed by path, so moving to
+ * another screen starts clean.
+ */
+function ScreenBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return (
+    <ErrorBoundary key={pathname} what="This screen">
+      {children}
+    </ErrorBoundary>
+  );
+}
+
+const screen = (page: ReactNode) => () => (
+  <ScreenBoundary>
+    <Suspense fallback={<ScreenLoading />}>{page}</Suspense>
+  </ScreenBoundary>
+);
 
 /** Screens that are built; every other nav item shows its designed empty state. */
 const PAGES: Readonly<Record<string, () => ReactNode>> = {

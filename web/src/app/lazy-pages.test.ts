@@ -6,6 +6,7 @@ import {
   loadDashboardService,
   loadedTodayPage,
   loadTodayPage,
+  retryableOnce,
   startTodayPrefetch,
 } from './lazy-pages';
 
@@ -13,6 +14,36 @@ vi.mock('@/services/dashboard', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   prefetchToday: vi.fn(() => vi.fn()),
 }));
+
+describe('retryableOnce', () => {
+  it('imports once while the import works', async () => {
+    const load = vi.fn(() => Promise.resolve('chunk'));
+    const get = retryableOnce(load);
+    const first = get();
+    expect(get()).toBe(first);
+    expect(await first).toBe('chunk');
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgets a failed import, so the next call tries again', async () => {
+    const load = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error('chunk is gone'))
+      .mockResolvedValueOnce('chunk');
+    const get = retryableOnce(load);
+    await expect(get()).rejects.toThrow('chunk is gone');
+    expect(await get()).toBe('chunk');
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('still rejects for every caller that was waiting on the failed import', async () => {
+    const get = retryableOnce(() => Promise.reject(new Error('offline')));
+    const first = get();
+    const second = get();
+    expect(second).toBe(first);
+    await expect(first).rejects.toThrow('offline');
+  });
+});
 
 describe('loadTodayPage', () => {
   it('returns the same import promise every time', async () => {

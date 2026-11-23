@@ -1,18 +1,35 @@
+/**
+ * Imports once, and forgets a failed import so the next call tries again. A rejected import
+ * promise that stayed cached would fail every later caller until a full reload (ADR-066).
+ */
+export function retryableOnce<T>(load: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | undefined;
+  return () => {
+    pending ??= load().catch((error: unknown) => {
+      pending = undefined;
+      throw error;
+    });
+    return pending;
+  };
+}
+
 const importToday = () => import('@/features/today/TodayPage');
 
-let todayPage: ReturnType<typeof importToday> | undefined;
 let todayModule: Awaited<ReturnType<typeof importToday>> | undefined;
+
+const loadToday = retryableOnce(() =>
+  importToday().then((module) => {
+    todayModule = module;
+    return module;
+  }),
+);
 
 /**
  * Loads the Today screen's chunk once. `lazy()` and the sign-in prefetch (ADR-050) both call
  * this, so there is one import promise and the chunk is fetched while the owner check runs.
  */
 export function loadTodayPage(): ReturnType<typeof importToday> {
-  todayPage ??= importToday().then((module) => {
-    todayModule = module;
-    return module;
-  });
-  return todayPage;
+  return loadToday();
 }
 
 /**
@@ -26,7 +43,7 @@ export function loadedTodayPage(): Awaited<ReturnType<typeof importToday>> | und
 
 const importDashboard = () => import('@/services/dashboard');
 
-let dashboardService: ReturnType<typeof importDashboard> | undefined;
+const loadDashboard = retryableOnce(importDashboard);
 
 /**
  * Loads the dashboard service's chunk once. The app starts this when it lands on `/`, once the
@@ -36,8 +53,7 @@ let dashboardService: ReturnType<typeof importDashboard> | undefined;
  * job schemas into the initial JS.
  */
 export function loadDashboardService(): ReturnType<typeof importDashboard> {
-  dashboardService ??= importDashboard();
-  return dashboardService;
+  return loadDashboard();
 }
 
 /**
