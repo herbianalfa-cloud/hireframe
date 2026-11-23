@@ -3,10 +3,10 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { DEFAULT_FX_USD_TO_GBP } from '../config.js';
 import type { LlmCallDeps } from '../llm/call.js';
 import { anthropicTransport } from '../llm/transport.js';
-import { applyReserve, applySettle, emptyUsage, type UsageStore } from '../llm/usage-store.js';
 import { setLogSink } from '../log.js';
 import { eachLimited } from '../sources/types.js';
 import { EVAL_NOW, parseGolden } from './cases.js';
+import { runCvSuite } from './cv-cli.js';
 import { evaluateCase, titleSuite, type CaseResult } from './evaluate.js';
 import {
   formatRecordings,
@@ -15,6 +15,7 @@ import {
   recordingTransport,
   replayTransport,
 } from './recordings.js';
+import { apiKey, memoryUsage } from './runtime.js';
 import { BaselineSchema, formatReport, gate, summarise, type Baseline } from './report.js';
 
 /**
@@ -27,42 +28,36 @@ const FILES = {
   golden: 'evals/golden.jsonl',
   recordings: 'evals/recordings.jsonl',
   baseline: 'evals/baseline.json',
-  secrets: 'functions/.secret.local',
 };
 const EVAL_CAP_PENCE = 150;
 const LIVE_CONCURRENCY = 4;
 
-function memoryUsage(): UsageStore {
-  let usage = emptyUsage(EVAL_CAP_PENCE, EVAL_NOW);
-  return {
-    reserve(input) {
-      usage = applyReserve(usage, input);
-      return Promise.resolve();
-    },
-    settle(input) {
-      usage = applySettle(usage, input);
-      return Promise.resolve();
-    },
-  };
-}
+export const SUITES = ['funnel', 'cv'] as const;
+export type Suite = (typeof SUITES)[number];
 
-function apiKey(): string {
-  const fromEnv = process.env.ANTHROPIC_API_KEY?.trim();
-  if (fromEnv) return fromEnv;
-  if (existsSync(FILES.secrets)) {
-    const line = readFileSync(FILES.secrets, 'utf8')
-      .split(/\r?\n/)
-      .find((entry) => entry.startsWith('ANTHROPIC_API_KEY='));
-    const key = line?.slice('ANTHROPIC_API_KEY='.length).trim();
-    if (key) return key;
-  }
-  throw new Error(`LIVE=1 needs ANTHROPIC_API_KEY in the environment or in ${FILES.secrets}.`);
+/** `--suite funnel|cv` picks one suite; without it both run. */
+export function selectSuites(args: readonly string[]): Suite[] {
+  const at = args.indexOf('--suite');
+  if (at === -1) return [...SUITES];
+  const value = args[at + 1];
+  const suite = SUITES.find((name) => name === value);
+  if (!suite) throw new Error(`--suite takes one of ${SUITES.join(', ')}, not ${String(value)}.`);
+  return [suite];
 }
 
 export async function main(args: readonly string[]): Promise<void> {
   // llm.call() logs every call; the report says what matters.
   setLogSink(() => undefined);
   const live = process.env.LIVE === '1';
+  const suites = selectSuites(args);
+  if (suites.includes('funnel')) await runFunnelSuite(args, live);
+  if (suites.includes('cv')) {
+    if (suites.length > 1) console.log('\n--- CV suite ---');
+    await runCvSuite(args, live);
+  }
+}
+
+async function runFunnelSuite(args: readonly string[], live: boolean): Promise<void> {
   const cases = parseGolden(readFileSync(FILES.golden, 'utf8'));
   const recordings = existsSync(FILES.recordings)
     ? parseRecordings(readFileSync(FILES.recordings, 'utf8'))
@@ -75,7 +70,7 @@ export async function main(args: readonly string[]): Promise<void> {
   const recorder = live ? recordingTransport(anthropicTransport(apiKey())) : null;
   const deps: LlmCallDeps = {
     transport: recorder ?? replay,
-    usage: memoryUsage(),
+    usage: memoryUsage(EVAL_CAP_PENCE),
     capPence: EVAL_CAP_PENCE,
     fxUsdToGbp: DEFAULT_FX_USD_TO_GBP,
     now: () => EVAL_NOW,
