@@ -2,8 +2,8 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
-## [0.9.1] - Unreleased
-<!-- Release day: first Tue-Thu after G1 merges (plan Decision 4); no exact date yet. -->
+## [0.9.1] - 2026-11-03
+<!-- Tagged 3 Nov. The Deploy run failed at the `billingGuard` create; the re-run on 5 Nov (Beeb, 12:35-12:42 London) created it. Evidence: docs/plans/v0-9-1-evidence.md. -->
 ### Added
 - **M8 PR 8C1: billing kill switch, dry run** (#39) (ADR-059; plan `docs/plans/m8c-plan.md` §2).
   - **`billingGuard` (new event function, needs RUNBOOK Part K: K1–K6 before the tag, K8–K13 after):** triggered by the `billing-guard` Pub/Sub topic, runs as `hireframe-billing-guard`, 60 s, 256 MiB, `maxInstances` 1, no retry, no secrets and no Firestore access. It reads the `hireframe-kill` budget message (zod), acts only on GBP actual cost at or above the budget (forecast fields are ignored) and always targets the runtime project from the metadata server. **Dry run:** unless `BILLING_GUARD_MODE` is exactly `armed` (prod never sets it), it logs `billing_guard.would_disable` and makes no network call. Armed (throwaway project only in this release): reads `billingInfo`, then one idempotent PUT to remove the billing account, retried at most 3 times. Logs `billing_guard.*` carry the mode, codes and amounts, never the message text or a token.
