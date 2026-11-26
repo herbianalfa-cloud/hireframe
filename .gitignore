@@ -37,3 +37,9 @@ iam-*.txt
 
 # Vitest local output (a direct `vitest run` writes .vitest/json/output.json)
 .vitest/
+
+# kit
+.env
+.env.*
+.claude/settings.local.json
+.claude/worktrees/

@@ -1,4 +1,5 @@
 import type { CvHeader, TrimmedCvContent } from '@hireframe/shared';
+import type { IRunOptions } from 'docx';
 import {
   AlignmentType,
   BorderStyle,
@@ -41,7 +42,16 @@ const HEADINGS: Partial<Record<Block['kind'], (typeof HeadingLevel)[keyof typeof
 };
 
 function run(text: string, kind: Block['kind'], bold = STYLES[kind].bold): TextRun {
-  return new TextRun({ text, font: FONT, size: STYLES[kind].size * 2, bold, color: '000000' });
+  // Typed as IRunOptions: TextRun also accepts a string, and that union makes
+  // @typescript-eslint/no-deprecated read `bold` as the legacy String.prototype.bold.
+  const options: IRunOptions = {
+    text,
+    font: FONT,
+    size: STYLES[kind].size * 2,
+    bold,
+    color: '000000',
+  };
+  return new TextRun(options);
 }
 
 /** A real `<w:tab/>` element; a tab character in a run's text is not one (ADR-054). */
