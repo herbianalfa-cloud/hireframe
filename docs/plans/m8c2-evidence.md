@@ -32,6 +32,6 @@ Proposed from the C32 list (54 enabled APIs), in the owner's order, each alone, 
 No API was disabled and nothing changed, so no post-disable checks were due. The five stay enabled and carry to the v1.0.1 review (the blocker is the `cloudapis` umbrella service, which is on the never-disable list).
 
 ## K18: quotas (C53)
-The Compute Engine API is not enabled (`gcloud compute project-info describe` answers "API [compute.googleapis.com] not enabled"), so C53 is not applicable. Residual risk accepted until v1.0.1 arms the kill switch (`dry_run` today). The wording and the principals that could enable the API are in the SECURITY checklist.
+The Compute Engine API is not enabled (`gcloud compute project-info describe` answers "API [compute.googleapis.com] not enabled"), so C53 is not applicable. Residual risk accepted until v1.0.1 arms the kill switch (`dry_run` today). Other limits: the virtual card's monthly limit and the passkey. The wording and the principals that could enable the API are in the SECURITY checklist.
 
 IAM diff, `~/iam-before-p3.txt` against `~/iam-after-p3.txt`: empty (`no IAM change`).
