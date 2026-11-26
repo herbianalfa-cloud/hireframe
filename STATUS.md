@@ -79,6 +79,7 @@ Full list in `LEARNINGS.md` ("Parked ideas (full list)") and `docs/ROADMAP.md`.
 - Plans are saved to `docs/plans/` before building. Claude Code updates STATUS.md in every PR. Instructions to Beeb follow Playbook Part 5 (one step at a time).
 - Show Beeb any `gh api`, force-push, tag, deploy or gcloud command, and wait for approval. Beeb runs every deploy, tag, IAM and console change.
 - Only tag after the PR is merged (`git checkout main && git pull` first).
+- **Cloud identity:** account herbianalfa@… (Owner of hireframe-f6b03), gcloud configuration `hireframe`, Firebase CLI pinned with `login:use` in this repo. Start every cloud step with `export CLOUDSDK_ACTIVE_CONFIG_NAME=hireframe` (it affects that shell only) and keep `--project=hireframe-f6b03` on every command.
 - **Release windows are in London time** (weekday 10:00–16:00 London, as in the plan), wherever Beeb is working. Beeb converts to local time; Claude states every deadline in London time and reads the app's times as London unless the screen says otherwise.
 - UI changes: check locally with `npm run dev` before merging, then on the live site after the deploy.
 - No automated browsing or scraping of LinkedIn (CLAUDE.md hard rule, ADR-004).

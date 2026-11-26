@@ -495,7 +495,7 @@ Design: `docs/plans/m8b-plan.md`, ADR-057 (wipe and retention), ADR-058 (backups
 ### Part K: Billing kill switch, IAM hardening and v1.0.0 (M8 8C1 `v0.9.1`, 8C2 `v1.0.0`)
 Design: `docs/plans/m8c-plan.md` §2 and §4, `docs/plans/m8c2-plan.md`, ADR-059 and ADR-060. `billingGuard` is the first event-triggered function, and it ships in **dry run**: it logs `would_disable` and makes no network call, and the project holds no billing role. Release on a weekday between 10:00 and 16:00 (London) with nothing Generating, after the throwaway spike (plan §4 Phase 1, which proves the armed path in a separate project and is not run from here). Cloud Shell, with this setup each session:
 ```bash
-gcloud config configurations activate hireframe   # playbook v3.1: one gcloud configuration per project; every K step starts with this line
+export CLOUDSDK_ACTIVE_CONFIG_NAME=hireframe   # playbook v3.1: one gcloud configuration per project; every K step starts with this line
 P=hireframe-f6b03; R=europe-west2
 NUM=$(gcloud projects describe $P --format='value(projectNumber)')
 SA=github-deployer@$P.iam.gserviceaccount.com
@@ -503,7 +503,6 @@ FNS=hireframe-fns@$P.iam.gserviceaccount.com
 GUARD=hireframe-billing-guard@$P.iam.gserviceaccount.com
 COMPUTE=$NUM-compute@developer.gserviceaccount.com
 PSA=service-$NUM@gcp-sa-pubsub.iam.gserviceaccount.com
-gcloud config set project $P
 # Only for "Billing was disabled" (Recovery): find the IDs, then set them by hand.
 gcloud billing accounts list --format='table(name,displayName,open)'
 BILLING=<the ID from the first column>
@@ -572,6 +571,10 @@ After K13, check that the next scheduled scan succeeds and the morning digest ar
 
 **Phase 3: stolen-account guards.** Its own weekday window, after the v0.9.1 Scan-now proof (K17 must not run before it, so a disable can't be mistaken for a v0.9.1 fault). Each step is shown in chat and approved alone.
 
+```bash
+export CLOUDSDK_ACTIVE_CONFIG_NAME=hireframe   # first line of this window
+```
+
 - **K14. Snapshot `flat` to `~/iam-before-p3.txt`; C43; C48 keys loop; C51.**
   ```bash
   cd ~ && flat > ~/iam-before-p3.txt && wc -l ~/iam-before-p3.txt
@@ -604,6 +607,10 @@ After K13, check that the next scheduled scan succeeds and the morning digest ar
   Then, in the console (**IAM & Admin → Quotas**, Compute Engine API), set **CPUs (all regions)** and **GPUs (all regions)** to 0. Check: the same read prints 0 and 0; `cd ~ && flat > ~/iam-after-p3.txt && diff ~/iam-before-p3.txt ~/iam-after-p3.txt` prints nothing; then **Scan now** and System shows **Succeeded** (the spike proved builds under quota 0, not the runtime). Rollback: set the recorded values back in the console. Raising a quota back is a quota increase request and may need approval; that is harmless, because nothing uses Compute Engine CPUs.
 
 **Phase 4: `v1.0.0`.** After the five gates, on a weekday between 10:00 and 16:00 (London), with nothing Generating, and never on a UK clock-change day. This is the proving deploy: the bundle changed, so every one of the 14 functions rebuilds as the compute account without Editor (ADR-060).
+
+```bash
+export CLOUDSDK_ACTIVE_CONFIG_NAME=hireframe   # first line of this window
+```
 
 - **K19. Release checklist recorded (the five gates).** Record each gate with its date and evidence in the SECURITY "v1.0.0 release gates" list: step 97 (phone median ≤ 2,000 ms); the restore drill C17–C20 (Part J); one clean weekday on v0.9.0; the Scan-now proof on v0.9.1 (right after its deploy, Scan now → System shows Succeeded with a run time → `digestNow` arrives → `gcloud scheduler jobs list --location=$R --project=$P` shows every job); C47 (a real budget message parsed, K13). Reference only: Lighthouse accessibility on Pipeline (100) and the 360 px phone check, both recorded in 8A2. Requirement evidence: R7 by step 97; R4 and R12 by the v0.9.0 clean weekday and the Scan-now proof; R11 by the cap test. Also record, with its date and no detail, that the owner checked the virtual card (£50 limit), the passkey and the recovery options (the SECURITY "Virtual card" item cites this line). Check: every gate has its evidence. Rollback: none; a missing gate stops here.
 - **K20. Evidence commit to 8C2; CI green; merge.** On `feat/m8c2-hardening`, commit the pre-deploy SECURITY ticks: every item whose evidence exists before the merge, which is K13 (budgets, C47), the five gates (K19, including the restore drill) and K14–K19; only items whose evidence is K21–K28 stay open for the follow-up PR, the gate dates, ADR-059's live push-delivery grant (K12) and whether C38b was needed (K7), and the v0.9.1 deploy time. If that deploy took more than 12 minutes, raise `timeout-minutes` in `.github/workflows/deploy.yml` (20 today) in the same commit. Wait for CI to go green, then merge. Merging deploys nothing, because deploys run only on tags. Check: the PR is merged. Rollback: none needed; revert the PR if it must not stay.
@@ -674,6 +681,10 @@ Before and after any tag. Part K's setup block applies.
 After K28, M8 is complete. Arming the billing guard (v1.0.1) is a separate, separately approved change (ADR-059).
 
 ### Recovery
+Every Recovery entry that runs `gcloud` or `firebase` starts with this line (then Part K's setup block, where an entry uses its variables):
+```bash
+export CLOUDSDK_ACTIVE_CONFIG_NAME=hireframe
+```
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
 - **Deploy fails with 403:** the `github-deployer` service account is missing a role. Grant the role named in the error with `gcloud projects add-iam-policy-binding` (never use a key file).
