@@ -38,27 +38,27 @@ CV and profile facts; job/application history; alert-email content; API keys (An
 ## Security checklist before first deploy
 - [x] Rules tests pass for every collection (owner allow, anon deny, other-user deny) (M1, `npm run test:rules`)
 - [x] App Check enforced on Firestore and Storage (M1 RUNBOOK step 16, 2026-09-30)
-- [ ] All secrets in Secret Manager; gitleaks clean on full history (checked live at RUNBOOK K15 (C34), ticked at K20; Anthropic key in Secret Manager, read only by `hireframe-fns`; Reed and Adzuna keys from M3, mounted only on `scanNow` and `scheduledScan` (Reed also on `rescore`, for full text) and never logged, ADR-025; the HMAC secret `INGEST_HMAC_SECRET` from M6, read only by `hireframe-fns` and mounted only on `ingestEmailJobs` and `getDigest`, copied once into the Apps Script's Script Properties and never into the repo, a chat or a log; RUNBOOK Part G)
+- [x] All secrets in Secret Manager; gitleaks clean on full history (checked live at RUNBOOK K15 (C34) on 24 Nov: five secrets, accessor only `hireframe-fns`, the deployer `secretmanager.viewer`, no public member; the `main` gitleaks job green; Anthropic key in Secret Manager, read only by `hireframe-fns`; Reed and Adzuna keys from M3, mounted only on `scanNow` and `scheduledScan` (Reed also on `rescore`, for full text) and never logged, ADR-025; the HMAC secret `INGEST_HMAC_SECRET` from M6, read only by `hireframe-fns` and mounted only on `ingestEmailJobs` and `getDigest`, copied once into the Apps Script's Script Properties and never into the repo, a chat or a log; RUNBOOK Part G)
 - [x] Budget alerts + Anthropic limit set
 - [x] HMAC verified with a replay test (M6: `functions/src/ingest/hmac.test.ts`, `handler.test.ts`, `tests/emulator/ingest.test.ts`; the digest purpose M7B: `functions/src/digest/handler.test.ts`, `tests/emulator/digest.test.ts`)
 - [x] Injection eval cases pass (M4: five cases in `evals/golden.jsonl`, all correct in the live eval at 85.0% agreement)
 
 ## Security checklist before v1.0.0
 Each item names the evidence. RUNBOOK step numbers are fixed (Part K, K14–K28). Items whose evidence is K14–K19 are ticked at K20, before the deploy. Items that need the v1.0.0 deploy (K21–K28) are marked "pending K25–K28" and are ticked by the docs-only PR after v1.0.0 (CLAUDE.md: deploys run only on tags, so that PR deploys nothing).
-- [ ] Secrets in Secret Manager, accessor only `hireframe-fns`, no public member, gitleaks green on `main` (C34, K15), ticked at K20
-- [ ] No user-managed service-account keys for any account (C48, K14), ticked at K20
-- [ ] Invoker audit: `allUsers` only on the 8 callables plus `ingestemailjobs` and `getdigest`, `hireframe-fns` only on the 3 scheduled, the guard only on `billingguard` (C49, K16; ticked at K20, re-confirmed at K27)
+- [x] Secrets in Secret Manager, accessor only `hireframe-fns`, no public member, gitleaks green on `main` (C34, K15; 24 Nov)
+- [x] No user-managed service-account keys for any account (C48, K14; 24 Nov: six accounts, none)
+- [x] Invoker audit: `allUsers` only on the 8 callables plus `ingestemailjobs` and `getdigest`, `hireframe-fns` only on the 3 scheduled, the guard only on `billingguard` (C49, K16; 24 Nov: 14 services, as listed; re-confirm at K27)
 - [ ] IAM snapshot taken before and after, diff exactly the Editor removal and the two build roles (K21, K26), pending K25–K28
 - [ ] Editor removed from the compute account and the proving deploy green: all 14 functions updated, builds SUCCESS as the compute account (C39, K23–K25, C50), pending K25–K28
 - [ ] Deployer roles equal the 9 Oct baseline (C43, K14, K21, K26), pending K25–K28
 - [x] Kill switch tested in a throwaway project (C30; the 17 Oct spike, `docs/plans/m8c-spike-results.md`)
 - [ ] Dry run on prod: below-threshold publish logs `below` with `dry_run`, and `BILLING_GUARD_MODE` is absent (C35, K27), pending K25–K28
-- [ ] A real budget message parsed (C47; within 24 h of K13; ticked at K20)
-- [ ] Budgets £2, £5 and £10 (actual and forecast) plus `hireframe-kill` (owner; RUNBOOK K13; ticked at K20)
+- [x] A real budget message parsed (C47; budget messages from 11 Nov, none invalid; passed 19 Nov)
+- [x] Budgets £2, £5 and £10 (actual and forecast) plus `hireframe-kill` (owner; RUNBOOK K13; 11 Nov)
 - [ ] Virtual card £50, passkey and recovery checked (owner; recorded with its date at RUNBOOK K19)
-- [ ] CPU and GPU quotas (all regions) at 0 (C53, K18)
-- [ ] Unused APIs disabled, one at a time, never `--force` (C32, C33, K17)
-- [ ] Restore drill (C17–C20, Sun 18 Oct; ticked at K20 as one of the five gates, K19)
+- [x] CPU and GPU quotas (all regions) at 0 (C53, K18): **not applicable** (24 Nov). The Compute Engine API is disabled, so no VM can start until a principal with `serviceusage.services.enable` enables it. Residual risk accepted until v1.0.1 arms the kill switch (it is `dry_run` today, so it does not yet cap spend). Other limits: the £50 virtual card and the passkey. Who holds that permission (K14 read A): `roles/owner` (the owner account), `roles/editor` on the compute account (removed at K24), the Google APIs service agent and the App Engine default account, and Google-managed service agents; `github-deployer` does not hold it directly. **The real path (K14 read B):** `github-deployer` holds `iam.serviceAccountUser` on the App Engine default account, which is an Editor, so a deploy that runs as that account could enable Compute. The deployer is reachable only through GitHub OIDC from the protected repository, so this path needs the owner's GitHub account, and a deploy needs the manual approval (RUNBOOK Part C step 27). Settled at v1.0.1 with the App Engine Editor: removed after v1.0.0 proves the pipeline, or accepted with a reason
+- [x] Unused APIs reviewed, one at a time, never `--force` (C32, C33, K17; 24 Nov): all five proposed disables were refused (`deploymentmanager` by `firebaseextensions`; `analyticshub`, `dataform`, `dataplex` and `bigquery` by `cloudapis`, and `bigquery` also by `bigquerystorage`), so none was disabled and nothing changed (IAM diff empty). Carried to the v1.0.1 review
+- [x] Restore drill (C17–C20, 20 Oct; one of the five gates, K19)
 - [x] The wipe is tested (emulator tests and the 1,000-job load test, M8 8B)
 - [x] Dependency audit allowlist with expiring entries (`npm run audit`, M8 8A, ADR-013 addendum)
 - [x] Every function states `maxInstances: 1` and its timeout, enforced by a table test and a source scan (`functions/src/index.test.ts`, M8 8C2 Session A)
@@ -67,10 +67,10 @@ Each item names the evidence. RUNBOOK step numbers are fixed (Part K, K14–K28)
 
 ### v1.0.0 release gates
 v1.0.0 is tagged only after all five (RUNBOOK K19 records them with dates):
-- [ ] RUNBOOK step 97: the phone speed test
-- [ ] The restore drill C17–C20
-- [ ] One clean weekday on v0.9.0
-- [ ] The Scan-now proof on v0.9.1: right after the deploy, Scan now shows System Succeeded with a run time, `digestNow` arrives, and `gcloud scheduler jobs list --location=europe-west2` shows every job
-- [ ] C47: a real budget message parsed
+- [x] RUNBOOK step 97: the phone speed test (passed 20 Oct; the median was not recorded, so fresh `hf:usable` numbers are taken at the v1.2.1 release)
+- [x] The restore drill C17–C20 (20 Oct)
+- [x] One clean weekday on v0.9.0 (Fri 16 Oct)
+- [x] The Scan-now proof on v0.9.1 (19 Nov): right after the deploy, Scan now shows System Succeeded with a run time, `digestNow` arrives, and `gcloud scheduler jobs list --location=europe-west2` shows every job
+- [x] C47: a real budget message parsed (19 Nov)
 
 One full clean weekday on v1.0.0 is a precondition for v1.0.1 (arming), not a v1.0.0 gate (ADR-059 addendum).
