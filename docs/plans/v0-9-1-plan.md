@@ -82,7 +82,7 @@ G1 review: `reviewer` (docs only). PR body lists the G1.1 output and "No code; n
 ### G2: closeout (after C47 and the post-K13 check)
 Branch from `origin/main` after G1 is merged and v0.9.1 is tagged.
 
-- [ ] **G2.1 Fill the evidence doc.**
+- [x] **G2.1 Fill the evidence doc.**
   - Allowed files: `docs/plans/v0-9-1-evidence.md`.
   - Pre-checks: Beeb has pasted every result in chat; C47 seen (or Decision 6 path taken).
   - Content: results, times, deploy job duration, which K6 bindings were added (so K9's scope is on record), whether C38b was needed, which push grant is live after K12 (project-level none / resource-level on the guard), whether the Budget API was enabled and when it was disabled.
@@ -90,7 +90,7 @@ Branch from `origin/main` after G1 is merged and v0.9.1 is tagged.
   - Acceptance: every row has a result or an explicit "not done + why"; `scan:pii` clean.
   - Hard area: no.
 
-- [ ] **G2.2 STATUS and CHANGELOG.**
+- [x] **G2.2 STATUS and CHANGELOG.**
   - Allowed files: `STATUS.md`, `CHANGELOG.md` (`[0.9.1]` date only, if the release day moved), `docs/plans/v0-9-1-plan.md`.
   - Change: STATUS Done "v0.9.1 tagged <date>, K6–K13 done, Scan-now proof passed, C47 seen <date>"; In progress → Phase 3 (K14–K18) next; Pending: "ADR-059 records the live push grant and C38b at K20" (Decision 2); Lessons (one line each) from the window; any RUNBOOK wording fixes queued for the K20 evidence commit or the post-v1.0.0 docs PR (Decision 1).
   - Tests to write first: none.
