@@ -19,6 +19,8 @@ Run Sat 17 Oct 2026 in the throwaway project `hireframe-guard-test-2050` (delete
 
 ## Decision pending (Beeb)
 
+*Decided 17 Oct: option A. See the ADR-059 addendum (8C2) in `docs/DECISIONS.md`.*
+
 Per m8c-plan decision 2, arming leaves M8. Options for v1.0.1:
 
 - Grant the prod guard `billing.projectManager` + `roles/browser` (tested).

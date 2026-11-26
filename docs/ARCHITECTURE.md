@@ -157,6 +157,7 @@ lookup add:  dedupe ─► create (lock, short) ─► S1 ─► S2 ─► ATS b
 ## Environments
 - `local`: emulators on the `demo-hireframe` project (can't reach real resources), fake data seeded by `npm run dev`, no real API calls unless `LIVE=1` (ADR-013).
 - `prod`: single Firebase project `hireframe-f6b03`, region `europe-west2`. (Staging not worth it for one user; guarded by emulator tests + eval gate + tagged deploys.)
+- Accounts in `prod` (ADR-060, from v1.0.0): functions run as `hireframe-fns`, or as `hireframe-billing-guard` for `billingGuard`; the deployer is `github-deployer`. The default compute account is **build-only**: Cloud Build runs as it (firebase-tools has no build-account field), it holds `logging.logWriter`, `artifactregistry.writer` on `gcf-artifacts` and a conditional `storage.objectViewer` on the `gcf-v2-` buckets, and no Editor. Nothing runs as it: every function sets `serviceAccount` and a test pins that.
 
 ## Web app config and deploy
 - The web app reads its Firebase config from Hosting's `/__/firebase/init.json` at runtime; no Firebase config lives in the repo (ADR-012). App Check uses reCAPTCHA Enterprise; the public site key is a build-time variable.

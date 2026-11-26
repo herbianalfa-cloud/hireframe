@@ -17,6 +17,7 @@ import {
   type ExistingJobKeys,
   type LockHolder,
   type Quota,
+  type ScanLock,
   type ScanSourceId,
   type SourceHealth,
 } from '@hireframe/shared';
@@ -59,14 +60,33 @@ function chunks<T>(items: readonly T[], size: number): T[][] {
   return out;
 }
 
+/**
+ * When a lock stops counting as held: its `staleAt`, or the scan's window after `startedAt` for a
+ * lock written before M6 (no `staleAt`). Undefined for a lock nobody holds (no `runId`) or one
+ * with no start. The one place the stale rule is written (ADR-048).
+ */
+export function lockLiveUntil(
+  lock: Pick<ScanLock, 'runId' | 'startedAt' | 'staleAt'> | undefined,
+): Date | undefined {
+  if (!lock?.runId || !lock.startedAt) return undefined;
+  return lock.staleAt ?? new Date(lock.startedAt.getTime() + SCAN.lockStaleMs);
+}
+
+/** True while the lock is held: it ends at `lockLiveUntil`, and that instant is already free. */
+export function isLockLive(
+  lock: Pick<ScanLock, 'runId' | 'startedAt' | 'staleAt'> | undefined,
+  now: Date,
+): boolean {
+  const until = lockLiveUntil(lock);
+  return until !== undefined && now.getTime() < until.getTime();
+}
+
 /** The live holder of `locks/scan`, or null when it is free or stale. */
 export async function liveLockHolder(db: Firestore, now: Date): Promise<LockHolder | null> {
   const snapshot = await db.doc(DOCS.scanLock).get();
   const parsed = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
-  if (!parsed.success || !parsed.data.runId || !parsed.data.startedAt) return null;
-  const staleAt =
-    parsed.data.staleAt ?? new Date(parsed.data.startedAt.getTime() + SCAN.lockStaleMs);
-  return now.getTime() < staleAt.getTime() ? (parsed.data.holder ?? 'scan') : null;
+  if (!parsed.success || !isLockLive(parsed.data, now)) return null;
+  return parsed.data.holder ?? 'scan';
 }
 
 export type WipeLockResult = { ok: true; recovered?: string } | { ok: false; holder: LockHolder };
@@ -83,10 +103,7 @@ export function acquireOrRefreshWipe(db: Firestore, now: Date): Promise<WipeLock
     const snapshot = await tx.get(lockRef);
     const parsed = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
     const lock = parsed.success ? parsed.data : undefined;
-    const staleAt = lock?.startedAt
-      ? (lock.staleAt ?? new Date(lock.startedAt.getTime() + SCAN.lockStaleMs))
-      : undefined;
-    const live = Boolean(lock?.runId && staleAt && now.getTime() < staleAt.getTime());
+    const live = isLockLive(lock, now);
     if (live && lock?.holder !== 'wipe') return { ok: false, holder: lock?.holder ?? 'scan' };
     const deadScan = !live && lock?.runId && !isShortHolder(lock.holder);
     const deadRunRef = deadScan && lock.runId ? db.doc(PATHS.run(lock.runId)) : null;
@@ -136,11 +153,7 @@ export function firestoreScanStore(db: Firestore): ScanStore {
         // An unreadable lock is treated as free: blocking every scan forever would be worse.
         const parsed = ScanLockSchema.safeParse(timestampsToDates(snapshot.data()));
         const lock = parsed.success ? parsed.data : undefined;
-        // `staleAt` is optional (locks written before M6 have none): fall back to the scan's.
-        const staleAt = lock?.startedAt
-          ? (lock.staleAt ?? new Date(lock.startedAt.getTime() + SCAN.lockStaleMs))
-          : undefined;
-        if (lock?.runId && staleAt && now.getTime() < staleAt.getTime()) {
+        if (lock && isLockLive(lock, now)) {
           return { ok: false, reason: 'running', holder: lock.holder ?? 'scan' };
         }
         if (lock?.lastFinishedAt && now.getTime() - lock.lastFinishedAt.getTime() < cooldownMs) {

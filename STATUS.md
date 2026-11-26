@@ -9,7 +9,7 @@ The repo copy is the master. Spec: `docs/PROJECT.md`. Plans: `docs/plans/`. Olde
 - **Release plan after v0.9.1** (24 Nov, Beeb): `main` is frozen from K20 to K28 (only #41 merges). Tags: v1.0.0 hardening (#41), v1.0.1 arming, v1.1.0 #42, v1.2.0 #43, v1.2.1 #45 + #44. Grouping: #43 alone; #45 + #44 together (one Hosting-only release). **#42 merges only after the v1.0.1 tag (arming).** Dependabot waits until after K28; #59 gets its own plan.
 - **PR queue** (24 Nov): #42, #43, #45 (with the lazy-screens fix) and #44 (rebased on `main`) have CI green and are unmerged. Merge order: #41 at K20; then, only after the v1.0.1 tag, #42, #43, #45, #44 in that order (tags above).
 - **v0.9.1 closeout** (19–24 Nov, Beeb): 8b closed on the 3 Nov Ready CV (`generateCvs` unchanged since 3 Nov 13:07Z); C7 accepted with one third-party reCAPTCHA console error; K13 deviations accepted (no separate £5 budget, scope "All projects (1)", done outside the window); K9's two Google service-agent lines accepted.
-- **App Engine default account's Editor:** stays in the ROADMAP parking lot (never spiked). v1.0.1 precondition: "removed, or accepted with a reason".
+- **App Engine default account's Editor:** stays in the ROADMAP parking lot (never spiked). v1.0.1 precondition: "removed, or accepted with a reason". The deployer's `serviceAccountUser` on it is the real path to re-enabling Compute (C53 N/A, 24 Nov; GitHub OIDC plus approval needed).
 - **Speed-up policy:**
   1. Work while gates run. A gate blocks the release, not the building.
   2. **Scan-now proof** for minor releases: right after the deploy, Scan now → System shows Succeeded → `digestNow` → `gcloud scheduler jobs list --location=europe-west2`.
@@ -63,10 +63,11 @@ Full list in `LEARNINGS.md` ("Parked ideas (full list)") and `docs/ROADMAP.md`.
 - From 8A2: reCAPTCHA load (F), slimmer Today docs (G), persistent cache (H). From 8C2: App Engine Editor; a custom role narrowing `roles/browser`; a build account.
 - **Native spend caps vs `billingGuard`** (11 Nov, Beeb): for the planner before v1.0.1 (arming the guard). Also re-check `hireframe-kill`'s scope ("All projects (1)" = `hireframe-f6b03` today) if another project ever joins this billing account. Not started.
 - [tech] **#44 hand-pinned `@firebase/app` 0.16.3 in `package-lock.json`** (1fbf396). A regenerated lockfile hoists 0.16.7 and nests 0.16.3, which fails `scripts/toolchain.test.ts`, and `npm dedupe` doesn't fix it. Remove the pin when firebase 13.x resolves to one copy: regenerate the lockfile on Node 24, and if the test passes without the edit, the pin is gone.
+- [tech] **Log alert on `serviceusage.services.enable` for `compute.googleapis.com`**, so you'd hear if someone enables it. Not built. Related: the App Engine default account's Editor is the real path (see Decisions).
 - **reCAPTCHA Enterprise `pat` 401 in the console** (24 Nov): a Google script request, not our code; accepted for C7 on v0.9.1. Re-check on the next console review.
 
 ## Pending / known
-- **ADR-059 and RUNBOOK edits go in #41's K20 commit** (v0.9.1 Decision 2): the live push grant (none) and that C38b was not used; K6/K6b/K9 wording. The R7 median `hf:usable` (ms) for the K20 evidence is not recorded.
+- **R7 median `hf:usable`:** recorded date-only (20 Oct, passed). Take fresh numbers (5 reloads, median) at the #45 + #44 release (steps 89 and 97).
 - **One application is blocked in Chosen since 19 Nov** (word check, twice). A Retry costs up to about 18p and may block again until #42 ships.
 - **Audit allowlist:** zod via `@google/clasp` until 2027-01-31. Review it by then.
 - **Dependabot alert #4 (moderate): leave it open.** `sprintf-js` via `mammoth`, no patch; owner-only upload.
@@ -78,6 +79,7 @@ Full list in `LEARNINGS.md` ("Parked ideas (full list)") and `docs/ROADMAP.md`.
 - Plans are saved to `docs/plans/` before building. Claude Code updates STATUS.md in every PR. Instructions to Beeb follow Playbook Part 5 (one step at a time).
 - Show Beeb any `gh api`, force-push, tag, deploy or gcloud command, and wait for approval. Beeb runs every deploy, tag, IAM and console change.
 - Only tag after the PR is merged (`git checkout main && git pull` first).
+- **Cloud identity:** account herbianalfa@… (Owner of hireframe-f6b03), gcloud configuration `hireframe`, Firebase CLI pinned with `login:use` in this repo. Start every cloud step with `export CLOUDSDK_ACTIVE_CONFIG_NAME=hireframe` (it affects that shell only) and keep `--project=hireframe-f6b03` on every command.
 - **Release windows are in London time** (weekday 10:00–16:00 London, as in the plan), wherever Beeb is working. Beeb converts to local time; Claude states every deadline in London time and reads the app's times as London unless the screen says otherwise.
 - UI changes: check locally with `npm run dev` before merging, then on the live site after the deploy.
 - No automated browsing or scraping of LinkedIn (CLAUDE.md hard rule, ADR-004).

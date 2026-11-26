@@ -43,6 +43,8 @@ export const lookup = onCall(
   {
     ...ownerOptions,
     timeoutSeconds: CALLABLE_TIMEOUT_SECONDS.lookup,
+    // Stated here as well as in the global options, so a change there can't widen this one.
+    maxInstances: 1,
     secrets: [anthropicApiKey],
   },
   safeHandler('lookup', async (request): Promise<LookupResult> => {
