@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
+import { deployEnvFile } from '../functions/src/deploy-env.ts';
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const functionsDir = join(root, 'functions');
 const outDir = join(functionsDir, 'deploy');
@@ -82,5 +84,11 @@ writeFileSync(
     2,
   )}\n`,
 );
+
+// The guard's mode for the production project (v1.0.1): validated source in, one env file out.
+const deployEnv = deployEnvFile(
+  readFileSync(join(functionsDir, 'deploy-env/hireframe-f6b03.env'), 'utf8'),
+);
+writeFileSync(join(outDir, deployEnv.name), deployEnv.content);
 
 console.log(`build-functions: wrote ${outDir}`);

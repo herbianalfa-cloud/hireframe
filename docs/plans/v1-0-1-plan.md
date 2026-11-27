@@ -86,7 +86,7 @@ G1 review: `reviewer`. PR body: "No code; no self-triggering surface changed."
 ### G2: arm through the build, plus runbook and ADR (code + docs)
 Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order change, Beeb 27 Nov: built early, stacked on the plan branch; say "Stacked on" in the PR body). It is rebased onto `origin/main` after G1 merges and before B1. Built while the clean weekday runs. **Merged by Beeb only at B1.** Not pushed without Beeb's OK.
 
-- [ ] **G2.1 Deploy env for the guard (tests first).**
+- [x] **G2.1 Deploy env for the guard (tests first).**
   - Allowed files:
     - `functions/deploy-env/hireframe-f6b03.env` (new, committed source: one line, `BILLING_GUARD_MODE=armed`; Decision 1, Beeb 2026-11-27: a non-dot name, so `.gitignore` (`.env*`, kit block `.env.*`) and the kit guard don't apply);
     - `functions/src/deploy-env.ts` (new, import-free so `scripts/` can import it with `.ts`, as `scripts/load-test.ts` does): `deployEnvFile(sourceText)` validates and returns `{ name, content }`;
