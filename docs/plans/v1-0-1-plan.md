@@ -23,6 +23,8 @@ Sources read: `CLAUDE.md`, `.claude/kit/WORKFLOW.md`, `docs/PROJECT.md`, `STATUS
 6. Whether the console now lets `hireframe-kill`'s scope be set to the single project (K13 could not).
 7. Whether the £50 virtual card limit (m8-billing-guards §8) is in place.
 8. The deployer's post-v1.0.0 role baseline (C43 after K26).
+9. Whether a budget notification carries a budget ID (payload or Pub/Sub attributes). Decides G2.4's identity check; checked in G1.2 from Google's schema and a real logged message.
+10. Whether any function runs with no explicit runtime account (R14), and what the console's excess-permissions insight says (R15; skipped if it needs an API).
 
 ## 2. Goal and definition of done
 
@@ -32,10 +34,12 @@ Sources read: `CLAUDE.md`, `.claude/kit/WORKFLOW.md`, `docs/PROJECT.md`, `STATUS
 1. **Preconditions:** `git ls-remote --tags origin v1.0.0` shows the tag. K28's docs PR is merged. The evidence doc records the clean weekday(s) per Decision 12.
 2. **App Engine account:** after A2, the R1 read prints no `roles/editor`, or Decision 3's "accept" is recorded with its reason in the ADR addendum. The deployer's `serviceAccountUser` on it is kept with the code reason (Decision 4). R2 still shows it.
 3. **Publishers:** R5 lists only the `user:` Owner (accepted, not pasted) and Google service agents (listed by role) as project-level holders of `pubsub.topics.publish`. R6 shows only Google's budget publisher on the topic. Both run in B0 on the release day.
+3b. **Identities and invoker:** R14 shows no function running as the App Engine account; R16 lists only the Eventarc trigger account as `billingguard`'s invoker; R17 shows only `hireframe-kill` publishing to the topic.
 4. **Kill-budget scope:** the budget list shows `hireframe-kill` scoped to `hireframe-f6b03` only. If Decision 6 → B: R7 prints exactly one project, and the RUNBOOK rule is in G2.
 5. **K17:** each API refused at K17 has a recorded outcome (disabled, or kept with a reason) in the evidence doc.
 6. **API-enable alert:** Monitoring → Alerting lists `hireframe-api-enabled`, enabled, with the owner's email channel (set in the console, never in the repo). Its query shows ≥ 1 historic match in Logs Explorer, which proves the filter.
-7. **Native cap:** Decision 5 is recorded. If a cap is chosen, Budgets & alerts lists it with spend cap on and not enforced.
+6b. **Failure alert:** Monitoring → Alerting lists `hireframe-guard-failed`, enabled, with the owner's email channel, and its field names were checked against a `billing_guard.below` row (A4b).
+7. **Native cap:** Decision 5 is recorded. If a cap is chosen, Budgets & alerts lists it with spend cap on and not enforced, at about £40 (above the £25 kill budget) or with `billingGuard` excluded.
 8. **Repo (G2):** `node .claude/kit/gate.mjs` all 0. the committed source file `functions/deploy-env/hireframe-f6b03.env` (one line, `BILLING_GUARD_MODE=armed`) is copied by `npm run build` to `functions/deploy/.env.hireframe-f6b03` (the build wipes that folder first), and no `.env`, `.env.prod` or `.env.local` there. `node scripts/smoke-functions-bundle.ts` asserts and prints it. The existing dry-run wiring test (env unset → no `fetch`) still passes unchanged.
 9. **Release:** `v1.0.1` points at a `main` commit containing G2. `git log --oneline v1.0.0..v1.0.1` lists only the K28 docs PR, G1 and G2 (Decision 11). The Deploy log shows every function `Successful update operation` (the env change alters every function's hash, `hash.js:11`) and no failure. Job time recorded.
 10. **Armed (B4–B8):** the env read shows `BILLING_GUARD_MODE=armed` on `billingGuard`. A £1 publish logs `billing_guard.below` with `mode: armed` within 2 min, both before and after the grant. `flat | grep $GUARD` prints exactly the two roles. The IAM diff vs `iam-before-101.txt` is exactly those two `>` lines. `billingEnabled` is `True`. **No over-threshold publish in prod, ever.**
@@ -47,7 +51,7 @@ Sources read: `CLAUDE.md`, `.claude/kit/WORKFLOW.md`, `docs/PROJECT.md`, `STATUS
 - **WORKFLOW gate 5 / C11:** Claude never merges, tags, deploys or touches gcloud, IAM or the console. Beeb runs every command, each shown in chat and approved first (memory: show admin commands, wait for OK).
 - **IAM:** only `add-`/`remove-iam-policy-binding`, **never `set-iam-policy`**. Never touch the `user:` owner binding. Every member spelled out. Snapshot (`flat > ~/iam-*.txt`) before and `diff` after every change. Snapshots stay in `~`, never the repo.
 - **C5 / never relax:** the £25 `hireframe-kill`, £2 and £10 budgets, the 3200p cap, the 52p lease and every daily cap stay as they are. A native cap only adds a limit (Decision 5). A failing gate, bundle or eval budget is Beeb's call.
-- **CLAUDE.md no-self-triggering:** G2 adds no function, trigger or loop. `billing/*.ts` is unchanged, and its source guard (no publish, Firestore, Cloud Tasks or timers) still runs. The alert and the native cap are console objects that only send email. Say so in the G2 PR body.
+- **CLAUDE.md no-self-triggering:** G2 adds no function, trigger or loop. only `billing/decide.ts` (a pure function) and its schema and handler wiring change (G2.4); `billing/client.ts` and the write path do not, and the source guard (no publish, Firestore, Cloud Tasks or timers) still runs. The alert and the native cap are console objects that only send email. Say so in the G2 PR body.
 - **CLAUDE.md config rule:** the deploy mode has one source of truth in `functions/src/`, never a literal copied into a script.
 - **ADR-059:** only the exact string `armed` arms; unset means dry run. The guard's target is the metadata project. Before arming, the topic shows only the budget publisher, plus a project-level publisher read.
 - **STATUS speed-up policy 2 and 3:** Scan-now proof after the deploy. A full clean weekday on v1.0.0 before arming (re-confirm, Decision 12).
@@ -103,7 +107,7 @@ Branch `feat/v1-0-1-arming-g2` from `origin/main` after G1 merges. Built while t
     - tests pass; gate 0;
     - `npm run build`, then `node scripts/smoke-functions-bundle.ts` reports one file with exactly one line;
     - `npm run dev` still starts (the emulator, `demo-hireframe`, never loads `.env.hireframe-f6b03`, `env.js:179-190`);
-    - `billing/*.ts` is untouched; the dry-run wiring test passes unchanged.
+    - G2.1 touches no `billing/*.ts`; the dry-run wiring test passes unchanged.
   - Hard area: **yes**.
 - [ ] **G2.2 Smoke check.**
   - Allowed files: `scripts/smoke-functions-bundle.ts`.
@@ -116,7 +120,8 @@ Branch `feat/v1-0-1-arming-g2` from `origin/main` after G1 merges. Built while t
     - the mechanism (Decision 1);
     - the order (Decision 2: code first, roles last);
     - option A's roles at project level;
-    - the disarm route (remove the two roles, then flip the constant and release a patch);
+    - the disarm route (remove the two roles, then set the source file to `dry_run` and release a patch);
+    - the guard acts only on a current-month `hireframe-kill` message (G2.4), and whether the payload carries a budget ID;
     - the deployer's `actAs` on the App Engine account kept, with the firebase-tools citation;
     - "every function now carries `BILLING_GUARD_MODE`; only `billingGuard` reads it".
   - RUNBOOK gets a new **Part L (v1.0.1)**:
@@ -126,6 +131,23 @@ Branch `feat/v1-0-1-arming-g2` from `origin/main` after G1 merges. Built while t
     - Recovery entries **"Disarm `billingGuard`"** and **"API-enabled alert fired"**.
   - Acceptance: every command in Part L matches section 8 word for word. `scan:pii` clean. Gate 0.
   - Hard area: yes (IAM text).
+
+- [ ] **G2.4 The guard acts only on a current-month `hireframe-kill` message (tests first).**
+  - Allowed files: `functions/src/billing/decide.ts`, `functions/src/billing/decide.test.ts`; `functions/src/billing/schema.ts`, `handler.ts` and `handler.test.ts` only to pass a clock and, if the payload has one, a budget ID; `functions/src/config.ts` only for a constant. **Not** `client.ts`, `functions/src/http/client.ts` or the write path.
+  - What the code does today (read 27 Nov): acts only when `budgetDisplayName` equals `hireframe-kill` (`decide.ts:17`), ignores the forecast fields (`decide.ts:12-13`, test at `decide.test.ts:57`) and requires GBP (`decide.ts:20`). Missing: `costIntervalStart` is parsed as a non-empty string and never checked, so a replayed or stale message from an earlier month still kills. The schema has no budget ID.
+  - Pre-checks:
+    - Read Google's budget-notification schema and one real logged message (G1.2) and record whether the payload or the Pub/Sub attributes carry a budget ID. **Not verified from the repo.**
+    - If one does, also require it to equal the `hireframe-kill` ID, held in `config.ts`.
+    - If none does, the display name stays the identity. Anyone who can create a budget can pick that name, so say so in the ADR and keep R5/R6/R17 as the control.
+  - Tests to write first (injected clock):
+    - a message with `costIntervalStart` in the current month, cost at the budget, armed → `disable`;
+    - the same message with last month's start → `ignored` (`stale_period`), and no client call;
+    - an unparseable or future `costIntervalStart` → `ignored`, no client call;
+    - another budget name, another currency → `ignored` (existing tests stay);
+    - forecast fields set and cost below the budget → `below` (existing test stays); forecast set with cost at the budget → the actual cost decides, as today.
+  - Change: `decideGuard` takes the clock and compares the year and month of `costIntervalStart` with it. "Current month" is UTC; at the month boundary a message may be ignored for a few hours, which fails safe (no kill). Logged as `billing_guard.ignored` at info, so it doesn't trip the clean-weekday check. Small decision, listed in the PR.
+  - Acceptance: tests pass; gate 0; `git diff --stat` shows no change to `billing/client.ts` or `http/client.ts`; the source-guard test (no publish, Firestore, Cloud Tasks or timers) passes unchanged. Hard area: yes (money, kill logic).
+  - Decision 10: G2.4 changes only the pure decision, not the client path, so it doesn't by itself require the throwaway armed kill test. If a builder has to touch `client.ts`, Decision 10 applies. **Beeb to confirm this reading.**
 
 G2 review: `reviewer-deep`. Gate set: the gate, `npm run build`, `smoke-functions-bundle`, `check:bundle`, `test:rules`, `audit`. The PR body states the no-self-triggering check.
 
@@ -139,7 +161,7 @@ Branch from `origin/main` after the v1.0.1 tag.
 
 ## 5. Decisions (recommendation first)
 
-**Decided by Beeb, 2026-11-27:** D1–D13 and R1–R2 as recommended below, except **D1**, amended: the committed non-dot source file, plus the two checks in G2.1. The "still OK?" items (R1, R2, speed-up policy 2–3, K13 scope deviation + Budget API rule) are confirmed.
+**Decided by Beeb, 2026-11-27:** D1–D13 and R1–R2 as recommended below, except **D1**, amended: the committed non-dot source file, plus the two checks in G2.1. **Second opinion, 27 Nov (applied):** D5 amended (cap above the kill budget, about £40); new reads R14–R17; new step G2.4 (the guard acts only on a current-month `hireframe-kill` message); a log alert on `billing_guard.failed` (A4b); B10 checks the first message after the grant. The "still OK?" items (R1, R2, speed-up policy 2–3, K13 scope deviation + Budget API rule) are confirmed.
 
 | # | Decision | Options | Recommendation + why | In STATUS Decisions? |
 |---|---|---|---|---|
@@ -147,7 +169,7 @@ Branch from `origin/main` after the v1.0.1 tag.
 | 2 | Order in window B | **A:** deploy the armed code first, check, then grant the two roles last. B: grant first, then deploy | **A.** Armed code without a billing role can't disable anything (a 403 → `failed`), so the grant is the single switch. It is instant and removed with one command, and the 15:30 hard stop is safe. B leaves no inert stage. | No (new) |
 | 3 | App Engine default account's Editor | **A:** remove it in window A, after R1–R4 show nothing runs as it. B: accept with a reason. C: disable the account | **A.** It can publish to `billing-guard`, so it can forge a kill once armed. The deployer can act as it (`serviceAccountUser`), so a deploy could run code with Editor. No function, trigger or scheduler job uses it (C39b, C3). Rollback is one `add-` command. Trade-off: unknown Google-side users; R4 only sees Admin Activity logs. C is untested and broader. | Yes: **re-confirm** ("removed, or accepted with a reason") |
 | 4 | The deployer's `serviceAccountUser` on the App Engine account | **A:** keep it, and record why. B: remove it and prove with a deploy. C: delete the account | **A.** firebase-tools 15.34.1 runs `checkServiceAccountIam` before every functions deploy and throws unless the deployer has `actAs` on `<project>@appspot…` (`deploy.js:83`, `checkIam.js:31-47`). B would fail every deploy in prepare. C is hard to undo, with unknown side effects. Revisit when firebase-tools changes (G1.2 item 3). | No (new; parallels ADR-060 for the compute account) |
-| 5 | Native spend caps vs `billingGuard` (GA 31 Oct 2026) | **A:** arm the guard and add one native cap on the billing service that carries our function costs, at £25. B: the same at a lower amount (for example £10). C: park native caps. D: native caps instead of arming | **A.** Caps cover only Gemini, Vertex, Cloud Run and Cloud Run functions, per project and service. They never delete resources, act on estimated cost (faster) and auto-lift monthly. They are not hard caps (lag; overage billed). At £25 the guard still covers every other service first (Compute, Firestore, Storage, Build). The cap is a gentler, earlier stop if functions alone run away. **Trade-off:** an enforced functions cap pauses the app **and `billingGuard` itself** for the rest of the month, so B buys speed at the price of the backstop. D is rejected: it leaves the stolen-account route (Compute) uncovered. Cost £0 (no fee listed). | Parked idea (11 Nov), now decided |
+| 5 | Native spend caps vs `billingGuard` (GA 31 Oct 2026) | **A (amended, second opinion 27 Nov):** arm the guard and add one native cap on the billing service that carries our function costs, **above the £25 kill budget (about £40)**, or exclude `billingGuard` from it if R11 shows caps can be scoped per service. B: the same at £25 or lower (for example £10). C: park native caps. D: native caps instead of arming | **A.** Caps cover only Gemini, Vertex, Cloud Run and Cloud Run functions, per project and service. They never delete resources, act on estimated cost (faster) and auto-lift monthly. They are not hard caps (lag; overage billed). The £25 kill budget fires first for every service (Compute, Firestore, Storage, Build, functions), so the cap is only a later backstop if functions alone run away. **Trade-off:** an enforced functions cap pauses the app **and `billingGuard` itself** for the rest of the month, so it sits above the kill amount (about £40) and can never pause the guard before the kill has had its chance. B (£25 or lower) would. D is rejected: it leaves the stolen-account route (Compute) uncovered. Cost £0 (no fee listed). | Parked idea (11 Nov), now decided |
 | 6 | `hireframe-kill` scope ("All projects (1)") | **A:** in window A, retry in the console to set the scope to `hireframe-f6b03` only; if refused, B. B: accept, plus R7 (one project on the billing account) in every arming pre-check, plus the RUNBOOK rule. C: set it with the Budget API (enable it for the step, then disable) | **A, then B.** Once armed, another project's spend would count toward the kill and unlink this project. A costs nothing. B is safe while R7 prints one project. C needs the API that stays disabled outside a K step. | Yes: **re-confirm** (v0.9.1 closeout K13 deviation; Budget API rule) |
 | 7 | K17 carry-over (disables refused by `cloudapis` dependencies) | **A:** keep those APIs enabled, recording each with a reason; Decision 8's alert covers new enables. B: disable `cloudapis.googleapis.com` first, then retry each disable alone (no `--force`), each followed by the K17 check. C: `--force` | **A.** Idle APIs cost £0, and anyone who can misuse them as Owner can re-enable them. B is untested (unverified that disabling the umbrella leaves its dependencies alone) and needs a check per API. C is banned (never `--force`). Revisit with the K17 list in G1.2. | No (new; STATUS Done says "carry to v1.0.1") |
 | 8 | API-enable log alert | **A:** one log-based alert on any Service Usage enable (all APIs). B: compute only, as scoped. C: none | **A.** The deployer can't enable APIs (`serviceUsageConsumer`), so an enable means a person or an attacker. It is rare and covers compute plus everything else at the same cost (≤ about $0.35/month, unverified). Trade-off: a console page that auto-enables an API will email too. | No (new) |
@@ -162,7 +184,7 @@ Branch from `origin/main` after the v1.0.1 tag.
 ## 6. Risks
 
 **Security**
-- **Forged kill once armed:** anyone with `pubsub.topics.publish` can unlink billing. Mitigations: R5 and R6 before B6; removing Editor from the App Engine account (Decision 3); the compute account's Editor goes at v1.0.0 K24.
+- **Forged kill once armed:** anyone with `pubsub.topics.publish` can unlink billing. A replayed old message is stopped by G2.4. Mitigations: R5, R6, R16 and R17 before B6; removing Editor from the App Engine account (Decision 3); the compute account's Editor goes at v1.0.0 K24.
 - **Residual route:** the deployer has `serviceAccountUser` on `hireframe-billing-guard` (K5), so a malicious deploy could run code as the guard and unlink billing. That is a DoS only. Deploys need a `v*` tag plus Beeb's `production` approval. Accepted, and recorded in the ADR.
 - **Role scope:** `billing.projectManager` also allows linking billing, and `roles/browser` reads project metadata. A custom role narrowing `browser` stays parked.
 - **Snapshots:** `~/iam-*-101*.txt` stay in the home directory. Paste role lists only.
@@ -232,21 +254,28 @@ Every command is shown in chat and approved before it runs. Use a `bash` tab wit
    - **R8** APIs: `gcloud services list --enabled --project=$P --format='value(config.name)' | sort`. Note `compute`, `monitoring` and the K17 list.
    - **R9** guard now: C14b, the K12 env read (no `BILLING_GUARD_MODE`), and `flat | grep "serviceAccount:$GUARD"` (expect nothing).
    - **R10** console, Billing → Reports: this month and last, grouped by service, for this project. Note the services that carry function costs.
-   - **R11** console, Budgets & alerts → Create budget: check that a spend-cap option is offered in GBP for that service. **Don't save.**
+   - **R11** console, Budgets & alerts → Create budget: check that a spend-cap option is offered in GBP for that service, and whether a cap can be scoped per service or exclude `billingGuard` (D5). **Don't save.**
    - **R12** roles: `gcloud iam roles describe roles/billing.projectManager --format='value(includedPermissions)' | tr ';' '\n' | grep deleteBillingAssignment` and `gcloud iam roles describe roles/browser --format='value(includedPermissions)' | tr ';' '\n' | grep -x resourcemanager.projects.get`. Each prints one line.
    - **R13** C43: the deployer's roles equal the post-v1.0.0 baseline (K26).
+   - **R14** runtime identities: `gcloud functions list --gen2 --project=$P --format='table(name,serviceConfig.serviceAccountEmail)'`. Expect every function on a dedicated account (`hireframe-fns@…`, `hireframe-billing-guard@…`) and none on `$APPSPOT` or the compute default. Any function with no explicit account runs as the App Engine default: record it and stop before A2.
+   - **R15** console, IAM → the App Engine account's row → excess-permissions insight: record what it says about `roles/editor`. If it asks to enable an API, skip it (don't enable) and note "skipped".
+   - **R16** invoker: `gcloud run services get-iam-policy billingguard --region=$R --project=$P --format='value(bindings.role,bindings.members)'`. Expect only `roles/run.invoker` for the Eventarc trigger account (the guard account, as C46). Anything else → stop.
+   - **R17** console, Billing → Budgets & alerts: for each budget open its notifications. Only `hireframe-kill` publishes to the `billing-guard` topic; the £2, £5 and £10 budgets are email only. (Console only: the Budget API stays disabled outside a K step.)
+   - R5 and R6 (project-level publishers and the topic policy) are the STATUS precondition and run again at A0 and B0.
 
 **Window A (weekday 10:00–16:00, no deploy)**
 
 | Step | What Beeb does | Expected | Rollback |
 |---|---|---|---|
+| A0 | R1–R9 and R14–R17 again, the same day, before any change | as the reads; any surprise → stop before A1 | — |
 | A1 | `cd ~ && flat > ~/iam-before-101a.txt && wc -l ~/iam-before-101a.txt` | line count recorded | — |
 | A2 (D3) | `gcloud projects remove-iam-policy-binding $P --member=serviceAccount:$APPSPOT --role=roles/editor --condition=None` | R1 prints no `roles/editor` | `add-` with the same arguments |
 | A3 | `flat > ~/iam-after-101a.txt && diff ~/iam-before-101a.txt ~/iam-after-101a.txt`; C43 | exactly `< roles/editor serviceAccount:<project>@appspot…`; any other line → stop | per line |
 | A4 (D8) | Logs Explorer, query: `logName="projects/hireframe-f6b03/logs/cloudaudit.googleapis.com%2Factivity" AND protoPayload.serviceName="serviceusage.googleapis.com" AND (protoPayload.methodName:"EnableService" OR protoPayload.methodName:"BatchEnableServices")`, range = max. Then Actions → Create log alert `hireframe-api-enabled`, 5 min notification rate, owner email channel. If the console asks to enable an API → stop and ask | ≥ 1 historic match; the policy is listed and enabled | delete the policy |
+| A4b (D8) | Logs Explorer, query: Cloud Run revision logs of `billingguard` at ERROR whose message is `billing_guard.failed`. Check the field names first by running the same query with `billing_guard.below` (the K12 publish rows) and reading one row; then Create log alert `hireframe-guard-failed`, 5 min notification rate, owner email channel. Same console rules as A4 (an API prompt → stop and ask). No VM-creation alert: Compute is off and A4 covers enabling it | the policy is listed and enabled; the `below` check shows the field names | delete the policy |
 | A5 (D6) | Budgets & alerts → `hireframe-kill` → Scope → Projects: only `hireframe-f6b03` → Save. Re-open: amount £25, actual, topic still `billing-guard` | scope shows the one project; refused → record the message, Decision 6 B | edit back |
 | A6 (D7) | Per Decision 7 (A: record each API and its reason; B: each disable shown alone) | per decision | `gcloud services enable <api> --project=$P` |
-| A7 (D5) | If A/B: Create budget `hireframe-cap-functions`, this project, the R10 service, the amount chosen, spend cap on, **no** topic link | listed, spend cap, not enforced | lift, then delete |
+| A7 (D5) | If A/B: Create budget `hireframe-cap-functions`, this project, the R10 service, about £40 (above the £25 kill budget), or with `billingGuard` excluded if R11 allowed it, spend cap on, **no** topic link | listed, spend cap, not enforced | lift, then delete |
 | A8 | C1–C3, C39a/C39b; the live site loads; the next scheduled scan and the digest | as RUNBOOK K10/K11 | per Recovery |
 
 3. **Clean weekday** (Decision 12) on the next weekday. Paste the five reads. Meanwhile Claude builds G2 (review included).
@@ -265,13 +294,13 @@ Every command is shown in chat and approved before it runs. Use a `bash` tab wit
 | B7 | `flat > ~/iam-after-101.txt && diff ~/iam-before-101.txt ~/iam-after-101.txt`; C43 | exactly two `>` lines for `$GUARD`; deployer unchanged | other line → stop |
 | B8 | the £1 publish again + log read; `billingEnabled` | `below`, `mode: armed`; `True` | stop, disarm |
 | B9 | Scan-now proof: Scan now Succeeded; `digestNow` Completed with mail; scheduler list three ENABLED; live site loads | as v0.9.1 steps 5–8 | stop, Claude diagnoses |
-| B10 | Within 24 h: the K13 log read, `--freshness=1d`, plus a per-severity count | real messages `below`, `mode: armed`; no `invalid`/`failed`/`disabled`/WARNING+ | `.invalid` → disarm (B6 `remove-`), diagnose |
+| B10 | Within 24 h: the K13 log read, `--freshness=1d`, plus a per-severity count | the **first real message after B6** is `billing_guard.below`, `mode: armed` (the log has no separate decision field: the event name is the decision); all real messages `below`, `mode: armed`; no `invalid`/`failed`/`disabled`/WARNING+ | `.invalid` → disarm (B6 `remove-`), diagnose |
 | B11 | The next scheduled scan Succeeded; the next digest arrived | — | Recovery |
 | B12 | `gcloud auth revoke` on the laptop (C41). Paste the results for G3 | — | — |
 
 **Never** publish `costAmount` ≥ 25 to `billing-guard` in prod: armed, it unlinks billing.
 
 ## 9. Noticed
-1. **An enforced native functions cap also pauses `billingGuard`**, because it is a Cloud Run function. That is why Decision 5 recommends the cap at the kill amount, not below it. Confirm in R11 that the service list says so.
+1. **An enforced native functions cap also pauses `billingGuard`**, because it is a Cloud Run function. That is why Decision 5 (amended) puts the cap above the kill budget, at about £40, or excludes `billingGuard` if R11 shows per-service scoping. Confirm in R11 that the service list says so.
 2. **#42 (CV quality, the user-facing win) now waits ≥ 3 weekdays after K28** behind an ops release that changes no code path #42 touches. If Beeb lets #42 ship first, the clean weekday moves to v1.1.0 instead (R2).
-3. **Detection gap:** nothing alerts on `billing_guard.failed`/`disabled` or on `compute.instances.insert` (the stolen-account VM route). A second log alert at the same cost would cover both. Parked unless Beeb wants it in window A.
+3. **Detection gap:** A4b now alerts on `billing_guard.failed`. Nothing alerts on `billing_guard.disabled` (billing going off is hard to miss) or on VM creation (Compute is off, and A4 covers enabling it). Both left out on purpose.
