@@ -557,6 +557,76 @@ Every command is shown in chat and approved before it runs. Use only `add-` and 
 
 After K13, check that the next scheduled scan succeeds and the morning digest arrives. K14 onwards (the stolen-account guards, Editor removal and `v1.0.0`) belong to PR 8C2.
 
+### Part L: Arm the billing kill switch (`v1.0.1`)
+Design: `docs/plans/v1-0-1-plan.md` (section 8 is the source of the steps below), the ADR-059 addendum for v1.0.1. `billingGuard` is armed by a committed one-line source file, `functions/deploy-env/hireframe-f6b03.env` (`BILLING_GUARD_MODE=armed`), which the build copies to `functions/deploy/.env.hireframe-f6b03`; the grant of the two billing roles (B6) is the switch. Nothing here runs before v1.0.0 is tagged, deployed and K28 is done. Window A has no deploy; window B is the release. Both run on a weekday between 10:00 and 16:00 (London), after the morning digest, with nothing Generating. **Hard stop: B6 not done by 15:30 → don't grant; resume next weekday** (armed code without the roles is inert).
+
+Rules for this Part:
+- **Never publish at or above the threshold in prod.** Never publish `costAmount` ≥ 25 to `billing-guard` in prod: armed, it unlinks billing.
+- **Set `hireframe-kill`'s scope before linking any other project to the billing account** (A5, R7). Once armed, another project's spend counts toward the kill and unlinks this project.
+- Use only `add-` and `remove-iam-policy-binding`, never `set-iam-policy`, and never touch the `user:` owner binding. Snapshots (`flat > ~/iam-*.txt`) stay in `~`, never the repo.
+- **K12's publish message (B5, B8) needs a current `costIntervalStart`.** Since G2.4 the guard ignores a message whose `costIntervalStart` is not in the current UTC month (`billing_guard.ignored`, reason `stale_period`, never `below`). K12's example uses `2026-10-01T00:00:00Z`: for B5 and B8 change it to the first of the current month (`YYYY-MM-01T00:00:00Z`). If `BILLING_GUARD.budgetId` in `functions/src/config.ts` is set, the publish also needs `--attribute=budgetId=<that ID>`, or the log shows `billing_guard.ignored` with reason `wrong_budget_id`.
+
+Every command is shown in chat and approved before it runs. Use a `bash` tab with the RUNBOOK Part K setup block, plus `APPSPOT=$P@appspot.gserviceaccount.com`. Paste role lists and log tables only: no `user:` lines and no email addresses; `<NUM>`, `<BILLING_ID>`.
+
+**Before window A (after K28): reads (read-only, any weekday)**
+- **R1** App Engine account roles: `gcloud projects get-iam-policy $P --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$APPSPOT" --format='value(bindings.role)'`. Expect `roles/editor`; record anything else.
+- **R2** who can act as it: `gcloud iam service-accounts get-iam-policy $APPSPOT --project=$P --format='value(bindings.role,bindings.members)'`. Expect only the deployer's `serviceAccountUser`.
+- **R3** nothing runs as it: C39a/C39b (RUNBOOK K10) and C3 (step 101) show no `$APPSPOT`. `gcloud app describe --project=$P --format='value(id,servingStatus,serviceAccount)'`: record the result or "no App Engine application".
+- **R4** its activity: `gcloud logging read "protoPayload.authenticationInfo.principalEmail=\"$APPSPOT\"" --project=$P --freshness=30d --limit=20 --format='table(timestamp,protoPayload.serviceName,protoPayload.methodName)'`. Expect empty (Admin Activity only).
+- **R5** project-level publishers:
+  ```bash
+  for ROLE in $(flat | cut -f1 | sort -u | grep '^roles/'); do gcloud iam roles describe "$ROLE" --format='value(includedPermissions)' 2>/dev/null | tr ';' '\n' | grep -qx 'pubsub.topics.publish' && flat | awk -F'\t' -v r="$ROLE" '$1==r && $2 !~ /^user:/ {print r, $2}'; done
+  flat | cut -f1 | sort -u | grep '^projects/'
+  ```
+  The second line lists custom roles (expect none). Expect only Google service agents plus `$APPSPOT` (Editor) before A2.
+- **R6** topic: `gcloud pubsub topics get-iam-policy billing-guard --project=$P --flatten='bindings[].members' --format='value(bindings.role,bindings.members)'`. Expect only `roles/pubsub.publisher` for `billing-budget-alert@system…`.
+- **R7** billing account: `gcloud billing projects describe $P --format='value(billingAccountName,billingEnabled)'` (don't paste the ID), then `gcloud billing projects list --billing-account=<BILLING_ID> --format='value(projectId)'`. Expect exactly `hireframe-f6b03`.
+- **R8** APIs: `gcloud services list --enabled --project=$P --format='value(config.name)' | sort`. Note `compute`, `monitoring` and the K17 list.
+- **R9** guard now: C14b, the K12 env read (no `BILLING_GUARD_MODE`), and `flat | grep "serviceAccount:$GUARD"` (expect nothing).
+- **R10** console, Billing → Reports: this month and last, grouped by service, for this project. Note the services that carry function costs.
+- **R11** console, Budgets & alerts → Create budget: check that a spend-cap option is offered in GBP for that service, and whether a cap can be scoped per service or exclude `billingGuard` (D5). **Don't save.**
+- **R12** roles: `gcloud iam roles describe roles/billing.projectManager --format='value(includedPermissions)' | tr ';' '\n' | grep deleteBillingAssignment` and `gcloud iam roles describe roles/browser --format='value(includedPermissions)' | tr ';' '\n' | grep -x resourcemanager.projects.get`. Each prints one line.
+- **R13** C43: the deployer's roles equal the post-v1.0.0 baseline (K26).
+- **R14** runtime identities: `gcloud functions list --gen2 --project=$P --format='table(name,serviceConfig.serviceAccountEmail)'`. Expect every function on a dedicated account (`hireframe-fns@…`, `hireframe-billing-guard@…`) and none on `$APPSPOT` or the compute default. Any function with no explicit account runs as the App Engine default: record it and stop before A2.
+- **R15** console, IAM → the App Engine account's row → excess-permissions insight: record what it says about `roles/editor`. If it asks to enable an API, skip it (don't enable) and note "skipped".
+- **R16** invoker: `gcloud run services get-iam-policy billingguard --region=$R --project=$P --format='value(bindings.role,bindings.members)'`. Expect only `roles/run.invoker` for the Eventarc trigger account (the guard account, as C46). Anything else → stop.
+- **R17** console, Billing → Budgets & alerts: for each budget open its notifications. Only `hireframe-kill` publishes to the `billing-guard` topic; the £2, £5 and £10 budgets are email only. (Console only: the Budget API stays disabled outside a K step.)
+- R5 and R6 (project-level publishers and the topic policy) are the STATUS precondition and run again at A0 and B0.
+
+**Window A (weekday 10:00–16:00, no deploy).** Each step: what Beeb does; expected; rollback.
+- **A0.** R1–R9 and R14–R17 again, the same day, before any change. Expected: as the reads; any surprise → stop before A1. Rollback: —
+- **A1.** `cd ~ && flat > ~/iam-before-101a.txt && wc -l ~/iam-before-101a.txt`. Expected: line count recorded. Rollback: —
+- **A2 (D3).** `gcloud projects remove-iam-policy-binding $P --member=serviceAccount:$APPSPOT --role=roles/editor --condition=None`. Expected: R1 prints no `roles/editor`. Rollback: `add-` with the same arguments.
+- **A3.** `flat > ~/iam-after-101a.txt && diff ~/iam-before-101a.txt ~/iam-after-101a.txt`; C43. Expected: exactly `< roles/editor serviceAccount:<project>@appspot…`; any other line → stop. Rollback: per line.
+- **A4 (D8).** Logs Explorer, query: `logName="projects/hireframe-f6b03/logs/cloudaudit.googleapis.com%2Factivity" AND protoPayload.serviceName="serviceusage.googleapis.com" AND (protoPayload.methodName:"EnableService" OR protoPayload.methodName:"BatchEnableServices")`, range = max. Then Actions → Create log alert `hireframe-api-enabled`, 5 min notification rate, owner email channel. If the console asks to enable an API → stop and ask. Expected: ≥ 1 historic match; the policy is listed and enabled. Rollback: delete the policy.
+- **A4b (D8).** Logs Explorer, query: Cloud Run revision logs of `billingguard` at ERROR whose message is `billing_guard.failed`. Check the field names first by running the same query with `billing_guard.below` (the K12 publish rows) and reading one row; then Create log alert `hireframe-guard-failed`, 5 min notification rate, owner email channel. Same console rules as A4 (an API prompt → stop and ask). No VM-creation alert: Compute is off and A4 covers enabling it. Expected: the policy is listed and enabled; the `below` check shows the field names. Rollback: delete the policy.
+- **A5 (D6).** Budgets & alerts → `hireframe-kill` → Scope → Projects: only `hireframe-f6b03` → Save. Re-open: amount £25, actual, topic still `billing-guard`. Expected: scope shows the one project; refused → record the message, Decision 6 B. Rollback: edit back.
+- **A6 (D7).** Per Decision 7 (A: record each API and its reason; B: each disable shown alone). Expected: per decision. Rollback: `gcloud services enable <api> --project=$P`.
+- **A7 (D5).** If A/B: Create budget `hireframe-cap-functions`, this project, the R10 service, about £40 (above the £25 kill budget), or with `billingGuard` excluded if R11 allowed it, spend cap on, **no** topic link. Expected: listed, spend cap, not enforced. Rollback: lift, then delete.
+- **A7b (G2.4).** In order, one command at a time, each shown and approved first: (1) `gcloud pubsub subscriptions create hireframe-capture-tmp --topic=billing-guard --expiration-period=1d --project=$P`; (2) wait up to about 30 min for a budget message, then `gcloud pubsub subscriptions pull hireframe-capture-tmp --limit=1 --auto-ack --project=$P --format=json`; (3) paste only the field names, `attributes` keys and the non-identifying values (never the real account or budget ID); (4) `gcloud pubsub subscriptions delete hireframe-capture-tmp --project=$P`. The temporary subscription is pull-only and separate from the push subscription that feeds `billingGuard`. Expected: one message captured; field names match Google's schema (`budgetId` in the attributes, or not); the subscription is deleted (`gcloud pubsub subscriptions list` no longer shows it). Rollback: delete the subscription (it also expires after 1 day).
+- **A8.** C1–C3, C39a/C39b; the live site loads; the next scheduled scan and the digest. Expected: as RUNBOOK K10/K11. Rollback: per Recovery.
+
+After A7b, Claude uses the capture for the second G2.4 fixture and either fills `BILLING_GUARD.budgetId` in `functions/src/config.ts` (the real ID, from the owner, never from a guess) or drops the requirement, in a G2 amend before B1.
+
+**Clean weekday** (Decision 12) on the next weekday. Paste the five reads. Meanwhile Claude builds G2 (review included).
+
+**Window B: v1.0.1 (weekday 10:00–16:00, digest arrived, nothing Generating).** Each step: what Beeb does; expected; if it fails.
+- **B0.** R5, R6, R7, R9 again; `cd ~ && flat > ~/iam-before-101.txt`; C43. Expected: as the reads; R5 = Google agents only (plus the user Owner, not pasted). If it fails: any extra publisher → stop.
+- **B1.** Merge G2 (CI green). `git checkout main && git pull && git log -1` (G2 merge); `git log --oneline v1.0.0..HEAD`. Expected: only the K28 docs PR, G1 and G2. If it fails: other commits → stop (Decision 11).
+- **B2.** `git tag v1.0.1 && git push origin v1.0.1`, approve `production`; record times. Expected: every function `Successful update operation`; no failure. If it fails: partial → stop, Claude diagnoses; no grant today.
+- **B3.** C14b, C46, C39a/C39b, C1–C3 (RUNBOOK K10/K11). Expected: unchanged from v1.0.0. If it fails: Recovery entries.
+- **B4.** `gcloud functions describe billingGuard --region=$R --gen2 --project=$P --format='value(serviceConfig.environmentVariables)'`; same for `scheduledScan`. Expected: `BILLING_GUARD_MODE: armed` on both (expected, harmless). If it fails: absent → stop.
+- **B5.** ≥ 2 min after the deploy: the RUNBOOK K12 £1 publish (`costAmount 1`) + log read (with the current `costIntervalStart`, see the rules above). Expected: `billing_guard.below`, `mode: armed`, ≤ 2 min; `billingEnabled` `True`. If it fails: nothing → Recovery "logs nothing after a publish".
+- **B6 (arm, by 15:30).** `gcloud projects add-iam-policy-binding $P --member=serviceAccount:$GUARD --role=roles/billing.projectManager --condition=None` then the same with `--role=roles/browser`. Expected: `flat | grep "serviceAccount:$GUARD"` prints exactly the two. If it fails: disarm: the same with `remove-`.
+- **B7.** `flat > ~/iam-after-101.txt && diff ~/iam-before-101.txt ~/iam-after-101.txt`; C43. Expected: exactly two `>` lines for `$GUARD`; deployer unchanged. If it fails: other line → stop.
+- **B8.** the £1 publish again + log read; `billingEnabled`. Expected: `below`, `mode: armed`; `True`. If it fails: stop, disarm.
+- **B9.** Scan-now proof: Scan now Succeeded; `digestNow` Completed with mail; scheduler list three ENABLED; live site loads. Expected: as v0.9.1 steps 5–8. If it fails: stop, Claude diagnoses.
+- **B10.** Within 24 h: the K13 log read, `--freshness=1d`, plus a per-severity count. Expected: the **first real message after B6** is `billing_guard.below`, `mode: armed` (the log has no separate decision field: the event name is the decision); all real messages `below`, `mode: armed`; no `invalid`/`failed`/`disabled`/WARNING+. If it fails: `.invalid` → disarm (B6 `remove-`), diagnose. A `billing_guard.ignored` row is not a failure on its own, but a real message that is `ignored` means the guard would not act on it: diagnose before relying on the guard (the reason names the check).
+- **B11.** The next scheduled scan Succeeded; the next digest arrived. Expected: —. If it fails: Recovery.
+- **B12.** `gcloud auth revoke` on the laptop (C41). Paste the results for G3. Expected: —. If it fails: —
+
+**Never** publish `costAmount` ≥ 25 to `billing-guard` in prod: armed, it unlinks billing.
+
 ### Recovery
 - **Locked out after bootstrap** (typo in `ownerUid`): fix `config/app.ownerUid` in the Firestore console. Console edits bypass the rules.
 - **App breaks right after enforcing App Check:** go to **App Check → APIs** → **Unenforce**, then check the site key and domains in the reCAPTCHA key.
@@ -632,6 +702,20 @@ After K13, check that the next scheduled scan succeeds and the morning digest ar
   gcloud iam service-accounts get-iam-policy $GUARD --project=$P --format='value(bindings.role,bindings.members)'
   ```
   The second command must show it beside the deployer's `serviceAccountUser`. Then publish the below-threshold message again and expect `billing_guard.below` within 2 minutes. Rollback: the same command with `remove-iam-policy-binding`. If it still logs nothing, check C46 (the only invoker is `hireframe-billing-guard@…`) and C14b (the trigger's service account). Record the live option in ADR-059.
+- **Disarm `billingGuard`** (Part L; after a wrong or forged kill, a guard that rejects real messages, or when the arming is to be undone). Shown in chat first; the variables are Part K's setup block. Step 1 is instant and needs no deploy:
+  ```bash
+  gcloud projects remove-iam-policy-binding $P --member=serviceAccount:$GUARD --role=roles/billing.projectManager --condition=None
+  gcloud projects remove-iam-policy-binding $P --member=serviceAccount:$GUARD --role=roles/browser --condition=None
+  flat | grep "serviceAccount:$GUARD"
+  ```
+  The last command prints nothing. From then on an over-threshold message logs `billing_guard.failed` (`permission_denied`) and nothing is unlinked. Step 2 (a repo change, Claude plus Beeb): set the one line in `functions/deploy-env/hireframe-f6b03.env` to `BILLING_GUARD_MODE=dry_run`, run the gate, and release a patch tag (the normal release steps, Beeb only). Check: `gcloud functions describe billingGuard --region=$R --gen2 --project=$P --format='value(serviceConfig.environmentVariables)'` shows `BILLING_GUARD_MODE: dry_run`, and the K12 below-threshold publish logs `billing_guard.below` with `mode: dry_run`. Re-arm only by repeating Part L B6. If billing was already unlinked, use "Billing was disabled" (#41) as well.
+- **API-enabled alert fired** (`hireframe-api-enabled`, Part L A4): someone or something enabled an API, and the deployer cannot, so it was an owner console action or a stolen owner session. Read what happened (the table shows the time, method and API; open the log entry in Logs Explorer for the caller and **don't paste the email**):
+  ```bash
+  gcloud logging read 'logName="projects/hireframe-f6b03/logs/cloudaudit.googleapis.com%2Factivity" AND protoPayload.serviceName="serviceusage.googleapis.com" AND (protoPayload.methodName:"EnableService" OR protoPayload.methodName:"BatchEnableServices")' --project=$P --freshness=1d --limit=10 --format='table(timestamp,protoPayload.methodName,protoPayload.resourceName)'
+  ```
+  - **Expected** (Beeb did it, or a console page enabled it on its own, for example a Part K step): record the API and the reason, and keep or disable it. Disable one API at a time and never with `--force`: `gcloud services disable <api> --project=$P`.
+  - **Not expected, or `compute.googleapis.com`:** treat the account as possibly stolen. Run the IAM read (`flat`) and diff it against the last snapshot, and run Part L R5, R6 and R17. Disable the API as above. If the guard is armed and anything unexplained can publish to `billing-guard`, **disarm first** (the entry above). Then check Billing → Reports for new spend, the Firebase console's Authentication and Firestore for new users or data, and change the owner's Google password and sessions. Tell Claude: the incident goes into STATUS.
+  - Rollback of a disable: `gcloud services enable <api> --project=$P`.
 
 ## Local setup (per machine)
 1. **Node 22:** run `nvm use` (it reads `.nvmrc`). `.npmrc` sets `engine-strict`, so other versions fail fast.
