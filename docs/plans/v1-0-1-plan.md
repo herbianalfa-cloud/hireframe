@@ -110,7 +110,7 @@ Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order
     - `npm run dev` still starts (the emulator, `demo-hireframe`, never loads `.env.hireframe-f6b03`, `env.js:179-190`);
     - G2.1 touches no `billing/*.ts`; the dry-run wiring test passes unchanged.
   - Hard area: **yes**.
-- [ ] **G2.2 Smoke check.**
+- [x] **G2.2 Smoke check.**
   - Allowed files: `scripts/smoke-functions-bundle.ts`.
   - Change: assert `functions/deploy/.env.hireframe-f6b03` is exactly `BILLING_GUARD_MODE=(armed|dry_run)` and print the value. Fail if `.env`, `.env.prod` or `.env.local` exists in `functions/deploy/`.
   - Tests: run it after `npm run build`, then once with the file deleted by hand (must fail).

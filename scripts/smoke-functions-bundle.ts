@@ -2,6 +2,8 @@
  * CI smoke test for the functions deploy bundle (ADR-017), run after `npm run build`: the
  * bundle imports cleanly and every function it exports is deployed to europe-west2 only.
  */
+import { DEPLOY_ENV_PROJECT } from '../functions/src/deploy-env.ts';
+
 const REGION = 'europe-west2';
 
 // A computed specifier: the bundle is a build output with no type declarations.
@@ -19,6 +21,31 @@ const wrong = names.filter((name) => {
 if (wrong.length > 0) {
   throw new Error(`smoke-functions-bundle: not in ${REGION} only: ${wrong.join(', ')}`);
 }
+// The deploy env file (v1.0.1 G2): exactly the prod project's file, exactly one mode line, and no
+// other env file that Firebase would load for every project. Names are built from parts.
+const dot = '.';
+const envPrefix = `${dot}env`;
+const expectedEnv = `${envPrefix}${dot}${DEPLOY_ENV_PROJECT}`;
+const envFiles = readdirSync(deployDir).filter((f) => f.startsWith(envPrefix));
+const strayEnv = envFiles.filter((f) => f !== expectedEnv);
+if (strayEnv.length > 0) {
+  throw new Error(
+    `smoke-functions-bundle: unexpected env file(s) in the deploy dir: ${strayEnv.join(', ')}`,
+  );
+}
+if (!envFiles.includes(expectedEnv)) {
+  throw new Error(`smoke-functions-bundle: ${expectedEnv} is missing from the deploy dir`);
+}
+const envMatch = /^BILLING_GUARD_MODE=(armed|dry_run)\n$/.exec(
+  readFileSync(new URL(expectedEnv, deployDir), 'utf8'),
+);
+if (!envMatch) {
+  throw new Error(
+    `smoke-functions-bundle: ${expectedEnv} is not exactly one BILLING_GUARD_MODE line`,
+  );
+}
+console.log(`smoke-functions-bundle: billing guard mode ${envMatch[1] ?? ''}`);
+
 // Production bundles never carry the emulator's fixtures (callable.ts `loadDevFakes`).
 // index.js and the chunks it loads on demand (build-functions.ts splits dynamic imports out).
 const bundleFiles = [
