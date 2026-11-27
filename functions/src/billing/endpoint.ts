@@ -29,21 +29,27 @@ export const billingGuard = onMessagePublished(
     retry: false,
   },
   async (event) => {
-    await runGuard(event.data.message.data, {
-      mode: guardMode(process.env),
-      billing: () =>
-        createBillingClient({
-          // Looked up per call, so a test can stand in for the global fetch.
-          fetch: (input, init) => globalThis.fetch(input, init),
-          now: () => Date.now(),
-          // Backoff between retries of one request, never a way to run again later.
-          sleep: (ms) => scheduler.wait(ms),
-          random: () => Math.random(),
-          log: (level, event, fields) => {
-            log[level](event, fields);
-          },
-          deadline: Date.now() + BILLING_GUARD.deadlineMs,
-        }),
-    });
+    await runGuard(
+      event.data.message.data,
+      {
+        mode: guardMode(process.env),
+        now: () => Date.now(),
+        expectedBudgetId: BILLING_GUARD.budgetId,
+        billing: () =>
+          createBillingClient({
+            // Looked up per call, so a test can stand in for the global fetch.
+            fetch: (input, init) => globalThis.fetch(input, init),
+            now: () => Date.now(),
+            // Backoff between retries of one request, never a way to run again later.
+            sleep: (ms) => scheduler.wait(ms),
+            random: () => Math.random(),
+            log: (level, event, fields) => {
+              log[level](event, fields);
+            },
+            deadline: Date.now() + BILLING_GUARD.deadlineMs,
+          }),
+      },
+      event.data.message.attributes,
+    );
   },
 );

@@ -7,6 +7,10 @@ import { parseBudgetMessage } from './schema.js';
 
 export interface GuardDeps {
   mode: GuardMode;
+  /** The clock, in epoch ms, for the current-month check. */
+  now: () => number;
+  /** The `hireframe-kill` budget ID to require in the attributes; unset skips the check. */
+  expectedBudgetId?: string | undefined;
   /**
    * Built only when a decision needs the network, so a dry run, a message below the threshold and
    * an invalid message make no network call at all (not even to the metadata server).
@@ -36,14 +40,22 @@ export function failureCode(error: unknown): { code: string; status?: number } {
  * The billing kill switch (ADR-059). One budget message in, at most one write out.
  * Never throws and never re-publishes: the trigger is a message this function can't cause.
  */
-export async function runGuard(data: unknown, deps: GuardDeps): Promise<void> {
+export async function runGuard(
+  data: unknown,
+  deps: GuardDeps,
+  attributes?: Readonly<Record<string, string>>,
+): Promise<void> {
   const { mode } = deps;
   const message = parseBudgetMessage(data);
   if (!message) {
     log.warn('billing_guard.invalid', { mode });
     return;
   }
-  const decision = decideGuard(message, mode);
+  const decision = decideGuard(message, mode, {
+    now: deps.now(),
+    attributes,
+    expectedBudgetId: deps.expectedBudgetId,
+  });
   const amounts = { mode, cost: message.costAmount, budget: message.budgetAmount };
   switch (decision.outcome) {
     case 'ignored':

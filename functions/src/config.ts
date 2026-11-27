@@ -625,6 +625,12 @@ export const BILLING_GUARD = {
   topic: 'billing-guard',
   /** The one budget the guard acts on; a message from any other budget is ignored. */
   budgetDisplayName: 'hireframe-kill',
+  /**
+   * The `hireframe-kill` budget's ID, read from the Pub/Sub message attributes. Unset: the check is
+   * skipped and the display name stays the identity. Set it from window A's capture, or drop the
+   * requirement (plan G2.4). Never a guess.
+   */
+  budgetId: undefined as string | undefined,
   currency: 'GBP',
   serviceAccount: 'hireframe-billing-guard@hireframe-f6b03.iam.gserviceaccount.com',
   /** A plain env var, not a `defineString` param: a param breaks non-interactive deploys. */

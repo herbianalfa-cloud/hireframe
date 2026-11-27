@@ -133,7 +133,7 @@ Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order
   - Acceptance: every command in Part L matches section 8 word for word. `scan:pii` clean. Gate 0.
   - Hard area: yes (IAM text).
 
-- [ ] **G2.4 The guard acts only on a current-month `hireframe-kill` message (tests first).**
+- [x] **G2.4 The guard acts only on a current-month `hireframe-kill` message (tests first).**
   - Allowed files: `functions/src/billing/decide.ts`, `functions/src/billing/decide.test.ts`; `functions/src/billing/schema.ts`, `handler.ts` and `handler.test.ts` only to pass a clock and, if the payload has one, a budget ID; `functions/src/config.ts` only for a constant. **Not** `client.ts`, `functions/src/http/client.ts` or the write path.
   - What the code does today (read 27 Nov): acts only when `budgetDisplayName` equals `hireframe-kill` (`decide.ts:17`), ignores the forecast fields (`decide.ts:12-13`, test at `decide.test.ts:57`) and requires GBP (`decide.ts:20`). Missing: `costIntervalStart` is parsed as a non-empty string and never checked, so a replayed or stale message from an earlier month still kills. The schema has no budget ID.
   - Pre-checks (amended 27 Nov, Beeb, after G1.2 found that `billingGuard` logs no message fields):
