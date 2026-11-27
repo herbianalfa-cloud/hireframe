@@ -66,7 +66,8 @@ Sources read: `CLAUDE.md`, `.claude/kit/WORKFLOW.md`, `docs/PROJECT.md`, `STATUS
 Branch `feat/v1-0-1-arming-plan-g1` (from `origin/main` 041788f). **Not merged until K28 is done.**
 
 - [x] **G1.1 This plan.** Allowed files: `docs/plans/v1-0-1-plan.md`. Pre-checks: none. Tests: none. Acceptance: `Status: Draft`, `scan:pii` clean, gate 0. Hard area: no.
-- [ ] **G1.2 Pre-flight (read-only, after the K28 docs PR merges).** First update the branch from `origin/main` (show the rebase or merge command; Beeb approves).
+- **Order change (Beeb, 27 Nov):** G1.2 runs now, on Friday 27 Nov, because it is read-only; the rest of the order is unchanged. G2 is then built now on a branch from `feat/v1-0-1-arming-plan-g1` (stacked on this plan branch, not on `main`; the plan stays approved, and this replaces the "after G1 merges" rule for the build only). Nothing merges and nothing pushes to `main` until after K28. Any branch is pushed only with Beeb's OK each time. Because v1.0.0 and the K28 docs PR don't exist yet, G1.2 items 1 and 2 (and the v1.0.0-based parts of item 5) can't pass today: they are recorded as "not yet checkable" and **re-run after K28**, before G2 merges. G2's merge, tag and every window step keep their original gates.
+- [ ] **G1.2 Pre-flight (read-only; originally after the K28 docs PR merges, now run first on 27 Nov and re-run for items 1 and 2 after K28).** First update the branch from `origin/main` (show the rebase or merge command; Beeb approves).
   - Allowed files: `docs/plans/v1-0-1-evidence.md` (results only).
   - Checks:
     1. `git log --oneline v1.0.0..origin/main` shows only the K28 docs PR. Anything else → report (Decision 11).
@@ -83,7 +84,7 @@ Branch `feat/v1-0-1-arming-plan-g1` (from `origin/main` 041788f). **Not merged u
 G1 review: `reviewer`. PR body: "No code; no self-triggering surface changed."
 
 ### G2: arm through the build, plus runbook and ADR (code + docs)
-Branch `feat/v1-0-1-arming-g2` from `origin/main` after G1 merges. Built while the clean weekday runs. **Merged by Beeb only at B1.**
+Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order change, Beeb 27 Nov: built early, stacked on the plan branch; say "Stacked on" in the PR body). It is rebased onto `origin/main` after G1 merges and before B1. Built while the clean weekday runs. **Merged by Beeb only at B1.** Not pushed without Beeb's OK.
 
 - [ ] **G2.1 Deploy env for the guard (tests first).**
   - Allowed files:
