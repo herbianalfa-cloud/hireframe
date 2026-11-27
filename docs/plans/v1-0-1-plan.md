@@ -36,7 +36,7 @@ Sources read: `CLAUDE.md`, `.claude/kit/WORKFLOW.md`, `docs/PROJECT.md`, `STATUS
 5. **K17:** each API refused at K17 has a recorded outcome (disabled, or kept with a reason) in the evidence doc.
 6. **API-enable alert:** Monitoring → Alerting lists `hireframe-api-enabled`, enabled, with the owner's email channel (set in the console, never in the repo). Its query shows ≥ 1 historic match in Logs Explorer, which proves the filter.
 7. **Native cap:** Decision 5 is recorded. If a cap is chosen, Budgets & alerts lists it with spend cap on and not enforced.
-8. **Repo (G2):** `node .claude/kit/gate.mjs` all 0. `npm run build` writes `functions/deploy/.env.hireframe-f6b03` containing exactly `BILLING_GUARD_MODE=armed`, and no `.env`, `.env.prod` or `.env.local` there. `node scripts/smoke-functions-bundle.ts` asserts and prints it. The existing dry-run wiring test (env unset → no `fetch`) still passes unchanged.
+8. **Repo (G2):** `node .claude/kit/gate.mjs` all 0. the committed source file `functions/deploy-env/hireframe-f6b03.env` (one line, `BILLING_GUARD_MODE=armed`) is copied by `npm run build` to `functions/deploy/.env.hireframe-f6b03` (the build wipes that folder first), and no `.env`, `.env.prod` or `.env.local` there. `node scripts/smoke-functions-bundle.ts` asserts and prints it. The existing dry-run wiring test (env unset → no `fetch`) still passes unchanged.
 9. **Release:** `v1.0.1` points at a `main` commit containing G2. `git log --oneline v1.0.0..v1.0.1` lists only the K28 docs PR, G1 and G2 (Decision 11). The Deploy log shows every function `Successful update operation` (the env change alters every function's hash, `hash.js:11`) and no failure. Job time recorded.
 10. **Armed (B4–B8):** the env read shows `BILLING_GUARD_MODE=armed` on `billingGuard`. A £1 publish logs `billing_guard.below` with `mode: armed` within 2 min, both before and after the grant. `flat | grep $GUARD` prints exactly the two roles. The IAM diff vs `iam-before-101.txt` is exactly those two `>` lines. `billingEnabled` is `True`. **No over-threshold publish in prod, ever.**
 11. **Post-deploy:** C1–C3, C14b, C46, C39a/C39b as in RUNBOOK K10/K11. Scan-now proof (System Succeeded, `digestNow` Completed with mail, three scheduler jobs ENABLED). Live site loads.
@@ -83,22 +83,25 @@ Branch `feat/v1-0-1-arming-g2` from `origin/main` after G1 merges. Built while t
 
 - [ ] **G2.1 Deploy env for the guard (tests first).**
   - Allowed files:
-    - `functions/src/deploy-env.ts` (new, import-free so `scripts/` can import it with `.ts`, as `scripts/load-test.ts` does);
+    - `functions/deploy-env/hireframe-f6b03.env` (new, committed source: one line, `BILLING_GUARD_MODE=armed`; Decision 1, Beeb 2026-11-27: a non-dot name, so `.gitignore` (`.env*`, kit block `.env.*`) and the kit guard don't apply);
+    - `functions/src/deploy-env.ts` (new, import-free so `scripts/` can import it with `.ts`, as `scripts/load-test.ts` does): `deployEnvFile(sourceText)` validates and returns `{ name, content }`;
     - `functions/src/deploy-env.test.ts`;
-    - `scripts/build-functions.ts`;
-    - `functions/src/config.ts` (only if the builder keeps the mode constant there; small decision, listed in the PR);
-    - `functions/src/config.test.ts`.
-  - Pre-checks: G1.2 item 3 holds. Decision 1 = A.
+    - `scripts/build-functions.ts`.
+  - Pre-checks:
+    - G1.2 item 3 holds. Decision 1 = A (amended).
+    - `git check-ignore` on the source file prints nothing, and the kit guard lets Claude write it. If either blocks it: stop and ask (fallback name without an `.env` part, for example `hireframe-f6b03.vars`; a small decision, listed in the PR).
+    - Emulator project: `scripts/dev.ts` uses `assertDemoProject` (`demo-hireframe`), and no `demo-*` or `.firebaserc` alias other than `prod` maps to `hireframe-f6b03`. If the emulator ID ever equals it, add an emulator override that keeps `dry_run` (Beeb's check (a)).
   - Tests to write first:
-    - `deployEnvFile()` returns exactly `{ name: '.env.hireframe-f6b03', content: 'BILLING_GUARD_MODE=armed\n' }`.
-    - With the mode constant set to `dry_run` it writes `BILLING_GUARD_MODE=dry_run` explicitly (disarm path).
+    - `deployEnvFile()` on the committed source returns exactly `{ name: '.env.hireframe-f6b03', content: 'BILLING_GUARD_MODE=armed\n' }`.
+    - A source with `dry_run` returns `BILLING_GUARD_MODE=dry_run` (disarm path). Anything else (extra lines, a comment, another key, a blank value, a secret-looking value) throws.
     - The name is never `.env`, `.env.local`, `.env.prod` or `.env.demo-*`.
-    - The project in the name equals `.firebaserc`'s `prod` alias and the domain of `BILLING_GUARD.serviceAccount`.
+    - The project in the name equals `.firebaserc`'s `prod` alias and the domain of `BILLING_GUARD.serviceAccount`; and it is not the emulator's project ID (the `demo-` ID used by `scripts/dev.ts`).
     - Round trip: the value parsed from the line, passed to `guardMode({[BILLING_GUARD.modeEnvVar]: value})`, gives `armed`.
-  - Change: after the esbuild step, `build-functions.ts` writes that one file into `functions/deploy/`.
+  - Change: after the esbuild step (and the `rmSync` of `functions/deploy/`), `build-functions.ts` reads the source file and writes the result into `functions/deploy/`.
+  - Note: the kit guard stops Claude naming `.env*` paths in shell commands, so the build output is checked through G2.2's smoke script (which prints the value), not by reading the file.
   - Acceptance:
     - tests pass; gate 0;
-    - `npm run build`, then the file exists with exactly one line;
+    - `npm run build`, then `node scripts/smoke-functions-bundle.ts` reports one file with exactly one line;
     - `npm run dev` still starts (the emulator, `demo-hireframe`, never loads `.env.hireframe-f6b03`, `env.js:179-190`);
     - `billing/*.ts` is untouched; the dry-run wiring test passes unchanged.
   - Hard area: **yes**.
@@ -134,11 +137,13 @@ Branch from `origin/main` after the v1.0.1 tag.
   - Acceptance: every row has a result or "not done + why". STATUS ≤ 1 page (move old Lessons to LEARNINGS). `scan:pii` clean. Gate 0. The plan's `Status` line is left for Beeb.
   - Hard area: no.
 
-## 5. Decisions (recommendation first; all open unless marked)
+## 5. Decisions (recommendation first)
+
+**Decided by Beeb, 2026-11-27:** D1–D13 and R1–R2 as recommended below, except **D1**, amended: the committed non-dot source file, plus the two checks in G2.1. The "still OK?" items (R1, R2, speed-up policy 2–3, K13 scope deviation + Budget API rule) are confirmed.
 
 | # | Decision | Options | Recommendation + why | In STATUS Decisions? |
 |---|---|---|---|---|
-| 1 | How prod gets `BILLING_GUARD_MODE=armed` | **A:** the build writes `functions/deploy/.env.hireframe-f6b03` from one constant in `functions/src/`. B: a plain `.env` file. C: make `guardMode` default to armed. D: `gcloud run services update --update-env-vars` | **A.** firebase-tools loads `.env.<projectId>` only for that project (`env.js:179-183`), so the emulator (`demo-hireframe`) stays dry run, and ADR-059's "unset = dry run" stays true. The value is reviewed in a PR. Trade-off: every function gets the variable and redeploys (`hash.js`). Rejected: B arms the emulator too. C breaks ADR-059's safety default. D drifts, because the next deploy overwrites it. | No (new) |
+| 1 | How prod gets `BILLING_GUARD_MODE=armed` | **A (amended, Beeb 2026-11-27):** a committed one-line source file `functions/deploy-env/hireframe-f6b03.env`, which the build copies to `functions/deploy/.env.hireframe-f6b03`. Checks added: the emulator's project ID is not `hireframe-f6b03`; the source has a non-dot name because `.gitignore` ignores `.env*` and the kit guard blocks `.env*` paths. B: a plain `.env` file. C: make `guardMode` default to armed. D: `gcloud run services update --update-env-vars` | **A.** firebase-tools loads `.env.<projectId>` only for that project (`env.js:179-183`), so the emulator (`demo-hireframe`) stays dry run, and ADR-059's "unset = dry run" stays true. The value is reviewed in a PR. Trade-off: every function gets the variable and redeploys (`hash.js`). Rejected: B arms the emulator too. C breaks ADR-059's safety default. D drifts, because the next deploy overwrites it. | No (new) |
 | 2 | Order in window B | **A:** deploy the armed code first, check, then grant the two roles last. B: grant first, then deploy | **A.** Armed code without a billing role can't disable anything (a 403 → `failed`), so the grant is the single switch. It is instant and removed with one command, and the 15:30 hard stop is safe. B leaves no inert stage. | No (new) |
 | 3 | App Engine default account's Editor | **A:** remove it in window A, after R1–R4 show nothing runs as it. B: accept with a reason. C: disable the account | **A.** It can publish to `billing-guard`, so it can forge a kill once armed. The deployer can act as it (`serviceAccountUser`), so a deploy could run code with Editor. No function, trigger or scheduler job uses it (C39b, C3). Rollback is one `add-` command. Trade-off: unknown Google-side users; R4 only sees Admin Activity logs. C is untested and broader. | Yes: **re-confirm** ("removed, or accepted with a reason") |
 | 4 | The deployer's `serviceAccountUser` on the App Engine account | **A:** keep it, and record why. B: remove it and prove with a deploy. C: delete the account | **A.** firebase-tools 15.34.1 runs `checkServiceAccountIam` before every functions deploy and throws unless the deployer has `actAs` on `<project>@appspot…` (`deploy.js:83`, `checkIam.js:31-47`). B would fail every deploy in prepare. C is hard to undo, with unknown side effects. Revisit when firebase-tools changes (G1.2 item 3). | No (new; parallels ADR-060 for the compute account) |
