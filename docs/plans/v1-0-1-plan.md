@@ -1,4 +1,4 @@
-Status: Draft
+Status: Approved (2026-11-27)
 
 # v1.0.1: arm `billingGuard` and close the 8C2 leftovers (plan)
 
@@ -147,9 +147,11 @@ Branch `feat/v1-0-1-arming-g2` from `origin/main` after G1 merges. Built while t
     - forecast fields set and cost below the budget → `below` (existing test stays); forecast set with cost at the budget → the actual cost decides, as today.
   - Change: `decideGuard` takes the clock and compares the year and month of `costIntervalStart` with it. "Current month" is UTC; at the month boundary a message may be ignored for a few hours, which fails safe (no kill). Logged as `billing_guard.ignored` at info, so it doesn't trip the clean-weekday check. Small decision, listed in the PR.
   - Acceptance: tests pass; gate 0; `git diff --stat` shows no change to `billing/client.ts` or `http/client.ts`; the source-guard test (no publish, Firestore, Cloud Tasks or timers) passes unchanged. Hard area: yes (money, kill logic).
-  - Decision 10: G2.4 changes only the pure decision, not the client path, so it doesn't by itself require the throwaway armed kill test. If a builder has to touch `client.ts`, Decision 10 applies. **Beeb to confirm this reading.**
+  - Real-message test (Beeb, 27 Nov): a fixture built from the real message logged in G1.2 (same field names and values: display name, amounts, `costIntervalStart`, currency), with the clock set to its month and cost at or above the budget → `disable` when armed. Account identifiers and anything personal are removed or faked before it is committed (CLAUDE.md: no personal data in the repo).
+  - Decision 10 (Beeb, 27 Nov): a change to `decide.ts` alone needs **no** throwaway armed kill test. The test **is** required if `client.ts` or `functions/src/http/client.ts`, the handler wiring between `decideGuard` and the client, the billing dependencies, or the Node runtime change. The PR body says which of these changed (expected: none).
+  - Month-boundary blind spot (UTC month vs the budget period's reset, about 7–8 h): accepted as fail-safe by Beeb.
 
-G2 review: `reviewer-deep`. Gate set: the gate, `npm run build`, `smoke-functions-bundle`, `check:bundle`, `test:rules`, `audit`. The PR body states the no-self-triggering check.
+G2 review: `reviewer-deep`, and G2.4 is reviewed specifically (decision logic, the real-message test, the Decision 10 scope). Gate set: the gate, `npm run build`, `smoke-functions-bundle`, `check:bundle`, `test:rules`, `audit`. The PR body states the no-self-triggering check.
 
 ### G3: closeout (after C47-armed and the next scheduled scan)
 Branch from `origin/main` after the v1.0.1 tag.
@@ -161,7 +163,7 @@ Branch from `origin/main` after the v1.0.1 tag.
 
 ## 5. Decisions (recommendation first)
 
-**Decided by Beeb, 2026-11-27:** D1–D13 and R1–R2 as recommended below, except **D1**, amended: the committed non-dot source file, plus the two checks in G2.1. **Second opinion, 27 Nov (applied):** D5 amended (cap above the kill budget, about £40); new reads R14–R17; new step G2.4 (the guard acts only on a current-month `hireframe-kill` message); a log alert on `billing_guard.failed` (A4b); B10 checks the first message after the grant. The "still OK?" items (R1, R2, speed-up policy 2–3, K13 scope deviation + Budget API rule) are confirmed.
+**Decided by Beeb, 2026-11-27:** D1–D13 and R1–R2 as recommended below, except **D1**, amended: the committed non-dot source file, plus the two checks in G2.1. **Second opinion, 27 Nov (applied):** D5 amended (cap above the kill budget, about £40); new reads R14–R17; new step G2.4 (the guard acts only on a current-month `hireframe-kill` message); a log alert on `billing_guard.failed` (A4b); B10 checks the first message after the grant. **D10 scope** set by Beeb (see G2.4); the real-message test is added to G2.4. The "still OK?" items (R1, R2, speed-up policy 2–3, K13 scope deviation + Budget API rule) are confirmed.
 
 | # | Decision | Options | Recommendation + why | In STATUS Decisions? |
 |---|---|---|---|---|
@@ -174,7 +176,7 @@ Branch from `origin/main` after the v1.0.1 tag.
 | 7 | K17 carry-over (disables refused by `cloudapis` dependencies) | **A:** keep those APIs enabled, recording each with a reason; Decision 8's alert covers new enables. B: disable `cloudapis.googleapis.com` first, then retry each disable alone (no `--force`), each followed by the K17 check. C: `--force` | **A.** Idle APIs cost £0, and anyone who can misuse them as Owner can re-enable them. B is untested (unverified that disabling the umbrella leaves its dependencies alone) and needs a check per API. C is banned (never `--force`). Revisit with the K17 list in G1.2. | No (new; STATUS Done says "carry to v1.0.1") |
 | 8 | API-enable log alert | **A:** one log-based alert on any Service Usage enable (all APIs). B: compute only, as scoped. C: none | **A.** The deployer can't enable APIs (`serviceUsageConsumer`), so an enable means a person or an attacker. It is rare and covers compute plus everything else at the same cost (≤ about $0.35/month, unverified). Trade-off: a console page that auto-enables an API will email too. | No (new) |
 | 9 | Window shape | **A:** window A (no deploy: Editor, alert, scope, K17, cap) → one clean weekday → window B (release). B: everything in one window | **A.** One risky change per release (m8c §1). If a scan fails, the cause is never in doubt. Trade-off: at least 3 weekdays after K28. | No (new) |
-| 10 | Re-run the throwaway armed kill test | **A:** only if G1.2 item 4 shows billing or http-client changes since the spike. B: always. C: never | **A.** The prod armed path can't be tested without unlinking billing. The 17 Oct spike proved these exact roles on the same code path (C30 `False`). | No (new) |
+| 10 | Re-run the throwaway armed kill test | **A (scope set by Beeb, 27 Nov):** only if `client.ts`, `http/client.ts`, the handler wiring between `decideGuard` and the client, the billing dependencies or the Node runtime changed since the spike (G1.2 item 4 and the G2 diff); `decide.ts` changes alone don't count. B: always. C: never | **A.** The prod armed path can't be tested without unlinking billing. The 17 Oct spike proved these exact roles on the same code path (C30 `False`). | No (new) |
 | 11 | Merges between v1.0.0 and v1.0.1 | **A:** hold Dependabot and every other PR until the v1.0.1 tag, so v1.0.1 = G1 + G2 only. B: Dependabot after K28 as planned | **A.** Keeps the arming release single-purpose and the clean weekday meaningful. Trade-off: Dependabot waits a few more days. | Yes: **re-confirm** (Release plan, 24 Nov) |
 | 12 | Clean weekday definition | **A:** a full London weekday after v1.0.0's deploy day (and after window A) with: both scheduled runs Succeeded (System); the digest arrived; that day's `billing_guard.*` rows only `below`/`dry_run`, none WARNING+; three scheduler jobs ENABLED; IAM `flat` diff vs the last snapshot empty. B: the same, without the IAM diff | **A.** Measurable and quick (about 5 reads). K28's 24-hour checks may fall on the same day. | Yes: **re-confirm** (speed-up policy 2–3) |
 | 13 | PROJECT.md wording ("dry run, armed in v1.0.1") | **A:** update the four lines in G3. B: leave for housekeeping | **A.** The spec would otherwise be wrong on a security control. | No (new) |
