@@ -115,7 +115,7 @@ Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order
   - Change: assert `functions/deploy/.env.hireframe-f6b03` is exactly `BILLING_GUARD_MODE=(armed|dry_run)` and print the value. Fail if `.env`, `.env.prod` or `.env.local` exists in `functions/deploy/`.
   - Tests: run it after `npm run build`, then once with the file deleted by hand (must fail).
   - Acceptance: exit 0 on the real build; non-zero on the planted cases. Hard area: yes.
-- [ ] **G2.3 Docs.**
+- [x] **G2.3 Docs.**
   - Allowed files: `docs/DECISIONS.md` (ADR-059 addendum, plus an ADR-060 addendum for Decisions 3–4), `docs/RUNBOOK.md`, `docs/SECURITY.md` (billing row), `docs/ARCHITECTURE.md` (`billingGuard` row), `CHANGELOG.md` (`[1.0.1]` Unreleased), `STATUS.md`, `docs/plans/v1-0-1-plan.md`.
   - The ADR addendum records:
     - the mechanism (Decision 1);
@@ -152,6 +152,10 @@ Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order
   - Order of checks: identity (budget name, `budgetId`, currency) and staleness (`costIntervalStart`) run **before** the below/over decision. A rejection logs a distinct event, `billing_guard.ignored` with a reason (`wrong_budget`, `wrong_budget_id`, `wrong_currency`, `stale_period`), never `billing_guard.below`. So B10's "first real message after B6 is `billing_guard.below`, `mode: armed`" catches a guard that wrongly rejects real messages. A stale message with a low cost is `ignored`, not `below`.
   - Decision 10 (Beeb, 27 Nov): a change to `decide.ts` alone needs **no** throwaway armed kill test. The test **is** required if `client.ts` or `functions/src/http/client.ts`, the handler wiring between `decideGuard` and the client, the billing dependencies, or the Node runtime change. The PR body says which of these changed (expected: none).
   - Month-boundary blind spot (UTC month vs the budget period's reset, about 7–8 h): accepted as fail-safe by Beeb.
+
+**Differences from plan (G2.3, built 27 Nov):**
+- The ADR-060 addendum for Decisions 3-4 and the K14-K18 cross-references are not written yet: ADR-060 and #41's RUNBOOK are not on this base. They are added after G2 is rebased onto `origin/main` once #41 merges (with K20/K28).
+- RUNBOOK Part L adds one note to section 8's B5/B8: K12's example `costIntervalStart` (`2026-10-01T00:00:00Z`) is stale under G2.4 and would log `ignored` (`stale_period`), so the publish uses the first of the current month (and the `budgetId` attribute once configured). The section 8 commands are unchanged.
 
 G2 review: `reviewer-deep`, and G2.4 is reviewed specifically (decision logic, the real-message test, the Decision 10 scope). Gate set: the gate, `npm run build`, `smoke-functions-bundle`, `check:bundle`, `test:rules`, `audit`. The PR body states the no-self-triggering check.
 

@@ -1,6 +1,6 @@
 # Hireframe: status & handoff
 
-_Updated: 2026-11-25 · Playbook 3.0 · Kit 3.0.2_
+_Updated: 2026-11-27 · Playbook 3.0 · Kit 3.0.2_
 
 The repo copy is the master. Spec: `docs/PROJECT.md`. Plans: `docs/plans/`. Older detail (Done before v0.9.1, older Lessons and Decisions, full Next and Parked text): `LEARNINGS.md`.
 
@@ -41,6 +41,8 @@ One line per milestone (older entries in `LEARNINGS.md`).
 - [process] Read a log by per-day counts (`uniq -c`), not from a pasted summary, and write start and Ready times down during a live check.
 
 ## In progress
+**v1.0.1 G2 is built locally** on `feat/v1-0-1-arming-g2` (stacked on the plan branch `feat/v1-0-1-arming-plan-g1`): the deploy env file and build copy (G2.1), the smoke check (G2.2), RUNBOOK Part L, the ADR-059 addendum and the SECURITY, ARCHITECTURE and CHANGELOG updates (G2.3), and the current-month identity checks (G2.4). **Not pushed, not merged.** `BILLING_GUARD.budgetId` is unset until A7b captures a real message (or Beeb drops the requirement). The ADR-060 addendum and K14-K18 cross-references wait for #41 (rebase after it merges). **Next: `reviewer-deep` on G2, then the checkpoint.**
+
 v0.9.1 is released and verified (see Done); this closeout is PR group G2 (`docs/v0-9-1-closeout-g2`).
 **M8 8C:** K1–K18 done. **Next: Phase 4 (K19–K28) = v1.0.0.** All five gates are done (phone test, restore drill, clean weekday, Scan-now proof on v0.9.1, C47). Weekday 10:00–16:00 London; nothing Generating; never on a Sunday. K20 merges PR #41.
 - K order: K19 record gates → **K20 evidence commit, merge #41** → K21 snapshot → K22 buckets → K23 Path F grants → **K24 compute-account Editor removal (not the App Engine account), then straight to K25 tag v1.0.0** → K26 `diff -u` → K27 live checks → K28 24-hour checks, `gcloud auth revoke`, follow-up docs PR (C50, K26, K27, K28, C41).
