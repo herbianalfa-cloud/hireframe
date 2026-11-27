@@ -65,6 +65,11 @@ describe('deployEnvFile', () => {
     expect(name).not.toContain(EMULATOR_PROJECT);
   });
 
+  it('writes the key the guard reads, BILLING_GUARD.modeEnvVar', () => {
+    const key = /^([^=]+)=/m.exec(deployEnvFile(source).content)?.[1];
+    expect(key).toBe(BILLING_GUARD.modeEnvVar);
+  });
+
   it('round-trips through guardMode to armed', () => {
     const value = /^BILLING_GUARD_MODE=(.*)$/m.exec(deployEnvFile(source).content)?.[1];
     expect(guardMode({ [BILLING_GUARD.modeEnvVar]: value })).toBe('armed');

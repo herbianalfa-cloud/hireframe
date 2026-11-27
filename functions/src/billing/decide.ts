@@ -11,7 +11,7 @@ export type GuardDecision =
 
 /** What the decision needs besides the message body. */
 export interface GuardContext {
-  /** The clock, in epoch ms. "Current month" is the UTC month of this instant. */
+  /** The clock, in epoch ms. "Current month" is the America/Los_Angeles month of this instant. */
   now: number;
   /** The Pub/Sub message attributes, where Google puts `budgetId` and `billingAccountId`. */
   attributes?: Readonly<Record<string, string>> | undefined;
@@ -19,19 +19,34 @@ export interface GuardContext {
   expectedBudgetId?: string | undefined;
 }
 
-/** True when `start` parses, is not in the future, and is in the same UTC year and month as `now`. */
+const PACIFIC = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  year: 'numeric',
+  month: 'numeric',
+});
+
+/** The year and month of an instant in America/Los_Angeles, as `year-month`. */
+function pacificMonth(ms: number): string {
+  const parts = PACIFIC.formatToParts(ms);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}`;
+}
+
+/**
+ * True when `start` parses, is not in the future, and is in the same year and month as `now`,
+ * both read in America/Los_Angeles (the zone of the budget period, to be confirmed by the
+ * captured message's start hour: 07:00Z in PDT, 08:00Z in PST).
+ */
 function inCurrentMonth(start: string, now: number): boolean {
   const startMs = Date.parse(start);
   if (Number.isNaN(startMs) || startMs > now) return false;
-  const a = new Date(startMs);
-  const b = new Date(now);
-  return a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth();
+  return pacificMonth(startMs) === pacificMonth(now);
 }
 
 /**
  * Whether a budget message means "turn billing off" (ADR-059). Identity and staleness are checked
  * first, in order: budget name, budget ID (when one is configured), currency, then a period start
- * in the current UTC month. A message that fails any of them is `ignored` with a reason, whatever
+ * in the current Pacific (America/Los_Angeles) month. A message that fails any of them is `ignored` with a reason, whatever
  * its cost, so a replayed old message can never kill. Only then does the actual cost decide. The
  * forecast fields are ignored on purpose: a forecast is a guess, and the kill is a last resort.
  * In dry run the same message gives `would_disable` and nothing else happens.

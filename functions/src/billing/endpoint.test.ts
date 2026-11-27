@@ -12,8 +12,8 @@ function cloudEvent(costAmount: number) {
     costAmount,
     budgetAmount: 25,
     currencyCode: 'GBP',
-    // The start of the current UTC month: the guard ignores a message from any other month.
-    costIntervalStart: `${new Date().toISOString().slice(0, 7)}-01T00:00:00Z`,
+    // Now: always in the current Pacific month (the guard ignores any other month), never in the future.
+    costIntervalStart: new Date().toISOString(),
   };
   return {
     specversion: '1.0',

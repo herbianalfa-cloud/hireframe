@@ -16,7 +16,7 @@ function data(overrides: Record<string, unknown> = {}): string {
       costAmount: 30,
       budgetAmount: 25,
       currencyCode: 'GBP',
-      costIntervalStart: '2026-10-01T00:00:00Z',
+      costIntervalStart: '2026-10-01T07:00:00Z',
       ...overrides,
     }),
   ).toString('base64');
@@ -80,8 +80,8 @@ describe('runGuard: decisions that need no network, armed or not', () => {
 
   it('ignores a stale or unparseable period as stale_period, never below, with no network call', async () => {
     const { g, deps } = armedWith(okRoutes(true));
-    await runGuard(data({ costIntervalStart: '2026-09-01T00:00:00Z', costAmount: 1 }), deps);
-    await runGuard(data({ costIntervalStart: '2026-09-01T00:00:00Z', costAmount: 99 }), deps);
+    await runGuard(data({ costIntervalStart: '2026-09-01T07:00:00Z', costAmount: 1 }), deps);
+    await runGuard(data({ costIntervalStart: '2026-09-01T07:00:00Z', costAmount: 99 }), deps);
     await runGuard(data({ costIntervalStart: 'garbage' }), deps);
     await runGuard(data({ costIntervalStart: '2026-11-01T00:00:00Z' }), deps);
     expect(events()).toEqual(Array(4).fill('billing_guard.ignored'));

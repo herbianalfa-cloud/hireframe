@@ -9,12 +9,12 @@ function message(overrides: Record<string, unknown> = {}): BudgetMessage {
     costAmount: 1,
     budgetAmount: 25,
     currencyCode: 'GBP',
-    costIntervalStart: '2026-10-01T00:00:00Z',
+    costIntervalStart: '2026-10-01T07:00:00Z',
     ...overrides,
   };
 }
 
-/** The clock sits in October 2026, the month of `message()`'s costIntervalStart. */
+/** The clock sits in October 2026 (Pacific), the month of message()'s start (Oct 1 00:00 PDT). */
 const NOW = Date.parse('2026-10-19T10:00:00Z');
 const ctx = (overrides: Partial<GuardContext> = {}): GuardContext => ({ now: NOW, ...overrides });
 
@@ -91,7 +91,7 @@ describe('decideGuard: identity and staleness run before below/over', () => {
   });
 
   it('ignores last month as stale_period, high cost or low', () => {
-    const lastMonth = '2026-09-01T00:00:00Z';
+    const lastMonth = '2026-09-01T07:00:00Z';
     expect(armed(message({ costIntervalStart: lastMonth, costAmount: 25 }))).toEqual({
       outcome: 'ignored',
       reason: 'stale_period',
@@ -103,7 +103,7 @@ describe('decideGuard: identity and staleness run before below/over', () => {
   });
 
   it('ignores the same month of another year', () => {
-    expect(armed(message({ costIntervalStart: '2025-10-01T00:00:00Z' }))).toEqual({
+    expect(armed(message({ costIntervalStart: '2025-10-01T07:00:00Z' }))).toEqual({
       outcome: 'ignored',
       reason: 'stale_period',
     });
@@ -122,7 +122,7 @@ describe('decideGuard: identity and staleness run before below/over', () => {
   it('ignores stale in dry run too, never would_disable', () => {
     expect(
       decideGuard(
-        message({ costIntervalStart: '2026-09-01T00:00:00Z', costAmount: 99 }),
+        message({ costIntervalStart: '2026-09-01T07:00:00Z', costAmount: 99 }),
         'dry_run',
         ctx(),
       ),
