@@ -2,6 +2,17 @@
 
 All notable changes. Format: Keep a Changelog, SemVer.
 
+## [1.0.1] - Unreleased
+<!-- Group G2 of docs/plans/v1-0-1-plan.md, built on feat/v1-0-1-arming-g2 and not yet merged or tagged. Date and the G3 results are added at closeout. -->
+### Added
+- **Arming mechanism (ADR-059 addendum):** a committed one-line source file `functions/deploy-env/hireframe-f6b03.env` (`BILLING_GUARD_MODE=armed`) that `npm run build` copies to `functions/deploy/.env.hireframe-f6b03` (firebase-tools loads it for the prod project only, so the emulator stays dry run). `functions/src/deploy-env.ts` validates it (one line, `armed` or `dry_run`, the prod project's file name, never `.env`, `.env.local`, `.env.prod` or `.env.demo-*`). Every function now carries the variable; only `billingGuard` reads it. The roles are granted last, in the release (the grant is the switch).
+- **Smoke check:** `scripts/smoke-functions-bundle.ts` asserts the deploy env file is exactly `BILLING_GUARD_MODE=(armed|dry_run)`, prints the value and fails if a stray `.env`, `.env.prod` or `.env.local` is in `functions/deploy/`.
+- **RUNBOOK Part L (v1.0.1):** the reads R1 to R17, window A (A0 to A8, including the log alerts and the message capture), window B (B0 to B12) and the Recovery entries "Disarm `billingGuard`" and "API-enabled alert fired". Never publish at or above the threshold in prod; set `hireframe-kill`'s scope before linking another project to the billing account.
+
+### Changed
+- **`billingGuard` acts only on a current-month `hireframe-kill` message (G2.4):** identity (budget name, the budget ID from the Pub/Sub attributes once `BILLING_GUARD.budgetId` is set, GBP) and period (`costIntervalStart` in the current UTC month) are checked before the below/over decision. A rejected message logs `billing_guard.ignored` with a reason (`wrong_budget`, `wrong_budget_id`, `wrong_currency`, `stale_period`), never `billing_guard.below`. `BILLING_GUARD.budgetId` is unset in the committed code until the real ID is captured (RUNBOOK A7b). The month-boundary blind spot (about 7 to 8 hours, UTC) is accepted as fail-safe.
+- **Docs:** ADR-059 addendum, SECURITY (billing row) and ARCHITECTURE (`billingGuard` row) describe the armed mode, the two roles, the env file mechanism and the new checks.
+
 ## [0.9.1] - 2026-11-03
 <!-- Tagged 3 Nov. The Deploy run failed at the `billingGuard` create; the re-run on 5 Nov (Beeb, 12:35-12:42 London) created it. Evidence: docs/plans/v0-9-1-evidence.md. -->
 ### Added
