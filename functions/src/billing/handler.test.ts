@@ -6,6 +6,8 @@ import { runGuard, type GuardDeps } from './handler.js';
 import { fakeGoogle, okRoutes, PROJECT, timeoutError, TOKEN } from './testing.js';
 
 const MARKER = 'SECRET-MARKER-TEXT';
+/** In October 2026, the month of the messages below. */
+const now = () => Date.parse('2026-10-19T10:00:00Z');
 
 function data(overrides: Record<string, unknown> = {}): string {
   return Buffer.from(
@@ -36,7 +38,7 @@ function events(): string[] {
 
 function armedWith(routes: ReturnType<typeof okRoutes>) {
   const g = fakeGoogle(routes);
-  const deps: GuardDeps = { mode: 'armed', billing: () => createBillingClient(g.deps) };
+  const deps: GuardDeps = { mode: 'armed', now, billing: () => createBillingClient(g.deps) };
   return { g, deps };
 }
 
@@ -46,7 +48,7 @@ describe('runGuard: dry run', () => {
     async (cost) => {
       const g = fakeGoogle(okRoutes(true));
       const billing = vi.fn(() => createBillingClient(g.deps));
-      await runGuard(data({ costAmount: cost }), { mode: 'dry_run', billing });
+      await runGuard(data({ costAmount: cost }), { mode: 'dry_run', now, billing });
       expect(billing).not.toHaveBeenCalled();
       expect(g.calls).toHaveLength(0);
       expect(events()).toEqual(['billing_guard.would_disable']);
@@ -58,6 +60,7 @@ describe('runGuard: dry run', () => {
     const g = fakeGoogle(okRoutes(true));
     await runGuard(data({ costAmount: 1 }), {
       mode: 'dry_run',
+      now,
       billing: () => createBillingClient(g.deps),
     });
     expect(g.calls).toHaveLength(0);
@@ -73,6 +76,32 @@ describe('runGuard: decisions that need no network, armed or not', () => {
     expect(events()).toEqual(['billing_guard.ignored', 'billing_guard.ignored']);
     expect(logged.map((entry) => entry.fields.reason)).toEqual(['wrong_budget', 'wrong_currency']);
     expect(g.calls).toHaveLength(0);
+  });
+
+  it('ignores a stale or unparseable period as stale_period, never below, with no network call', async () => {
+    const { g, deps } = armedWith(okRoutes(true));
+    await runGuard(data({ costIntervalStart: '2026-09-01T00:00:00Z', costAmount: 1 }), deps);
+    await runGuard(data({ costIntervalStart: '2026-09-01T00:00:00Z', costAmount: 99 }), deps);
+    await runGuard(data({ costIntervalStart: 'garbage' }), deps);
+    await runGuard(data({ costIntervalStart: '2026-11-01T00:00:00Z' }), deps);
+    expect(events()).toEqual(Array(4).fill('billing_guard.ignored'));
+    expect(logged.map((entry) => entry.fields.reason)).toEqual(Array(4).fill('stale_period'));
+    expect(logged.every((entry) => entry.level === 'info')).toBe(true);
+    expect(g.calls).toHaveLength(0);
+  });
+
+  it('checks the budget ID from the attributes when one is configured', async () => {
+    const { g, deps } = armedWith(okRoutes(true));
+    const configured = { ...deps, expectedBudgetId: 'fake-budget-id-1' };
+    await runGuard(data(), configured, { budgetId: 'fake-budget-id-2' });
+    await runGuard(data(), configured);
+    expect(logged.map((entry) => entry.fields.reason)).toEqual([
+      'wrong_budget_id',
+      'wrong_budget_id',
+    ]);
+    expect(g.calls).toHaveLength(0);
+    await runGuard(data(), configured, { budgetId: 'fake-budget-id-1' });
+    expect(events()).toContain('billing_guard.disabled');
   });
 
   it('logs invalid for garbage and for missing fields, with no network call', async () => {
@@ -116,7 +145,7 @@ describe('runGuard: armed', () => {
       billingEnabled,
       disableBilling,
     };
-    await runGuard(data(), { mode: 'armed', billing: () => client });
+    await runGuard(data(), { mode: 'armed', now, billing: () => client });
     expect(billingEnabled).toHaveBeenCalledWith('some-other-proj');
     expect(disableBilling).toHaveBeenCalledTimes(1);
     expect(disableBilling).toHaveBeenCalledWith('some-other-proj');
@@ -171,7 +200,7 @@ describe('runGuard: armed', () => {
       g.advance(46_000);
       return slow(input, init);
     }) as typeof fetch;
-    await runGuard(data(), { mode: 'armed', billing: () => createBillingClient(g.deps) });
+    await runGuard(data(), { mode: 'armed', now, billing: () => createBillingClient(g.deps) });
     expect(logged.at(-1)?.fields).toMatchObject({ step: 'read', code: 'deadline' });
     expect(g.puts()).toHaveLength(0);
   });
@@ -196,7 +225,7 @@ describe('runGuard: armed', () => {
       disableBilling: vi.fn(),
     };
     await expect(
-      runGuard(data(), { mode: 'armed', billing: () => client }),
+      runGuard(data(), { mode: 'armed', now, billing: () => client }),
     ).resolves.toBeUndefined();
     expect(logged.at(-1)?.fields).toMatchObject({ step: 'project', code: 'unexpected' });
   });
@@ -214,7 +243,7 @@ describe('runGuard: logs carry no message text', () => {
       armedWith(okRoutes(true)).deps,
       armedWith(okRoutes(false)).deps,
       armedWith(failing).deps,
-      { mode: 'dry_run' as const, billing: () => createBillingClient(fakeGoogle({}).deps) },
+      { mode: 'dry_run' as const, now, billing: () => createBillingClient(fakeGoogle({}).deps) },
     ];
     for (const deps of runs) {
       await runGuard(data(extra), deps);

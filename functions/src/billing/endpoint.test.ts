@@ -12,7 +12,8 @@ function cloudEvent(costAmount: number) {
     costAmount,
     budgetAmount: 25,
     currencyCode: 'GBP',
-    costIntervalStart: '2026-10-01T00:00:00Z',
+    // The start of the current UTC month: the guard ignores a message from any other month.
+    costIntervalStart: `${new Date().toISOString().slice(0, 7)}-01T00:00:00Z`,
   };
   return {
     specversion: '1.0',
