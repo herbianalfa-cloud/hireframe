@@ -23,7 +23,7 @@ Sources read: `CLAUDE.md`, `.claude/kit/WORKFLOW.md`, `docs/PROJECT.md`, `STATUS
 6. Whether the console now lets `hireframe-kill`'s scope be set to the single project (K13 could not).
 7. Whether the £50 virtual card limit (m8-billing-guards §8) is in place.
 8. The deployer's post-v1.0.0 role baseline (C43 after K26).
-9. Whether a budget notification carries a budget ID (payload or Pub/Sub attributes). Decides G2.4's identity check; checked in G1.2 from Google's schema and a real logged message.
+9. Whether a real budget notification carries `budgetId` in the Pub/Sub attributes, as Google's schema says. G1.2 showed the logs hold no message fields, so it is confirmed by the capture in A7b (window A), not from a log.
 10. Whether any function runs with no explicit runtime account (R14), and what the console's excess-permissions insight says (R15; skipped if it needs an API).
 
 ## 2. Goal and definition of done
@@ -136,10 +136,10 @@ Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order
 - [ ] **G2.4 The guard acts only on a current-month `hireframe-kill` message (tests first).**
   - Allowed files: `functions/src/billing/decide.ts`, `functions/src/billing/decide.test.ts`; `functions/src/billing/schema.ts`, `handler.ts` and `handler.test.ts` only to pass a clock and, if the payload has one, a budget ID; `functions/src/config.ts` only for a constant. **Not** `client.ts`, `functions/src/http/client.ts` or the write path.
   - What the code does today (read 27 Nov): acts only when `budgetDisplayName` equals `hireframe-kill` (`decide.ts:17`), ignores the forecast fields (`decide.ts:12-13`, test at `decide.test.ts:57`) and requires GBP (`decide.ts:20`). Missing: `costIntervalStart` is parsed as a non-empty string and never checked, so a replayed or stale message from an earlier month still kills. The schema has no budget ID.
-  - Pre-checks:
-    - Read Google's budget-notification schema and one real logged message (G1.2) and record whether the payload or the Pub/Sub attributes carry a budget ID. **Not verified from the repo.**
-    - If one does, also require it to equal the `hireframe-kill` ID, held in `config.ts`.
-    - If none does, the display name stays the identity. Anyone who can create a budget can pick that name, so say so in the ADR and keep R5/R6/R17 as the control.
+  - Pre-checks (amended 27 Nov, Beeb, after G1.2 found that `billingGuard` logs no message fields):
+    - Google's documented notification schema puts `budgetId` (and `billingAccountId`) in the Pub/Sub **message attributes**. G2.4 reads `budgetId` from the attributes and requires it to equal the `hireframe-kill` ID, held in `config.ts`. **Not verified from the repo**; window A's capture (A7b) confirms it.
+    - If the real message has no `budgetId`, that requirement is **dropped before window B** (a G2 amend before B1) and the display name stays the identity. Anyone who can create a budget can pick that name, so say so in the ADR and keep R5/R6/R17 as the control.
+    - The attributes have to reach `decideGuard`: check `endpoint.ts` and `handler.ts` for how the CloudEvent data arrives. If plumbing them changes the call from the handler to the client or its dependencies, Decision 10 applies (the builder reports which, and Beeb confirms at the checkpoint).
   - Tests to write first (injected clock):
     - a message with `costIntervalStart` in the current month, cost at the budget, armed → `disable`;
     - the same message with last month's start → `ignored` (`stale_period`), and no client call;
@@ -148,7 +148,8 @@ Branch `feat/v1-0-1-arming-g2`, **now from `feat/v1-0-1-arming-plan-g1`** (order
     - forecast fields set and cost below the budget → `below` (existing test stays); forecast set with cost at the budget → the actual cost decides, as today.
   - Change: `decideGuard` takes the clock and compares the year and month of `costIntervalStart` with it. "Current month" is UTC; at the month boundary a message may be ignored for a few hours, which fails safe (no kill). Logged as `billing_guard.ignored` at info, so it doesn't trip the clean-weekday check. Small decision, listed in the PR.
   - Acceptance: tests pass; gate 0; `git diff --stat` shows no change to `billing/client.ts` or `http/client.ts`; the source-guard test (no publish, Firestore, Cloud Tasks or timers) passes unchanged. Hard area: yes (money, kill logic).
-  - Real-message test (Beeb, 27 Nov): a fixture built from the real message logged in G1.2 (same field names and values: display name, amounts, `costIntervalStart`, currency), with the clock set to its month and cost at or above the budget → `disable` when armed. Account identifiers and anything personal are removed or faked before it is committed (CLAUDE.md: no personal data in the repo).
+  - Fixture test (Beeb, 27 Nov, amended after G1.2): the logs hold no real message, so the first fixture is **Google's documented example** (field names and shapes from the schema, fake `billingAccountId` and `budgetId`, marked as documented, not captured), with the clock set to its month and cost at or above the budget → `disable` when armed. **After A7b** a second fixture is added from the real captured message (same field names and values, `billingAccountId` and `budgetId` faked again; nothing personal committed), and the same test runs against it before B1. If the real message's shape differs from the documented one, fix the schema and tests before window B.
+  - Order of checks: identity (budget name, `budgetId`, currency) and staleness (`costIntervalStart`) run **before** the below/over decision. A rejection logs a distinct event, `billing_guard.ignored` with a reason (`wrong_budget`, `wrong_budget_id`, `wrong_currency`, `stale_period`), never `billing_guard.below`. So B10's "first real message after B6 is `billing_guard.below`, `mode: armed`" catches a guard that wrongly rejects real messages. A stale message with a low cost is `ignored`, not `below`.
   - Decision 10 (Beeb, 27 Nov): a change to `decide.ts` alone needs **no** throwaway armed kill test. The test **is** required if `client.ts` or `functions/src/http/client.ts`, the handler wiring between `decideGuard` and the client, the billing dependencies, or the Node runtime change. The PR body says which of these changed (expected: none).
   - Month-boundary blind spot (UTC month vs the budget period's reset, about 7–8 h): accepted as fail-safe by Beeb.
 
@@ -164,7 +165,7 @@ Branch from `origin/main` after the v1.0.1 tag.
 
 ## 5. Decisions (recommendation first)
 
-**Decided by Beeb, 2026-11-27:** D1–D13 and R1–R2 as recommended below, except **D1**, amended: the committed non-dot source file, plus the two checks in G2.1. **Second opinion, 27 Nov (applied):** D5 amended (cap above the kill budget, about £40); new reads R14–R17; new step G2.4 (the guard acts only on a current-month `hireframe-kill` message); a log alert on `billing_guard.failed` (A4b); B10 checks the first message after the grant. **D10 scope** set by Beeb (see G2.4); the real-message test is added to G2.4. The "still OK?" items (R1, R2, speed-up policy 2–3, K13 scope deviation + Budget API rule) are confirmed.
+**Decided by Beeb, 2026-11-27:** D1–D13 and R1–R2 as recommended below, except **D1**, amended: the committed non-dot source file, plus the two checks in G2.1. **Second opinion, 27 Nov (applied):** D5 amended (cap above the kill budget, about £40); new reads R14–R17; new step G2.4 (the guard acts only on a current-month `hireframe-kill` message); a log alert on `billing_guard.failed` (A4b); B10 checks the first message after the grant. **D10 scope** set by Beeb (see G2.4); the fixture test is added to G2.4 (documented example now, real capture in A7b; `budgetId` from the attributes, dropped before B if the real message has none; identity and staleness before below/over, distinct `ignored` reasons). The "still OK?" items (R1, R2, speed-up policy 2–3, K13 scope deviation + Budget API rule) are confirmed.
 
 | # | Decision | Options | Recommendation + why | In STATUS Decisions? |
 |---|---|---|---|---|
@@ -279,6 +280,7 @@ Every command is shown in chat and approved before it runs. Use a `bash` tab wit
 | A5 (D6) | Budgets & alerts → `hireframe-kill` → Scope → Projects: only `hireframe-f6b03` → Save. Re-open: amount £25, actual, topic still `billing-guard` | scope shows the one project; refused → record the message, Decision 6 B | edit back |
 | A6 (D7) | Per Decision 7 (A: record each API and its reason; B: each disable shown alone) | per decision | `gcloud services enable <api> --project=$P` |
 | A7 (D5) | If A/B: Create budget `hireframe-cap-functions`, this project, the R10 service, about £40 (above the £25 kill budget), or with `billingGuard` excluded if R11 allowed it, spend cap on, **no** topic link | listed, spend cap, not enforced | lift, then delete |
+| A7b (G2.4) | In order, one command at a time, each shown and approved first: (1) `gcloud pubsub subscriptions create hireframe-capture-tmp --topic=billing-guard --expiration-period=1d --project=$P`; (2) wait up to about 30 min for a budget message, then `gcloud pubsub subscriptions pull hireframe-capture-tmp --limit=1 --auto-ack --project=$P --format=json`; (3) paste only the field names, `attributes` keys and the non-identifying values (never the real account or budget ID); (4) `gcloud pubsub subscriptions delete hireframe-capture-tmp --project=$P`. The temporary subscription is pull-only and separate from the push subscription that feeds `billingGuard` | one message captured; field names match Google's schema (`budgetId` in the attributes, or not); the subscription is deleted (`gcloud pubsub subscriptions list` no longer shows it) | delete the subscription (it also expires after 1 day) |
 | A8 | C1–C3, C39a/C39b; the live site loads; the next scheduled scan and the digest | as RUNBOOK K10/K11 | per Recovery |
 
 3. **Clean weekday** (Decision 12) on the next weekday. Paste the five reads. Meanwhile Claude builds G2 (review included).
