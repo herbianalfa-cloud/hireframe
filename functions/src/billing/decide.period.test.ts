@@ -11,7 +11,7 @@ function msg(costIntervalStart: string, costAmount = 25): BudgetMessage {
     budgetAmount: 25,
     currencyCode: 'GBP',
     costIntervalStart,
-  } as BudgetMessage;
+  };
 }
 const at = (iso: string) => ({ now: Date.parse(iso) });
 const armed = (start: string, now: string, cost = 25) =>
